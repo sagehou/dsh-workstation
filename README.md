@@ -4,7 +4,7 @@ A Docker Compose-based, self-hosted web workstation built around the official De
 
 ## Project status
 
-**M1 private preview.** The first Runtime and Compose candidate serves DSH Web and manual Chromium on one loopback origin. The [private bring-up guide](deploy/README.md) covers the Actions build, SSH access and version rollback. Public deployment is pending the authentication gateway.
+The [public Compose guide](deploy/public/README.md) covers single-user HTTPS, the Go authentication gateway and session-scoped Browser Provider. See the [remote evidence](docs/roadmap/public-compose.md) before deploying. The [private preview](deploy/README.md) remains available for loopback-only access through SSH.
 
 ## Goals
 
@@ -32,7 +32,7 @@ A Docker Compose-based, self-hosted web workstation built around the official De
 2. Read [SPEC.md](docs/SPEC.md) for product requirements and acceptance criteria.
 3. Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries and deployment topology.
 4. Read the [ADRs](docs/adr/) for decisions and unresolved validation gates.
-5. See [M0 evidence](docs/roadmap/M0-evidence.md) and the [M1 scope](docs/roadmap/M1.md). The browser findings remain open while Runtime work proceeds.
+5. See [M0 evidence](docs/roadmap/M0-evidence.md) and the [M1 scope](docs/roadmap/M1.md). The held-input handoff and native Sidebar remain open.
 
 ## Important engineering rule
 

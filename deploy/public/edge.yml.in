@@ -44,7 +44,7 @@ http:
           X-Workstation-User: ""
     signin:
       forwardAuth:
-        address: http://auth:8081/verify
+        address: http://172.30.242.3:8081/verify
         trustForwardHeader: false
         preserveLocationHeader: true
         authRequestHeaders: [Cookie, Accept, Sec-Fetch-Mode, Sec-Fetch-Dest, Upgrade]
@@ -64,7 +64,7 @@ http:
     auth:
       loadBalancer:
         servers:
-          - url: http://auth:8080
+          - url: http://172.30.242.3:8080
     dsh:
       loadBalancer:
         serversTransport: dsh-tls

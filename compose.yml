@@ -81,6 +81,21 @@ services:
       timeout: 4s
       retries: 5
 
+  auth-admin:
+    profiles: [maintenance]
+    image: dsh-workstation-auth:0.1.0
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: {driver: none}
+    environment:
+      PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
+    secrets: [auth_key]
+    volumes:
+      - auth-data:/data
+    command: ["bootstrap"]
+
   runtime:
     <<: *runtime
     restart: "on-failure:5"
