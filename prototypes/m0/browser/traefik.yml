@@ -1,7 +1,7 @@
 http:
   routers:
     browser:
-      rule: Host(`m0.test`) && PathPrefix(`/browser/`)
+      rule: Host(`m0.test`) && PathPrefix(`/browser/`) && !PathRegexp(`^/browser/api/tokens/?$`)
       priority: 100
       tls: {}
       middlewares: [fixture-auth, browser-frame]

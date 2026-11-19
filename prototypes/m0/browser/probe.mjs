@@ -35,7 +35,10 @@ const desktop = await playwright.connectOverCDP(cdp)
 try {
   assert.equal(desktop.contexts().length, 1)
   const managed = desktop.contexts()[0]
-  if (process.argv.includes('--after-restart')) {
+  if (process.argv.includes('--exclusive')) {
+    const { verifySelkiesInput } = await import('./exclusive.mjs')
+    await verifySelkiesInput({ managed, origin, fixture, poll })
+  } else if (process.argv.includes('--after-restart')) {
     assert((await managed.cookies(fixture)).some(c => c.name === 'm0_profile' && c.value === 'human'))
     console.log('persistent cookie still present in the default context after Chromium restart')
   } else {

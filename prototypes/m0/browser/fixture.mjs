@@ -4,6 +4,9 @@ import { randomBytes } from 'node:crypto'
 const ticket = `__Host-m0_run=${randomBytes(24).toString('hex')}`
 createServer((req, res) => {
   switch (req.url) {
+    case '/browser/api/tokens':
+      res.writeHead(404).end()
+      return
     case '/__m0/bootstrap':
       res.writeHead(204, { 'Set-Cookie': `${ticket}; Secure; HttpOnly; SameSite=Lax; Path=/` }).end()
       return

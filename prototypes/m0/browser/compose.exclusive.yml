@@ -1,0 +1,17 @@
+services:
+  chromium:
+    environment:
+      FILE__SELKIES_MASTER_TOKEN: /run/secrets/m0_master
+      SELKIES_ENABLE_COLLAB: "false"
+      SELKIES_ENABLE_CLIPBOARD: "false"
+      SELKIES_GAMEPAD_ENABLED: "false"
+      SELKIES_MICROPHONE_ENABLED: "false"
+      SELKIES_WEBCAM_ENABLED: "false"
+      SELKIES_COMMAND_ENABLED: "false"
+    secrets: [m0_master]
+  probe:
+    secrets: [m0_master]
+
+secrets:
+  m0_master:
+    file: ${M0_MASTER_FILE:?create an isolated test secret with run.sh --exclusive}
