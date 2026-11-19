@@ -47,7 +47,7 @@ createServer(async (req, res) => {
     if (result) {
       const content = JSON.stringify(result.content)
       const value = content.match(/\b(?:[a-f0-9-]{36}:\d+|WTAB_(?:ALPHA|BETA)|OK|NO_LEASE|NOT_OWNER|STALE_GENERATION|TAB_UNAVAILABLE|HANDOVER|BUSY|DISCONNECTED|EXPIRED|ORIGIN_NOT_ALLOWED|ACTION_UNCERTAIN)\b/g)?.at(-1)
-      return reply(res, data.model, null, 'CI_RESULT_' + label + '=' + (value ?? 'UNKNOWN'))
+      return reply(res, data.model, null, 'CI_RESULT_' + label + '=' + (value ?? (result.is_error ? 'TOOL_ERROR' : 'UNKNOWN')))
     }
     const name = 'mcp__browser__' + operation
     if (!data.tools?.some(tool => tool.name === name)) return reply(res, data.model, null, 'CI_RESULT_' + label + '=TOOL_NOT_LISTED')

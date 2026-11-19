@@ -156,7 +156,10 @@ try {
       return until(label + ' result', async () => {
         const result = await rpc('session/page', { address: { kind: 'session', sessionId }, maxMessages: 20 })
         const match = JSON.stringify(result).match(new RegExp('CI_RESULT_' + label + '=([A-Za-z0-9_:-]+)'))
-        return match?.[1]
+        if (!match) return
+        const value = match[1]
+        console.log('DSH MCP ' + label + ': ' + (/^[a-f0-9-]{36}:\d+$/.test(value) ? 'GENERATION' : value))
+        return value
       })
     }
     const control = await context.newPage()

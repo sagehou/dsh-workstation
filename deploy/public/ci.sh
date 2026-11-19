@@ -94,7 +94,7 @@ volumes:
     external: true
 YAML
 restore_cleanup() {
-  if (( $? != 0 )); then restore_compose logs --no-color --tail=15 edge auth provider || true; fi
+  if (( $? != 0 )); then restore_compose logs --no-color --tail=15 edge auth runtime provider || true; fi
   restore_compose down --volumes --remove-orphans
   compose down --volumes --remove-orphans
   docker volume rm "$restore_volume" >/dev/null
