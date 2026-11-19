@@ -50,7 +50,9 @@ server.stdout.on('data', chunk => { out = (out + chunk).slice(-65536) })
 server.stderr.on('data', chunk => { err = (err + chunk).slice(-8192) })
 let browser, page
 const problems = []
-const redact = value => String(value).replace(/(?:https?|wss?):\/\/\S+/g, '[URL redacted]')
+const redact = value => String(value)
+  .replace(/(?:https?|wss?):\/\/\S+/g, '[URL redacted]')
+  .replace(/\b[A-Za-z0-9_-]{40,}\b/g, '[value redacted]')
 try {
   let url
   const deadline = Date.now() + 90_000
@@ -62,6 +64,9 @@ try {
   page = await browser.newPage({ locale: 'en-US', viewport: { width: 1680, height: 950 } })
   page.setDefaultTimeout(20_000)
   page.on('pageerror', error => problems.push(redact(error.message)))
+  page.on('console', message => {
+    if (message.type() === 'error') problems.push(redact(message.text()))
+  })
   let loads = 0
   await page.route('**/browser/', route => {
     ++loads
@@ -158,7 +163,9 @@ try {
 } catch (error) {
   console.error(redact(error))
   const locale = await page?.locator('html').getAttribute('lang', { timeout: 1000 }).catch(() => null)
+  const visible = await page?.locator('body').innerText({ timeout: 1000 }).catch(() => '')
   console.error('fixture page language:', locale, '; browser errors:', problems.slice(-4))
+  if (visible) console.error('fixture page:', redact(visible).slice(0, 1600))
   console.error(redact(err))
   process.exitCode = 1
 } finally {
