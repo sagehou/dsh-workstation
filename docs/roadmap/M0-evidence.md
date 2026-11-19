@@ -2,14 +2,14 @@
 
 [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1) · [Acceptance criteria](M0.md) · [Experiment design](M0-design.md)
 
-**No-go for M1–M3.** The Runtime and Profile persistence experiment and the shared Chromium experiment passed. Selkies can remove human keyboard and mouse authority while keeping video live. Exclusive control and the full native Sidebar lifecycle are blocked. The existing ADRs remain in force.
+**No-go for M1–M3.** The Runtime and Profile persistence experiment and the shared Chromium experiment passed. The independent Browser Provider enforced leases over the official DSH MCP path, but the Selkies authority switch did not release a previously held mouse button. The full native Sidebar lifecycle is still blocked. The existing ADRs remain in force.
 
 | Gate | Status | Evidence |
 | --- | --- | --- |
 | A — Runtime and Profile | Pass for the tested packages and upgrade pair | [Runtime job](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353929974), [native job](https://github.com/sagehou/dsh-workstation/actions/runs/44460118655/job/135344573520) |
 | B — Shared Chromium | Pass for the pinned stack and fixture | [Shared tabs, same-origin routing and profile restart](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930294) |
-| C — Exclusive | Blocked on the Agent lease and handover | [Selkies input boundary passed](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930341) |
-| D — DSH plugin API | Blocked on native floating maximize/restore and tool integration | [Sidebar probe passed for the supported lifecycle](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930328) |
+| C — Exclusive | Agent lease and drain passed in the fixture; Human-to-Agent handover blocked on held input | [Independent Provider evidence](M0-provider-evidence.md#observed-result) |
+| D — DSH plugin API | Browser tool calls were gated through official MCP in ACP; native floating maximize/restore remains blocked | [Sidebar lifecycle job](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930328) |
 
 ## Exact upstream versions
 
@@ -125,7 +125,7 @@ At [`5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/444602127
 
 The unsecured CDP relay in Gate B is for the experiment only. The official DSH [Browser Use Playwright MCP provider](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/experimental/browser-use-playwright-mcp/README.md) documents `mode: attach` and `endpoint`. Its Session reservation is local to the provider instance. The shared `ctx.browserUse` service only registers a provider; there is no shared action interception API. DSH's public [`ctx.tools.guard`](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/tools.md#ctxtools--tools) can veto tool admission; the [pipeline](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/core/tools/src/pipeline.ts#L213) checks it before dispatch. A guard in DSH does not enforce a lease on direct CDP reachable from the Agent's execution environment.
 
-No valid/invalid lease, stale generation, concurrency, expiry, takeover drain/cancel, disconnect or DSH restart case has passed. The next architecture decision is whether to prototype a standalone lease-aware browser tool provider on the private CDP network, with DSH using its documented [Streamable HTTP MCP integration](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/mcp.md) and having no direct CDP route. The service would admit calls for the current generation only and revoke/drain before enabling human input. It adds an owned service and a network boundary; no implementation or decision is implied by the probe.
+The approved [independent Provider experiment](M0-provider-evidence.md) used DSH's documented [Streamable HTTP MCP integration](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/mcp.md) in its ACP profile. Only the Provider could reach private CDP. Lease admission, takeover drain, expiry, concurrency, stale generations and DSH, Chromium and Provider process loss/restart passed in the fixture. The job failed the held pointer assertion: a mouse-down before the grant remained in effect until input authority returned to HUMAN. Gate C needs a supported way to quiesce and release already accepted input before granting Agent control.
 
 ## D — Native Sidebar lifecycle
 
@@ -143,6 +143,6 @@ iframe retained across docked fullscreen and restore
 upstream floating hide closes the tab; its iframe does not survive
 ```
 
-The agreed native floating lifecycle requires upstream support or an explicit architecture decision that preserves the acceptance criteria. Private dockkit imports, a custom overlay or presenting docked fullscreen as floating maximize are not proof of the requested API. The Browser Use admission hook is documented in Gate C; no guarded official-provider CDP call was exercised in the Sidebar test.
+The agreed native floating lifecycle waits for upstream support. The standalone Provider demonstrated gated browser tool calls through official MCP in ACP without DSH core changes. Neither the official Playwright MCP Browser Use package nor credential binding to Web Profile sessions was validated under a lease.
 
 Evidence collected 2026-11-19 UTC. These experiments are disposable and are not production deployments.
