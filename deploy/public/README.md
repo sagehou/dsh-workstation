@@ -2,7 +2,7 @@
 
 Use this stack for one trusted operator on Linux x86-64 with rootful Docker Engine 28+ and Compose v2. Point a public DNS name at the host and allow inbound TCP 80 and 443. Port 80 serves the ACME HTTP-01 challenge and redirects other traffic to HTTPS. Traefik requests and renews the certificate. If you publish an AAAA record, make sure it reaches the same host. The Docker subnets in [compose.yml](../../compose.yml) must not overlap the host's routes.
 
-Build and verify the images using the [Public Compose workflow](../../.github/workflows/public-compose.yml). Download the successful run's **public-compose-linux-amd64** artifact. Use the same repository commit listed in its `source-commit` file.
+Download the verified [public-compose-linux-amd64](https://github.com/sagehou/dsh-workstation/actions/runs/44488230831/artifacts/14512006785) archive and use the repository commit listed in its `source-commit` file ([`de823f9`](https://github.com/sagehou/dsh-workstation/commit/de823f9d850ae5a8bc001a67613413220ff4fd7e)). The [Public Compose workflow](../../.github/workflows/public-compose.yml) builds the images and verifies the stack.
 
 ```sh
 # In the extracted Actions artifact directory
