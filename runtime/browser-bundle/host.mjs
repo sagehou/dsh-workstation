@@ -25,14 +25,14 @@ export function apply(ctx) {
   // Agent disposal has already unwound registrations in agent.ctx at this event.
   ctx.on('agent/disposed', ({ agent }) => { clients.delete(agent) })
   ctx.on('agent/created', async ({ agent, signal }) => {
-    if (stopping || signal?.aborted || clients.has(agent) || agent.session.meta.parentSession !== undefined) return
+    if (stopping || signal?.aborted || clients.has(agent) || agent.session.header.parentSession !== undefined) return
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(agent.id)) return
     const claim = 'v1.' + agent.id + '.' + randomBytes(24).toString('hex') + '.' + (Date.now() + 60_000)
     const ticket = claim + '.' + createHmac('sha256', key).update(claim).digest('hex')
     let fiber
     const abort = () => {
       clients.delete(agent)
-      void Promise.resolve(fiber?.dispose()).catch(() => {})
+      void Promise.resolve().then(() => fiber?.dispose()).catch(() => {})
     }
     try {
       const headers = { Authorization: 'Bearer ' + ticket }
