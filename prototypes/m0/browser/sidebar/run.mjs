@@ -48,7 +48,9 @@ let out = '', err = '', exited = false
 const done = new Promise(resolve => server.once('exit', () => { exited = true; resolve() }))
 server.stdout.on('data', chunk => { out = (out + chunk).slice(-65536) })
 server.stderr.on('data', chunk => { err = (err + chunk).slice(-8192) })
-let browser
+let browser, page
+const problems = []
+const redact = value => String(value).replace(/(?:https?|wss?):\/\/\S+/g, '[URL redacted]')
 try {
   let url
   const deadline = Date.now() + 90_000
@@ -57,8 +59,9 @@ try {
     await setTimeout(250)
   }
   browser = await chromium.launch({ args: ['--no-sandbox'] })
-  const page = await browser.newPage({ locale: 'en-US', viewport: { width: 1680, height: 950 } })
+  page = await browser.newPage({ locale: 'en-US', viewport: { width: 1680, height: 950 } })
   page.setDefaultTimeout(20_000)
+  page.on('pageerror', error => problems.push(redact(error.message)))
   let loads = 0
   await page.route('**/browser/', route => {
     ++loads
@@ -68,10 +71,20 @@ try {
       body: '<!doctype html><html lang="en"><title>M0 frame</title><label>Marker <input></label></html>',
     })
   })
-  await page.goto(url)
-  const drawer = page.getByRole('button', { name: 'Show sidebar', exact: true })
+  assert.equal((await page.goto(url))?.status(), 200, 'authenticated Web UI did not load')
+  const notice = page.getByRole('button', { name: 'Continue', exact: true })
+  const addKey = page.getByRole('button', { name: 'Add API Key', exact: true })
+  const addWorkspace = page.getByRole('button', { name: 'Add workspace', exact: true })
+  const drawer = page.locator('[data-sidebar-toggle]').and(page.getByRole('button', { name: 'Open sidebar', exact: true }))
+  await notice.or(addKey).or(addWorkspace).or(drawer).first().waitFor()
+  if (await notice.isVisible()) await notice.click()
+  await addKey.or(addWorkspace).or(drawer).first().waitFor()
+  if (await addKey.isVisible()) {
+    await addKey.click()
+    await page.getByRole('button', { name: 'Configure later', exact: true }).click()
+  }
   if (await drawer.isVisible()) await drawer.click()
-  await page.getByRole('button', { name: 'Add workspace', exact: true }).click()
+  await addWorkspace.click()
   const dialog = page.getByRole('dialog', { name: 'Select Workspace Directory' })
   await dialog.getByRole('button', { name: 'Edit path' }).click()
   const path = dialog.getByRole('textbox', { name: 'Edit path' })
@@ -143,8 +156,10 @@ try {
   await iframe.waitFor({ state: 'detached' })
   console.log('upstream floating hide closes the tab; its iframe does not survive')
 } catch (error) {
-  console.error(String(error).replace(/https?:\/\/\S+/g, '[URL redacted]'))
-  console.error(err.replace(/https?:\/\/\S+/g, '[URL redacted]'))
+  console.error(redact(error))
+  const locale = await page?.locator('html').getAttribute('lang', { timeout: 1000 }).catch(() => null)
+  console.error('fixture page language:', locale, '; browser errors:', problems.slice(-4))
+  console.error(redact(err))
   process.exitCode = 1
 } finally {
   await browser?.close()
