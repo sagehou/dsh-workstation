@@ -1,0 +1,70 @@
+x-node: &node node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
+
+services:
+  chromium:
+    image: lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2
+    shm_size: 1gb
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      SUBFOLDER: /browser/
+      CHROME_CLI: --user-data-dir=/config/m0-chromium --remote-debugging-port=9222 --no-first-run http://fixture:8080/seed
+      SELKIES_MODE: websockets
+      SELKIES_ENABLE_DUAL_MODE: "false"
+      SELKIES_ALLOWED_ORIGINS: https://m0.test
+      SELKIES_FRAME_ANCESTORS: "'self'"
+    volumes:
+      - profile:/config
+    networks:
+      web: {}
+      cdp:
+        ipv4_address: 172.30.231.2
+
+  cdp-relay:
+    image: *node
+    user: node
+    network_mode: service:chromium
+    depends_on: [chromium]
+    command: ["node", "/m0/relay.mjs"]
+    volumes:
+      - ./relay.mjs:/m0/relay.mjs:ro
+
+  edge:
+    image: traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4
+    command:
+      - --entrypoints.websecure.address=:443
+      - --providers.file.filename=/etc/traefik/m0.yml
+    volumes:
+      - ./traefik.yml:/etc/traefik/m0.yml:ro
+    networks:
+      web:
+        aliases: [m0.test, foreign.test]
+
+  fixture:
+    image: *node
+    user: node
+    command: ["node", "/m0/fixture.mjs"]
+    volumes:
+      - ./fixture.mjs:/m0/fixture.mjs:ro
+    networks: [web]
+
+  probe:
+    build: .
+    init: true
+    profiles: [probe]
+    command: ["node", "/m0/probe.mjs"]
+    networks: [web, cdp]
+
+networks:
+  web:
+    internal: true
+  cdp:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam:
+      config:
+        - subnet: 172.30.231.0/24
+
+volumes:
+  profile:

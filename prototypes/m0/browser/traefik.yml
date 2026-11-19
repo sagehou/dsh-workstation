@@ -1,0 +1,37 @@
+http:
+  routers:
+    browser:
+      rule: Host(`m0.test`) && PathPrefix(`/browser/`)
+      priority: 100
+      tls: {}
+      middlewares: [fixture-auth, browser-frame]
+      service: selkies
+    app:
+      rule: Host(`m0.test`) || Host(`foreign.test`)
+      tls: {}
+      middlewares: [fixture-auth]
+      service: fixture
+    fixture-login:
+      rule: (Host(`m0.test`) || Host(`foreign.test`)) && Path(`/__m0/bootstrap`)
+      priority: 200
+      tls: {}
+      service: fixture
+  middlewares:
+    fixture-auth:
+      forwardAuth:
+        address: http://fixture:8080/__m0/verify
+        authRequestHeaders: [Cookie]
+    browser-frame:
+      headers:
+        customResponseHeaders:
+          Content-Security-Policy: "frame-ancestors 'self'"
+          X-Frame-Options: SAMEORIGIN
+  services:
+    selkies:
+      loadBalancer:
+        servers:
+          - url: http://chromium:3000
+    fixture:
+      loadBalancer:
+        servers:
+          - url: http://fixture:8080
