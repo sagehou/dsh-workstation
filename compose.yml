@@ -184,33 +184,33 @@ networks:
     driver_opts: &isolated
       com.docker.network.bridge.gateway_mode_ipv4: isolated
     ipam:
-      config: [{subnet: 172.30.231.0/24}]
+      config: [{subnet: 172.30.231.0/24, ip_range: 172.30.231.128/25}]
   mcp:
     internal: true
     driver_opts: *isolated
     ipam:
-      config: [{subnet: 172.30.232.0/24}]
+      config: [{subnet: 172.30.232.0/24, ip_range: 172.30.232.128/25}]
   control:
     internal: true
     driver_opts: *isolated
     ipam:
-      config: [{subnet: 172.30.233.0/24}]
+      config: [{subnet: 172.30.233.0/24, ip_range: 172.30.233.128/25}]
   runtime-route:
     internal: true
     driver_opts: *isolated
     ipam:
-      config: [{subnet: 172.30.241.0/24}]
+      config: [{subnet: 172.30.241.0/24, ip_range: 172.30.241.128/25}]
   edge-auth:
     internal: true
     driver_opts: *isolated
     ipam:
-      config: [{subnet: 172.30.242.0/24}]
+      config: [{subnet: 172.30.242.0/24, ip_range: 172.30.242.128/25}]
   browser-route:
     internal: true
     driver_opts: *isolated
   public-entry:
     ipam:
-      config: [{subnet: 172.30.244.0/24}]
+      config: [{subnet: 172.30.244.0/24, ip_range: 172.30.244.128/25}]
   runtime-egress: {}
   browser-egress: {}
 
