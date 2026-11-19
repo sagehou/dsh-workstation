@@ -89,14 +89,16 @@ try {
       }, 12_000)
       console.log('agent-created tab accepted Selkies input and shared the human-set cookie')
 
-      assert.equal((await user.request.get('https://foreign.test/__m0/bootstrap')).status(), 204)
+      // A foreign origin on the same site sends the fixture cookie to the frame.
+      // Thus a denial proves frame-ancestors, not a missing SameSite cookie.
+      assert.equal((await user.request.get('https://foreign.m0.test/__m0/bootstrap')).status(), 204)
       const foreign = await user.newPage()
-      const blocked = poll('cross-origin iframe was not blocked by frame-ancestors', () => {
-        return foreign.frames().some(item => item.url() === 'chrome-error://chromewebdata/')
-      }, 10_000)
-      await foreign.goto('https://foreign.test/')
-      await blocked
-      console.log('cross-origin iframe navigated to Chromium error document under enforced frame-ancestors')
+      const denial = foreign.waitForEvent('console', {
+        predicate: msg => msg.type() === 'error' && msg.text().includes("frame-ancestors 'self'"),
+        timeout: 15_000,
+      })
+      await Promise.all([denial, foreign.goto('https://foreign.m0.test/')])
+      console.log('Chromium reported an enforced frame-ancestors denial for the cross-origin iframe')
     } finally {
       await outer.close()
     }

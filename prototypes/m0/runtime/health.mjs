@@ -8,7 +8,10 @@ import { setTimeout } from 'node:timers/promises'
 const [bin, mode] = process.argv.slice(2)
 const dir = await mkdtemp(join(tmpdir(), 'dsh-m0-health-'))
 const marker = join(dir, 'mounted')
-const child = spawn(bin, ['web', '--no-open', '--port', '0'], {
+const args = ['web', '--no-open', '--port', '0']
+// The exact DSH releases reject wildcard binds; exercise the real startup failure path.
+if (mode === 'fail-readiness') args.push('--host', '0.0.0.0')
+const child = spawn(bin, args, {
   env: { ...process.env, M0_MOUNT_LOG: marker },
   stdio: ['ignore', 'pipe', 'pipe'],
 })

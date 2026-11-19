@@ -38,7 +38,7 @@ services:
       - ./traefik.yml:/etc/traefik/m0.yml:ro
     networks:
       web:
-        aliases: [m0.test, foreign.test]
+        aliases: [m0.test, foreign.m0.test]
 
   fixture:
     image: *node

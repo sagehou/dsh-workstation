@@ -53,7 +53,7 @@ case "$1" in
     if [[ -L "$root/current" ]]; then previous="$(readlink "$root/current")"; else previous=; fi
     if [[ -n "$previous" && "$previous" != "versions/$version" ]]; then backup "before-$version"; fi
     pointer "versions/$version"
-    if [[ "$mode" != fail-readiness ]] && check "$candidate" "$mode"; then
+    if check "$candidate" "$mode"; then
       echo "active DSH $version"
     else
       if [[ -n "$previous" ]]; then pointer "$previous"; else rm "$root/current"; fi
@@ -67,18 +67,9 @@ case "$1" in
     pnpm_config "$profile"
     dsh="$(bin current)"
     "$dsh" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check "$badge@$base"
-    repo=/workspace/m0-git-fixture
-    mkdir "$repo"
-    cp /m0/fixture/* "$repo/"
-    git -C "$repo" init -q
-    git -C "$repo" add .
-    GIT_AUTHOR_DATE=2026-11-19T00:00:00Z GIT_COMMITTER_DATE=2026-11-19T00:00:00Z \
-      git -C "$repo" -c user.name=M0 -c user.email=m0@example.invalid commit -qm fixture
-    commit="$(git -C "$repo" rev-parse HEAD)"
-    echo "Git fixture commit: $commit"
-    "$dsh" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check "git+file://$repo#$commit"
-    # The Git dependency must point at the packaged install, not at its source checkout.
-    mv "$repo" "$repo.saved"
+    git_fixture='git+https://github.com/sagehou/dsh-workstation.git#8a1d8c03ff3e2f94abc82792ed0771bc82b6fb63&path:/prototypes/m0/runtime/fixture'
+    echo "Git fixture: $git_fixture"
+    "$dsh" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check "$git_fixture"
     ;;
   fingerprint)
     cd "$profile"

@@ -7,12 +7,12 @@ http:
       middlewares: [fixture-auth, browser-frame]
       service: selkies
     app:
-      rule: Host(`m0.test`) || Host(`foreign.test`)
+      rule: Host(`m0.test`) || Host(`foreign.m0.test`)
       tls: {}
       middlewares: [fixture-auth]
       service: fixture
     fixture-login:
-      rule: (Host(`m0.test`) || Host(`foreign.test`)) && Path(`/__m0/bootstrap`)
+      rule: (Host(`m0.test`) || Host(`foreign.m0.test`)) && Path(`/__m0/bootstrap`)
       priority: 200
       tls: {}
       service: fixture

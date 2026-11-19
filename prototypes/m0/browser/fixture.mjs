@@ -16,7 +16,7 @@ createServer((req, res) => {
   }
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   if (req.url === '/') {
-    const source = req.headers.host === 'foreign.test' ? 'https://m0.test/browser/' : '/browser/'
+    const source = req.headers.host === 'foreign.m0.test' ? 'https://m0.test/browser/' : '/browser/'
     res.end(`<!doctype html><html lang="en"><title>M0 iframe</title><iframe title="Selkies" style="width:96vw;height:92vh" src="${source}"></iframe></html>`)
     return
   }
