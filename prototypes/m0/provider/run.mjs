@@ -190,11 +190,13 @@ try {
   let owner = contenders[0].status === 200 ? a : b
   const other = owner === a ? b : a
   let generation = contenders.find(reply => reply.status === 200).data.generation
+  const live = await state('AGENT')
+  assert.match(live.mcpProtocol ?? '', /^2025-\d\d-\d\d$/, 'MCP client did not negotiate a stateful revision')
   assert.equal(await ask(other, 'wrong-owner', generation), 'NOT_OWNER')
   await deniedInput()
   assert.equal(await ask(owner, 'valid', generation), 'M0_OK')
   await seen('finished:valid')
-  console.log('official DSH ACP → official Streamable HTTP MCP: valid lease wrote the Chromium marker; HUMAN/no lease and a second Agent were denied')
+  console.log('official DSH ACP → Streamable HTTP MCP ' + live.mcpProtocol + ': valid lease wrote the Chromium marker; HUMAN/no lease and a second Agent were denied')
   console.log('competing grants admitted exactly one owner; raw Selkies keys and buttons were blocked with live video')
 
   const simultaneous = background(ask(owner, 'parallel', generation, 'parallel'))

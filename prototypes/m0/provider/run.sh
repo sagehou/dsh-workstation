@@ -24,6 +24,6 @@ compose up --no-build -d fixture witness chromium cdp-relay edge provider dsh vi
 for service in chromium cdp-relay provider edge dsh; do
   test -z "$(docker port "$(compose ps -q "$service")")"
 done
-cdp_net="$(docker network inspect dsh-m0-provider_cdp --format '{{range .Containers}}{{println .Name}}{{end}}' | sort)"
+cdp_net="$(docker network inspect dsh-m0-provider_cdp --format '{{range .Containers}}{{println .Name}}{{end}}' | sed '/^$/d' | sort)"
 diff -u <(printf '%s\n' dsh-m0-provider-chromium-1 dsh-m0-provider-provider-1) <(printf '%s\n' "$cdp_net")
 node ../provider/run.mjs "${files[@]}"

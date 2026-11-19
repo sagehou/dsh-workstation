@@ -196,6 +196,7 @@ async function mcp(req, res) {
   const observing = req.method === 'GET' && reply.ok
   if (observing) {
     peer.stream = true
+    peer.protocol = req.headers['mcp-protocol-version']
     res.once('close', () => retire(peer))
   }
   if (req.method === 'DELETE' && reply.ok) retire(peer)
@@ -209,7 +210,7 @@ async function control(req, res) {
   const want = Buffer.from(digest('Bearer ' + admin), 'hex')
   check(timingSafeEqual(want, Buffer.from(digest(req.headers.authorization), 'hex')), 'UNAUTHORIZED', 401)
   if (req.method === 'GET' && req.url === '/status') {
-    return respond(res, 200, { state, reason, inFlight: Boolean(flight), lease: Boolean(lease) })
+    return respond(res, 200, { state, reason, inFlight: Boolean(flight), lease: Boolean(lease), mcpProtocol: lease?.peer.protocol })
   }
   check(req.method === 'POST', 'NOT_FOUND', 404)
   const args = await json(req)
