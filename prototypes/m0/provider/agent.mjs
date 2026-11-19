@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
+import { json } from 'node:stream/consumers'
 
 if (process.argv[2] === '--network') {
   const denied = [
@@ -16,8 +17,32 @@ if (process.argv[2] === '--network') {
   process.exit(0)
 }
 
+if (process.argv[2] === '--wire-call') {
+  const { credential, mcpSession, protocol, marker, generation } = await json(process.stdin)
+  const response = await fetch('http://provider:8080/mcp', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + credential,
+      'Mcp-Session-Id': mcpSession,
+      'Mcp-Protocol-Version': protocol,
+      Accept: 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 'm0-wire-' + marker, method: 'tools/call',
+      params: { name: 'mark', arguments: { marker, generation, hold: false } },
+    }),
+    signal: AbortSignal.timeout(5000),
+  })
+  assert.equal(response.status, 200)
+  const { result } = await response.json()
+  assert.equal(result?.isError, true, 'overlapping MCP call was not denied')
+  console.log(result.content[0].text)
+  process.exit(0)
+}
+
 const toolName = 'mcp__browser__mark'
-const command = /^m0:([a-z0-9-]{1,30}):([a-zA-Z0-9:-]{1,64}):(once|hold|parallel)$/
+const command = /^m0:([a-z0-9-]{1,30}):([a-zA-Z0-9:-]{1,64}):(once|hold)$/
 const codes = /\b(?:M0_OK|NO_LEASE|NOT_OWNER|STALE_GENERATION|BUSY|HANDOVER|DISCONNECTED|EXPIRED|ACTION_UNCERTAIN)\b/g
 function outcome(result) {
   const seen = [...JSON.stringify(result.content).matchAll(codes)].map(match => match[0])
@@ -65,8 +90,7 @@ const mock = createServer(async (req, res) => {
     const match = user.findLast(block => block.type === 'text' && command.test(block.text?.trim()))?.text.trim().match(command)
     if (!match) return sendMessages(res, data.model, [], 'M0 result NO_FIXTURE_PROMPT')
     const [, marker, generation, mode] = match
-    const actions = (mode === 'parallel' ? [marker + '-a', marker + '-b'] : [marker])
-      .map(marker => ({ marker, generation, hold: mode !== 'once' }))
+    const actions = [{ marker, generation, hold: mode === 'hold' }]
     const results = actions.map(args => user.findLast(block => block.type === 'tool_result' && block.tool_use_id === 'call-' + args.marker))
     if (results.every(Boolean)) return sendMessages(res, data.model, [], 'M0 result ' + results.map(outcome).join(','))
     if (!data.tools?.some(tool => tool.name === toolName)) return sendMessages(res, data.model, [], 'M0 result TOOL_NOT_LISTED')

@@ -161,8 +161,8 @@ async function ask(peer, marker, generation = 'none', mode = 'once') {
     assert.equal(result.stopReason, 'end_turn', marker + ': DSH turn did not settle')
     const value = /^M0 result (\S+)$/.exec(turn.text.trim())?.[1]
     assert(value, marker + ': no deterministic tool result from DSH')
-    assert.deepEqual(turn.tools, Array(mode === 'parallel' ? 2 : 1).fill('mcp__browser__mark'), marker + ': wrong DSH tool dispatch')
-    return value.split(',').sort().join(',')
+    assert.deepEqual(turn.tools, ['mcp__browser__mark'], marker + ': wrong DSH tool dispatch')
+    return value
   } finally {
     turns.delete(peer.sessionId)
   }
@@ -170,6 +170,14 @@ async function ask(peer, marker, generation = 'none', mode = 'once') {
 const grant = async (peer, ttl = 90_000) => (await ok('/grant', { peer: peer.id, ttl })).generation
 const release = async marker => assert.equal(await viewer.call('release', marker), 204, 'renderer barrier was not live')
 const background = promise => { void promise.catch(() => {}); return promise }
+// The official DSH scheduler serializes its MCP batch. Overlap a real DSH call
+// with a standard MCP request in the same authenticated session to test Provider admission.
+const wireCall = (peer, grant, marker) => execFileSync('docker', [
+  ...cli, 'exec', '-T', 'dsh', 'node', '/m0/provider/agent.mjs', '--wire-call',
+], {
+  encoding: 'utf8',
+  input: JSON.stringify({ credential: peer.credential, ...grant, marker }),
+}).trim()
 
 try {
   await state('DISCONNECTED', 'BOOT')
@@ -189,7 +197,8 @@ try {
   assert.equal(contenders.find(reply => reply.status === 409).data.error, 'NOT_HUMAN')
   let owner = contenders[0].status === 200 ? a : b
   const other = owner === a ? b : a
-  let generation = contenders.find(reply => reply.status === 200).data.generation
+  const firstGrant = contenders.find(reply => reply.status === 200).data
+  let generation = firstGrant.generation
   const live = await state('AGENT')
   assert.match(live.mcpProtocol ?? '', /^2025-\d\d-\d\d$/, 'MCP client did not negotiate a stateful revision')
   assert.equal(await ask(other, 'wrong-owner', generation), 'NOT_OWNER')
@@ -199,21 +208,21 @@ try {
   console.log('official DSH ACP → Streamable HTTP MCP ' + live.mcpProtocol + ': valid lease wrote the Chromium marker; HUMAN/no lease and a second Agent were denied')
   console.log('competing grants admitted exactly one owner; raw Selkies keys and buttons were blocked with live video')
 
-  const simultaneous = background(ask(owner, 'parallel', generation, 'parallel'))
-  const winner = await poll('neither concurrent operation reached the renderer barrier', async () => {
-    const entry = (await events()).find(event => event.startsWith('barrier:parallel-'))
-    return entry?.split(':')[1]
-  })
+  const inFlight = background(ask(owner, 'takeover-drain', generation, 'hold'))
+  await seen('barrier:takeover-drain')
+  assert.equal(wireCall(owner, firstGrant, 'overlap-busy'), 'BUSY')
   const takeover = background(ok('/takeover', {}))
   const handover = await state('HANDOVER', 'TAKEOVER', true)
   assert(handover.lease, 'lease cleared before the action drained')
+  assert.equal(wireCall(owner, firstGrant, 'overlap-handover'), 'HANDOVER')
   assert.equal(await ask(other, 'during-takeover', generation), 'HANDOVER')
   await deniedInput()
-  assert(!(await events()).includes('finished:' + winner))
-  await release(winner)
-  assert.equal(await simultaneous, 'BUSY,M0_OK')
+  const beforeDrain = await events()
+  assert(!['started:overlap-busy', 'started:overlap-handover', 'finished:takeover-drain'].some(event => beforeDrain.includes(event)))
+  await release('takeover-drain')
+  assert.equal(await inFlight, 'M0_OK')
   assert.equal((await takeover).state, 'HUMAN')
-  const finished = (await events()).indexOf('finished:' + winner)
+  const finished = (await events()).indexOf('finished:takeover-drain')
   assert(finished >= 0)
   await humanInput()
   assert((await events()).slice(finished + 1).includes('event:mousedown'))

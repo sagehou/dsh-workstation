@@ -99,7 +99,7 @@ async function grant(peerId, ttl) {
     state = 'AGENT'
     reason = 'GRANTED'
     expiry = setTimeout(() => { void handover('EXPIRED').catch(() => {}) }, ttl)
-    return { generation }
+    return { generation, mcpSession: peer.transport.sessionId, protocol: peer.protocol }
   } catch (error) {
     fault('GRANT_FAILED')
     throw error
