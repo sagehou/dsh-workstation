@@ -1,8 +1,8 @@
 # Private preview
 
-The preview is for one trusted user on a trusted host. It runs official DSH Web at `http://127.0.0.1:3080/` and manual Selkies at `/browser/`. Only the Traefik port is published, on host loopback. Access from a different machine uses SSH. Leave the port on loopback until the public authentication and HTTPS path is ready.
+The preview is for one trusted user on a trusted host with Docker Engine 28 or newer and Compose v2. It runs official DSH Web at `http://127.0.0.1:3080/` and manual Selkies at `/browser/`. Only the Traefik port is published, on host loopback. Access from a different machine uses SSH. Leave the port on loopback until the public authentication and HTTPS path is ready.
 
-Build and check the preview in [M1 private preview](../.github/workflows/m1-preview.yml) on GitHub Actions. The runner executes `bash deploy/ci-preview.sh`, exercising the actual Compose routes, Runtime selection/rollback, and container recreation. Download `dsh-workstation-runtime.tar.gz` from a successful run of your own reviewed commit. No run for this candidate is recorded yet.
+Build and check the preview in [M1 private preview](../.github/workflows/m1-preview.yml) on GitHub Actions. The runner executes `bash deploy/ci-preview.sh`, exercising the actual Compose routes, Runtime selection/rollback, and container recreation. Download `dsh-workstation-runtime.tar.gz` from the [passing `fe91e89` run](https://github.com/sagehou/dsh-workstation/actions/runs/44474103563/artifacts/14505771617), or a successful run of your own reviewed commit.
 
 On the deployment host, use the Compose and Traefik files from that same commit:
 
