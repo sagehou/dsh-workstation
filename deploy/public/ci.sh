@@ -12,7 +12,7 @@ for setup in edge:workstation.test fixture:fixture.test; do
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 -subj "/CN=$host" \
     -addext "subjectAltName=DNS:$host" -keyout "$dir/key.pem" -out "$dir/cert.pem" 2>/dev/null
 done
-chmod 0444 "$state"/fixture/*.pem
+chmod 0444 "$state"/fixture/*.pem "$state/edge/cert.pem"
 sed -i 's/tls: {certResolver: public}/tls: {}/g' "$state/edge/routes.yml"
 cat > "$state/edge/test-certificate.yml" <<'TLS'
 tls:
@@ -76,7 +76,8 @@ expect_status 404 -X POST https://workstation.test/browser/api/tokens
 echo 'TLS and ForwardAuth: HTTP redirects to HTTPS, documents to login, unauthenticated API/WebSocket denied, Selkies token API unrouted'
 check() {
   docker run --rm --ipc=host --network host --add-host workstation.test:127.0.0.1 \
-    -e CI_EDGE_SPKI -v "$PWD/deploy/public:/m0/public:ro" -v "$state/ci-state:/ci-state" \
+    -e CI_EDGE_SPKI -e NODE_EXTRA_CA_CERTS=/ci-edge.pem -v "$state/edge/cert.pem:/ci-edge.pem:ro" \
+    -v "$PWD/deploy/public:/m0/public:ro" -v "$state/ci-state:/ci-state" \
     workstation-ci-viewer node /m0/public/check.mjs "$1"
 }
 check gateway
