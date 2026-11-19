@@ -1,5 +1,7 @@
 # DSH Workstation
 
+English · [简体中文](README.zh-CN.md)
+
 A Docker Compose-based, self-hosted web workstation built around the official DeepSeek Harness (DSH) runtime.
 
 ## Project status
@@ -32,7 +34,7 @@ The [public Compose guide](deploy/public/README.md) covers single-user HTTPS, th
 2. Read [SPEC.md](docs/SPEC.md) for product requirements and acceptance criteria.
 3. Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries and deployment topology.
 4. Read the [ADRs](docs/adr/) for decisions and unresolved validation gates.
-5. See [M0 evidence](docs/roadmap/M0-evidence.md) and the [M1 scope](docs/roadmap/M1.md). The held-input handoff and native Sidebar remain open.
+5. See [M0 evidence](docs/roadmap/M0-evidence.md) and the [M1 scope](docs/roadmap/M1.md). The held-input handoff and native Sidebar remain open in [#1](https://github.com/sagehou/dsh-workstation/issues/1).
 
 ## Important engineering rule
 

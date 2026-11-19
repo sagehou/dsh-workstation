@@ -1,5 +1,7 @@
 # ADR-0001: Decouple DSH npm version from Runtime Image
 
+English · [简体中文](0001-runtime-version-decoupling.zh-CN.md)
+
 Status: Accepted
 
 ## Context

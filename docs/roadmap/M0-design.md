@@ -1,5 +1,7 @@
 # M0 experiment design
 
+English · [简体中文](M0-design.zh-CN.md)
+
 Scope: [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1). Run only on a disposable remote runner with fresh Compose volumes and no DeepSeek credentials. Keep the M0 work off `main`. Do not promote any of these fixtures to production.
 
 - **A:** Use one pinned Node/pnpm image, one non-root UID, and one DSH_HOME volume. Install exact DSH versions to separate directories, holding a lock during install and activation. Check the authenticated Web boot response and Profile state; intentionally fail readiness once and check that the pointer is restored. Recreate the container without reinstalling, then check the store, manifests, lockfile, package links and a bundle's runtime side effect. Record separate results for dependency lifecycle scripts.

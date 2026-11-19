@@ -1,5 +1,7 @@
 # Product Specification — DSH Web Workstation
 
+English · [简体中文](SPEC.zh-CN.md)
+
 Status: Approved product direction; technical assumptions remain subject to M0 verification.
 
 ## 1. Product

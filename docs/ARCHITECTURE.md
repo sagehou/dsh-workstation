@@ -1,5 +1,7 @@
 # Architecture — DSH Web Workstation
 
+English · [简体中文](ARCHITECTURE.zh-CN.md)
+
 ## Component boundaries
 
 ### DSH Runtime image

@@ -1,5 +1,7 @@
 # M0 independent Browser Provider
 
+English · [简体中文](M0-provider-evidence.zh-CN.md)
+
 [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1) · [M0 decision](M0-evidence.md) · [Approved experiment design](M0-design.md)
 
 This is a disposable follow-up to Gate C and to the Browser Use extension check in Gate D. The provider is the only client joined to the isolated CDP bridge; the relay and Chromium share a network namespace. DSH is on the separate MCP bridge. Its only browser tool is a fixed fixture action discovered through DSH's [official MCP client](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/mcp/mcp-client/README.md). No DSH package or upstream browser image was modified.

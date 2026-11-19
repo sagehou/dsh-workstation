@@ -1,5 +1,7 @@
 # AGENTS.md — DSH Workstation
 
+English · [简体中文](AGENTS.zh-CN.md)
+
 ## Mission
 
 Build a self-hosted Docker Compose workstation around the **official DeepSeek Harness (DSH) npm package**. The repository owns the runtime image, runtime version manager, Go authentication gateway, Workstation plugin, deployment configuration, and tests.

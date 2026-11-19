@@ -1,5 +1,7 @@
 # ADR-0003: Self-hosted Auth Gateway
 
+English · [简体中文](0003-self-hosted-auth-gateway.zh-CN.md)
+
 Status: Accepted
 
 ## Context

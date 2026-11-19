@@ -1,5 +1,7 @@
 # M0 evidence and decision
 
+English · [简体中文](M0-evidence.zh-CN.md)
+
 [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1) · [Acceptance criteria](M0.md) · [Experiment design](M0-design.md)
 
 **Proceed with [M1 Runtime and private bring-up](M1.md).** The Runtime and Profile persistence experiment and the shared Chromium experiment passed. The owner approved starting Runtime work while carrying the browser limitations forward. The held mouse button failure in Selkies and the missing native Sidebar operations remain unresolved; this decision does not turn either result into a pass.

@@ -1,5 +1,7 @@
 # Public Compose: design and evidence
 
+English · [简体中文](public-compose.zh-CN.md)
+
 The owner authorized continuing with a public single-user Compose and deferring the held-input handoff and native Sidebar. This builds on [M0](M0-evidence.md), the [Provider results](M0-provider-evidence.md), and the [M1 Runtime results](M1.md). It does not mark the open M0 acceptance criteria as passed.
 
 - Traefik terminates public TLS and uses Go ForwardAuth on the DSH and Selkies routes. The Go service alone issues its session cookie. It trusts the proxy on a dedicated bridge, verifies the public origin on writes, and separates login documents from API and WebSocket denial. Upgraded browser and DSH connections through Auth have the same SQLite session lifetime as HTTP.

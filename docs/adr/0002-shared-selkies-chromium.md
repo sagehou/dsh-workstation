@@ -1,5 +1,7 @@
 # ADR-0002: Shared Selkies Chromium for Human and Agent
 
+English · [简体中文](0002-shared-selkies-chromium.zh-CN.md)
+
 Status: Accepted, subject to M0 proof
 
 ## Context
