@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({
         const kind = 'm0-browser'
         const title = () => 'M0 Browser Desktop'
         ctx.effect(() => ctx.sidebarRightTabs.register({
-          id, kind, title, keepMounted: true, guide: { order: 10, title },
+          id, kind, title, keepMounted: true, guide: [{ id: 'desktop', order: 10, title }],
         }), 'M0 browser tab')
         const button = (text, onClick) => h('button', { type: 'button', onClick }, text)
         function Body({ useTabInfo }) {
