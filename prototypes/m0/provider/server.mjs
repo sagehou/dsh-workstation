@@ -399,9 +399,14 @@ listen(mcp, '172.30.232.2', 8080)
 listen(control, '172.30.233.2', 8081)
 
 if (publicMode) {
+  let lastProblem
   const retry = () => {
     if (state === 'DISCONNECTED' && ['BOOT', 'BROWSER_LOST'].includes(reason) && !recovering && !flight) {
-      void recover().catch(() => {})
+      void recover().then(() => { lastProblem = undefined }, error => {
+        const problem = error instanceof Denied ? error.message : error?.code === 'EROFS' ? 'SCRATCH_READ_ONLY' : 'ATTACH_FAILED'
+        if (problem !== lastProblem) console.warn('Provider attachment unavailable:', problem)
+        lastProblem = problem
+      })
     }
   }
   retry()

@@ -166,6 +166,8 @@ services:
   provider:
     <<: *provider
     restart: unless-stopped
+    # Playwright creates a scratch directory even when attaching over CDP.
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"]
     environment:
       WORKSTATION_PROVIDER: "1"
       BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
@@ -173,6 +175,22 @@ services:
       - provider-state:/state
     # Playwright attaches to Chromium; it never downloads or launches a browser.
     secrets: [m0_master, m0_controller, m0_sentinel, m0_admin, browser_enroll]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://172.30.233.2:8081/status', {
+            headers: {Authorization: 'Bearer '+require('node:fs').readFileSync('/run/secrets/m0_admin','utf8')},
+            signal: AbortSignal.timeout(2000)
+          }).then(r => r.ok ? r.json() : {}).then(({state}) => {
+            if (!['HUMAN','AGENT','HANDOVER'].includes(state)) process.exitCode = 1
+          }).catch(() => { process.exitCode = 1 })
+      interval: 5s
+      timeout: 3s
+      retries: 18
+      start_period: 30s
     networks:
       cdp: {}
       mcp: {ipv4_address: 172.30.232.2}
