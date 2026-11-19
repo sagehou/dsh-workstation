@@ -1,0 +1,10 @@
+# M0 experiment design
+
+Scope: [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1). Run only on a disposable remote runner with fresh Compose volumes and no DeepSeek credentials. Keep the M0 work off `main`. Do not promote any of these fixtures to production.
+
+- **A:** Use one pinned Node/pnpm image, one non-root UID, and one DSH_HOME volume. Install exact DSH versions to separate directories, holding a lock during install and activation. Check the authenticated Web boot response and Profile state; intentionally fail readiness once and check that the pointer is restored. Recreate the container without reinstalling, then check the store, manifests, lockfile, package links and a bundle's runtime side effect. Record separate results for dependency lifecycle scripts.
+- **B:** Use the published LinuxServer image by digest. Chromium's desktop CDP server binds to loopback; test a relay in the same network namespace bound only to a dedicated private network interface. Run the observer and Playwright's CDP attachment on the remote runner. Route Selkies through Traefik without removing the prefix. Check live control, tab/cookie identity, profile persistence and upstream headers/transport.
+- **C:** Examine the pinned Selkies secure-mode token table and DSH's public tool guard before designing a lease experiment. A human viewer must lose control at dispatch and keep the stream. A tool guard is only one part of ownership: the DSH process that can run arbitrary shell commands must have no other path to CDP. Do not build a custom image or proxy for input gating without an architecture decision.
+- **D:** Audit the published Sidebar/client module and Browser Use contracts. A test of registration, floating and DOM retention cannot stand in for a missing native operation. No DSH core changes or private dockkit imports.
+
+Evidence belongs in the M0 report, linked to the runner and its commands. Do not print startup authentication URLs, tokens or cookies. Record a failure or an unfinished check explicitly.

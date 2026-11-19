@@ -1,0 +1,18 @@
+services:
+  runtime:
+    build: .
+    command: ["sleep", "infinity"]
+    environment:
+      DSH_HOME: /dsh-home
+      DSH_TELEMETRY_DISABLED: "1"
+      CI: "true"
+    volumes:
+      - dsh:/dsh-home
+      - workspace:/workspace
+      - backup:/backup
+      - ./:/m0:ro
+
+volumes:
+  dsh:
+  workspace:
+  backup:
