@@ -27,5 +27,9 @@ createServer((req, res) => {
     res.end('<!doctype html><html lang="en"><title>M0 agent</title><style>body{background:#1755a0;color:white}</style><h1>M0 agent</h1><input aria-label="Agent page marker" autofocus></html>')
     return
   }
+  if (req.url === '/seed') {
+    res.end('<!doctype html><html lang="en"><title>M0 seed</title><a href="/human" target="_blank" rel="noopener">Open human tab</a></html>')
+    return
+  }
   res.end('<!doctype html><html lang="en"><title>M0 fixture</title><style>body{background:#882134;color:white}</style><h1>M0 fixture</h1></html>')
 }).listen(8080, '0.0.0.0')

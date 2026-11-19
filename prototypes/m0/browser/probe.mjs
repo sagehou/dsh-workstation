@@ -39,7 +39,8 @@ try {
     const { verifySelkiesInput } = await import('./exclusive.mjs')
     await verifySelkiesInput({ managed, origin, fixture, poll })
   } else if (process.argv.includes('--after-restart')) {
-    assert((await managed.cookies(fixture)).some(c => c.name === 'm0_profile' && c.value === 'human'))
+    await poll('persistent cookie missing after Chromium restart', async () =>
+      (await managed.cookies(fixture)).some(c => c.name === 'm0_profile' && c.value === 'human'))
     console.log('persistent cookie still present in the default context after Chromium restart')
   } else {
     const outer = await playwright.launch({ args: ['--no-sandbox'] })
@@ -56,6 +57,13 @@ try {
       assert.equal(headers['x-frame-options'], 'SAMEORIGIN')
 
       const page = await user.newPage()
+      let video = false
+      page.on('websocket', socket => {
+        if (new URL(socket.url()).pathname !== '/browser/api/websockets') return
+        socket.on('framereceived', ({ payload }) => {
+          if (Buffer.isBuffer(payload) && [0x03, 0x04].includes(payload[0])) video = true
+        })
+      })
       await page.goto(origin + '/')
       const inner = page.frameLocator('iframe[title="Selkies"]')
       const overlay = inner.locator('#overlayInput')
@@ -66,14 +74,16 @@ try {
         const response = await user.request.get(browserURL + 'api/sessions', { timeout: 2000 })
         assert(response.ok())
         const { sessions } = await response.json()
-        return sessions.some(session => session.transport === 'websockets')
+        return video && sessions.some(session => session.transport === 'websockets')
       })
-      console.log('same-origin HTTPS iframe and WebSocket reached Selkies through the unchanged /browser/ prefix')
+      console.log('same-origin HTTPS iframe received Selkies WebSocket video through the unchanged /browser/ prefix')
 
+      // Use the image's initial tab; the Selkies keystroke alone opens /human.
+      const seed = await poll('initial Chromium tab did not load the fixture', () =>
+        managed.pages().find(tab => tab.url() === fixture + '/seed'))
+      await seed.bringToFront()
+      await seed.getByRole('link', { name: 'Open human tab' }).focus()
       await overlay.focus()
-      await page.keyboard.press('Control+t')
-      await page.keyboard.press('Control+l')
-      await page.keyboard.type(fixture + '/human')
       await page.keyboard.press('Enter')
       await poll('Selkies keyboard navigation did not reach the managed Chromium', async () => {
         return (await discovery('/json/list')).some(t => t.type === 'page' && t.url === fixture + '/human')

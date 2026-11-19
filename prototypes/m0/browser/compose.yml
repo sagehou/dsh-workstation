@@ -49,7 +49,9 @@ services:
     networks: [web]
 
   probe:
-    build: .
+    build:
+      context: .
+      target: probe
     init: true
     profiles: [probe]
     command: ["node", "/m0/probe.mjs"]

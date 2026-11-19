@@ -8,7 +8,7 @@ case "${1:-}" in
     export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-dsh-m0-exclusive}"
     scratch="$(mktemp -d)"
     export M0_MASTER_FILE="$scratch/master"
-    openssl rand -hex 32 > "$M0_MASTER_FILE"
+    openssl rand -hex 32 | tr -d '\n' > "$M0_MASTER_FILE"
     chmod 444 "$M0_MASTER_FILE"
     files+=(-f compose.exclusive.yml)
     ;;

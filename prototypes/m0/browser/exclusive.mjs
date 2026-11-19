@@ -18,7 +18,9 @@ export async function verifySelkiesInput({ managed, origin, fixture, poll }) {
       body: JSON.stringify(table),
       signal: AbortSignal.timeout(2000),
     })
-    return response.ok
+    await response.body?.cancel()
+    assert(response.ok, `internal Selkies token endpoint returned HTTP ${response.status}`)
+    return true
   }
   await poll('Selkies secure-mode control plane unavailable', () => provision(false))
   const target = await managed.newPage()

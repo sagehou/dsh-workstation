@@ -1,0 +1,3 @@
+- insert:
+    - id: m0-sidebar-probe
+      name: ./host.mjs
