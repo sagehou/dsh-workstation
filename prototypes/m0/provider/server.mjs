@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { Readable } from 'node:stream'
@@ -12,12 +12,21 @@ import { z } from 'zod'
 const [master, controller, sentinel, admin] = await Promise.all(
   ['m0_master', 'm0_controller', 'm0_sentinel', 'm0_admin'].map(name => readFile('/run/secrets/' + name, 'utf8')),
 )
+const publicMode = process.env.WORKSTATION_PROVIDER === '1'
+const enroll = publicMode ? (await readFile('/run/secrets/browser_enroll', 'utf8')).trim() : ''
+if (publicMode && !/^[0-9a-f]{64}$/.test(enroll)) throw Error('Invalid workstation MCP admission key')
+const origins = new Set((process.env.BROWSER_TOOL_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean))
+for (const origin of origins) {
+  if (!origin.startsWith('https://') || new URL(origin).origin !== origin) throw Error('Expected bare HTTPS browser tool origins')
+}
 const cdp = 'http://172.30.231.2:9223'
 const fixture = 'http://witness:8081/'
 const fencePath = '/state/browser-fence'
 const boot = randomUUID()
 const digest = text => createHash('sha256').update(text ?? '').digest('hex')
 const tickets = new Map()
+const usedTickets = new Map()
+const webTicketLifetime = 5 * 60_000
 let state = 'DISCONNECTED', reason = 'BOOT', nextGeneration = 0
 let browser, browserId, page, lease, expiry, flight, recovering
 
@@ -69,10 +78,13 @@ async function recover() {
         if (browser === attached) fault('BROWSER_LOST')
       })
     }
-    const context = browser.contexts()[0]
-    page = context.pages().find(tab => tab.url() === fixture) ?? context.pages()[0] ?? await context.newPage()
-    if (page.url() !== fixture) await page.goto(fixture, { timeout: 5000 })
-    await page.bringToFront()
+    if (!publicMode) {
+      const context = browser.contexts()[0]
+      const reserved = new Set([...tickets.values()].map(peer => peer.binding?.page))
+      page = context.pages().find(tab => !reserved.has(tab) && tab.url() === fixture) ?? await context.newPage()
+      if (page.url() !== fixture) await page.goto(fixture, { timeout: 5000 })
+      await page.bringToFront()
+    }
     await input(false)
     await rm(fencePath, { force: true })
     check(browser.isConnected(), 'BROWSER_LOST')
@@ -83,19 +95,39 @@ async function recover() {
     recovering = false
   }
 }
+const liveBinding = binding => binding && binding.browserId === browserId && !binding.page.isClosed()
+
+async function bindTab(peer) {
+  if (peer.binding) return peer.binding
+  const id = browserId
+  const tab = await browser.contexts()[0].newPage()
+  check(state === 'HANDOVER' && browserId === id && browser.isConnected() && peer.stream, 'OWNER_LOST_DURING_GRANT')
+  const onClose = () => {
+    if (state === 'AGENT' && lease?.peer === peer) void handover('TAB_CLOSED').catch(() => {})
+  }
+  peer.binding = { browserId: id, page: tab, onClose }
+  tab.once('close', onClose)
+  if (!publicMode) await tab.goto(fixture, { timeout: 5000 })
+  return peer.binding
+}
+
 async function grant(peerId, ttl) {
   const peer = [...tickets.values()].find(candidate => candidate.id === peerId)
   check(peer?.stream, 'NO_LIVE_MCP_CONNECTION')
   check(Number.isSafeInteger(ttl) && ttl >= 500 && ttl <= 120_000, 'BAD_TTL', 400)
   check(state === 'HUMAN', 'NOT_HUMAN')
+  if (peer.binding) check(liveBinding(peer.binding), 'TAB_UNAVAILABLE')
   state = 'HANDOVER'
   try {
     await input(true)
     await writeFile(fencePath + '.new', browserId, { mode: 0o600 })
     await rename(fencePath + '.new', fencePath)
     check(state === 'HANDOVER' && browser.isConnected() && peer.stream, 'OWNER_LOST_DURING_GRANT')
+    const binding = peer.tab ? await bindTab(peer) : { browserId, page }
+    check(state === 'HANDOVER' && browser.isConnected() && peer.stream, 'OWNER_LOST_DURING_GRANT')
+    check(liveBinding(binding), 'TAB_UNAVAILABLE')
     const generation = boot + ':' + ++nextGeneration
-    lease = { peer, generation, expires: performance.now() + ttl }
+    lease = { peer, binding, generation, expires: performance.now() + ttl }
     state = 'AGENT'
     reason = 'GRANTED'
     expiry = setTimeout(() => { void handover('EXPIRED').catch(() => {}) }, ttl)
@@ -127,24 +159,35 @@ async function handover(cause) {
 function retire(peer) {
   peer.stream = false
   tickets.delete(peer.key)
+  if (peer.binding) peer.binding.page.off('close', peer.binding.onClose)
   if (state === 'AGENT' && lease.peer === peer) void handover('MCP_LOST').catch(() => {})
   void peer.transport.close().catch(() => {})
 }
 function toolResult(code) {
   return { isError: code !== 'M0_OK', content: [{ type: 'text', text: code }] }
 }
-async function mark(peer, args) {
-  if (state === 'HANDOVER' || state === 'DISCONNECTED') return toolResult(state)
-  if (!lease) return toolResult('NO_LEASE')
+function leaseDenied(peer) {
+  if (state === 'HANDOVER' || state === 'DISCONNECTED') return state
+  if (!lease) return 'NO_LEASE'
   if (performance.now() >= lease.expires) {
     void handover('EXPIRED').catch(() => {})
-    return toolResult('EXPIRED')
+    return 'EXPIRED'
   }
-  if (lease.peer !== peer || !peer.stream) return toolResult('NOT_OWNER')
+  if (lease.peer !== peer || !peer.stream) return 'NOT_OWNER'
+  if (!liveBinding(lease.binding)) return 'TAB_UNAVAILABLE'
+}
+async function mark(peer, args) {
+  const denied = leaseDenied(peer)
+  if (denied) return toolResult(denied)
   if (lease.generation !== args.generation) return toolResult('STALE_GENERATION')
   if (flight) return toolResult('BUSY')
+  const tab = lease.binding.page
+  if (tab.url() !== fixture) return toolResult('FIXTURE_UNAVAILABLE')
   // Keep the CDP promise through MCP cancellation; the renderer may still have work.
-  const work = page.evaluate(({ marker, hold }) => window.m0Mark(marker, hold), args)
+  const work = tab.evaluate(({ marker, hold, fixture }) => {
+    if (location.href !== fixture) return 'wrong page'
+    return window.m0Mark(marker, hold)
+  }, { ...args, fixture })
   flight = work
   try {
     if (await work !== 'done') throw new Error('marker not confirmed')
@@ -156,6 +199,87 @@ async function mark(peer, args) {
     flight = undefined
   }
 }
+function cleanTickets() {
+  const now = Date.now()
+  for (const [key, until] of usedTickets) if (until <= now) usedTickets.delete(key)
+  for (const peer of tickets.values()) {
+    if (peer.label && !peer.stream && peer.deadline <= now) {
+      tickets.delete(peer.key)
+      if (peer.transport) void peer.transport.close().catch(() => {})
+    }
+  }
+}
+
+function admit(authorization, key) {
+  const match = /^Bearer (v1\.([a-zA-Z0-9_-]{1,128})\.[a-f0-9]{48}\.([0-9]{13}))\.([a-f0-9]{64})$/.exec(authorization ?? '')
+  check(match, 'MCP_CREDENTIAL_REVOKED', 401)
+  const [, claim, label, expiry, signature] = match
+  const now = Date.now()
+  check(Number(expiry) > now && Number(expiry) <= now + 65_000, 'MCP_CREDENTIAL_REVOKED', 401)
+  const expected = createHmac('sha256', enroll).update(claim).digest()
+  check(timingSafeEqual(expected, Buffer.from(signature, 'hex')), 'MCP_CREDENTIAL_REVOKED', 401)
+  check(!usedTickets.has(key), 'MCP_CREDENTIAL_REVOKED', 401)
+  check(tickets.size < 32 && usedTickets.size < 128, 'TOO_MANY_MCP_CONNECTIONS', 429)
+  const peer = { id: randomUUID(), label, key, deadline: Number(expiry), tab: true, stream: false }
+  usedTickets.set(key, Number(expiry))
+  tickets.set(key, peer)
+  return peer
+}
+
+function allowed(raw) {
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && !url.username && !url.password && origins.has(url.origin)
+  } catch { return false }
+}
+const textResult = text => ({ content: [{ type: 'text', text }] })
+async function browserAction(peer, args, operation) {
+  const denied = leaseDenied(peer)
+  if (denied) return toolResult(denied)
+  if (lease.generation !== args.generation) return toolResult('STALE_GENERATION')
+  if (flight) return toolResult('BUSY')
+  const tab = lease.binding.page
+  const target = operation === 'navigate' ? args.url : tab.url()
+  if (!allowed(target)) return toolResult('ORIGIN_NOT_ALLOWED')
+  const work = (async () => {
+    if (operation === 'navigate') await tab.goto(target, { waitUntil: 'domcontentloaded', timeout: 10_000 })
+    if (operation === 'click') {
+      const match = tab.getByRole(args.role, { name: args.name, exact: true })
+      await match.click({ timeout: 4_000 })
+    }
+    if (!allowed(tab.url())) return toolResult('ORIGIN_NOT_ALLOWED')
+    if (operation !== 'read') return textResult('OK')
+    // Browser-side constants only; no model-supplied JavaScript.
+    const visible = await tab.evaluate(() => (document.body?.innerText ?? '').slice(0, 8000))
+    return allowed(tab.url()) ? textResult(visible) : toolResult('ORIGIN_NOT_ALLOWED')
+  })()
+  flight = work
+  let timer
+  try {
+    return await Promise.race([work, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('browser timeout')), 12_000)
+    })])
+  } catch {
+    fault('ACTION_UNCERTAIN')
+    return toolResult('ACTION_UNCERTAIN')
+  } finally {
+    clearTimeout(timer)
+    flight = undefined
+  }
+}
+function publicTools(server, peer) {
+  const generation = z.string().max(64)
+  for (const [operation, description, inputs] of [
+    ['navigate', 'Open an allowed HTTPS URL in this session’s assigned tab.', { url: z.string().max(2048) }],
+    ['read', 'Read visible, untrusted text from this session’s assigned tab.', {}],
+    ['click', 'Click an exact accessible button or link in this session’s assigned tab.',
+      { role: z.enum(['button', 'link']), name: z.string().min(1).max(200) }],
+  ]) {
+    server.registerTool(operation, { description, inputSchema: { generation, ...inputs } },
+      args => browserAction(peer, args, operation))
+  }
+}
+
 async function json(req) {
   let body = ''
   for await (const chunk of req) {
@@ -166,13 +290,21 @@ async function json(req) {
 }
 async function mcp(req, res) {
   check(req.url === '/mcp' && !req.headers.origin, 'NOT_FOUND', 404)
-  const peer = tickets.get(digest(req.headers.authorization))
-  check(peer, 'MCP_CREDENTIAL_REVOKED', 401)
+  const key = digest(req.headers.authorization)
   const body = req.method === 'POST' ? await json(req) : undefined
+  if (publicMode) cleanTickets()
+  let peer = tickets.get(key)
+  if (publicMode && !peer && isInitializeRequest(body)) peer = admit(req.headers.authorization, key)
+  check(peer, 'MCP_CREDENTIAL_REVOKED', 401)
   if (!peer.transport) {
+    if (peer.acceptUntil !== undefined && Date.now() >= peer.acceptUntil) {
+      tickets.delete(peer.key)
+      throw new Denied('MCP_CREDENTIAL_REVOKED', 401)
+    }
     check(isInitializeRequest(body), 'USE_MCP_INITIALIZE', 400)
     const server = new McpServer({ name: 'm0-browser-provider', version: '0.0.1' })
-    server.registerTool('mark', {
+    if (publicMode) publicTools(server, peer)
+    else server.registerTool('mark', {
       description: 'Write a marker in the M0 browser fixture under the current generation.',
       inputSchema: {
         generation: z.string().max(64),
@@ -180,6 +312,13 @@ async function mcp(req, res) {
         hold: z.boolean(),
       },
     }, args => mark(peer, args))
+    if (peer.tab) server.registerTool('lease_status', {
+      description: 'Get this session’s active lease generation before using browser tools.',
+      inputSchema: {},
+    }, () => {
+      const denied = leaseDenied(peer)
+      return denied ? toolResult(denied) : { content: [{ type: 'text', text: lease.generation }] }
+    })
     peer.transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: randomUUID, enableJsonResponse: true, keepAliveMs: 500,
     })
@@ -210,7 +349,9 @@ async function control(req, res) {
   const want = Buffer.from(digest('Bearer ' + admin), 'hex')
   check(timingSafeEqual(want, Buffer.from(digest(req.headers.authorization), 'hex')), 'UNAUTHORIZED', 401)
   if (req.method === 'GET' && req.url === '/status') {
-    return respond(res, 200, { state, reason, inFlight: Boolean(flight), lease: Boolean(lease), mcpProtocol: lease?.peer.protocol })
+    const peers = publicMode ? [...tickets.values()].filter(peer => peer.label && peer.stream)
+      .map(peer => ({ id: peer.id, label: peer.label, tab: Boolean(liveBinding(peer.binding)) })) : undefined
+    return respond(res, 200, { state, reason, inFlight: Boolean(flight), lease: Boolean(lease), mcpProtocol: lease?.peer.protocol, peers })
   }
   check(req.method === 'POST', 'NOT_FOUND', 404)
   const args = await json(req)
@@ -218,12 +359,19 @@ async function control(req, res) {
   switch (req.url) {
     case '/recover': result = await recover(); break
     case '/issue': {
+      check(!publicMode, 'NOT_FOUND', 404)
+      const now = Date.now()
+      for (const [key, peer] of tickets) {
+        if (!peer.transport && peer.acceptUntil !== undefined && peer.acceptUntil <= now) tickets.delete(key)
+      }
       check(tickets.size < 32, 'TOO_MANY_MCP_CONNECTIONS')
       const credential = randomBytes(32).toString('hex')
       const key = digest('Bearer ' + credential)
       const id = randomUUID()
-      tickets.set(key, { id, key, stream: false })
-      result = { id, credential }
+      const tab = args?.tab === true
+      const acceptUntil = tab ? now + webTicketLifetime : undefined
+      tickets.set(key, { id, key, stream: false, tab, acceptUntil })
+      result = { id, credential, acceptUntil }
       break
     }
     case '/grant': result = await grant(args.peer, args.ttl); break
@@ -242,3 +390,13 @@ function listen(handler, host, port) {
 }
 listen(mcp, '172.30.232.2', 8080)
 listen(control, '172.30.233.2', 8081)
+
+if (publicMode) {
+  const retry = () => {
+    if (state === 'DISCONNECTED' && ['BOOT', 'BROWSER_LOST'].includes(reason) && !recovering && !flight) {
+      void recover().catch(() => {})
+    }
+  }
+  retry()
+  setInterval(retry, 3000).unref()
+}

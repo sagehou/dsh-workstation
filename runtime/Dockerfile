@@ -13,6 +13,7 @@ ENV DSH_HOME=/dsh-home \
 
 COPY --chmod=0755 dsh-runtime /usr/local/bin/dsh-runtime
 COPY web.mjs /usr/local/lib/dsh-runtime/web.mjs
+COPY browser-bundle /opt/workstation-browser
 USER node
 WORKDIR /workspace
 ENTRYPOINT ["dsh-runtime"]

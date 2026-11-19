@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{.CSRF}}">
+<title>{{.Title}} · DSH Workstation</title>
+<link rel="stylesheet" href="/_auth/style.css">
+{{if or (eq .View "login") (eq .View "account")}}<script src="/_auth/passkey.js" defer></script>{{end}}
+</head>
+<body>
+<main>
+<h1>{{.Title}}</h1>
+{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}
+{{if eq .View "login"}}
+<form action="/_auth/password" method="post">
+{{template "csrf" .CSRF}}
+<input type="hidden" name="next" value="{{.Next}}">
+<label for="username">用户名</label>
+<input id="username" name="username" autocomplete="username" required maxlength="64">
+<label for="password">密码</label>
+<input type="password" id="password" name="password" autocomplete="current-password" required maxlength="256">
+<button>验证密码</button>
+</form>
+<button type="button" data-passkey="login" data-next="{{.Next}}" hidden>用 Passkey 登录</button>
+<p id="passkey-status" role="status" hidden></p>
+{{else if or (eq .View "totp") (eq .View "recovery")}}
+<form action="/_auth/{{.View}}" method="post">
+{{template "csrf" .CSRF}}
+<input type="hidden" name="next" value="{{.Next}}">
+{{if eq .View "totp"}}
+<label for="code">动态验证码</label>
+<input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+{{else}}
+<label for="code">恢复码</label>
+<input id="code" name="code" autocomplete="off" spellcheck="false" maxlength="24" required>
+{{end}}
+<button>登录</button>
+</form>
+<nav><a href="/_auth/login?next={{.Next}}">返回登录</a>{{if eq .View "totp"}} <a href="/_auth/recovery?next={{.Next}}">使用恢复码</a>{{end}}</nav>
+{{else if eq .View "account"}}
+{{template "nav" .}}
+<h2>安全设置</h2>
+{{if .Recent}}
+<button type="button" data-passkey="register" hidden>添加 Passkey</button>
+<p id="passkey-status" role="status" hidden></p>
+{{range .Keys}}
+<form action="/_auth/passkey/remove" method="post" class="inline">
+{{template "csrf" $.CSRF}}<input type="hidden" name="id" value="{{.ID}}">
+<span>{{.Label}}</span> <button>移除此 Passkey</button>
+</form>
+{{end}}
+<form action="/_auth/totp/rotate" method="post">{{template "csrf" .CSRF}}<button>更换动态验证器</button></form>
+<form action="/_auth/recovery/regenerate" method="post">{{template "csrf" .CSRF}}<button>重新生成恢复码</button>
+<details><summary aria-label="恢复码提示">ⓘ</summary>生成后旧恢复码失效。</details></form>
+<form action="/_auth/password/change" method="post">
+{{template "csrf" .CSRF}}
+<label for="new-password">新密码</label><input id="new-password" type="password" name="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+<button>修改密码</button>
+</form>
+{{else}}
+<a href="/_auth/login?next=%2F_auth%2Faccount">重新验证身份</a>
+{{end}}
+<h2>登录会话</h2>
+<ul>
+{{range .Sessions}}
+<li><form action="/_auth/sessions/revoke" method="post" class="inline">
+{{template "csrf" $.CSRF}}<input type="hidden" name="id" value="{{.ID}}">
+<span>{{if .Current}}当前 · {{end}}{{stamp .Seen}}</span> <button>撤销此会话</button>
+</form></li>
+{{end}}
+</ul>
+<form action="/_auth/sessions/revoke-all" method="post">{{template "csrf" .CSRF}}<button>退出所有会话</button></form>
+<h2>最近活动</h2>
+<ul>{{range .Events}}<li>{{stamp .At}} · <code>{{.Event}}</code></li>{{end}}</ul>
+{{else if eq .View "codes"}}
+<details><summary aria-label="保存恢复码提示">ⓘ</summary>恢复码只显示这一次。</details>
+<ul>{{range .Codes}}<li><code>{{.}}</code></li>{{end}}</ul>
+<a href="/_auth/account">返回账户</a>
+{{else if eq .View "rotate"}}
+<p>验证器密钥：<code>{{.Key}}</code></p>
+<form action="/_auth/totp/confirm" method="post">
+{{template "csrf" .CSRF}}<input type="hidden" name="challenge" value="{{.Challenge}}">
+<label for="code">新验证器的动态验证码</label>
+<input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+<button>确认更换</button>
+</form>
+{{else if eq .View "control"}}
+{{template "nav" .}}
+{{if .Control.State}}<p role="status">状态：{{.Control.State}} · {{.Control.Reason}}</p>{{end}}
+{{if eq .Control.State "DISCONNECTED"}}
+<form action="/_auth/control" method="post">
+{{template "csrf" .CSRF}}<button name="action" value="recover">连接浏览器</button>
+</form>
+{{else if eq .Control.State "AGENT"}}
+<form action="/_auth/control" method="post">
+{{template "csrf" .CSRF}}<button name="action" value="takeover">接管浏览器</button>
+</form>
+{{else if eq .Control.State "HUMAN"}}
+{{if .Control.Peers}}
+<form action="/_auth/control" method="post">
+{{template "csrf" .CSRF}}
+<label for="peer">DSH 会话</label>
+<select name="peer" id="peer" required>
+<option value="">选择会话</option>
+{{range .Control.Peers}}<option value="{{.ID}}">{{.Label}}{{if .Tab}} · 已绑定{{end}}</option>{{end}}
+</select>
+<label for="seconds">授权时长（秒）</label>
+<input type="number" name="seconds" id="seconds" value="120" min="10" max="120" required>
+<button name="action" value="grant">将标签页交给 Agent</button>
+<details><summary aria-label="交接提示">ⓘ</summary>交接前先松开鼠标和按键。</details>
+</form>
+{{else}}
+<p>还没有活动的 DSH 会话。</p>
+<a href="/_auth/dsh">打开 DSH</a>
+{{end}}
+{{end}}
+{{end}}
+</main>
+</body>
+</html>
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
+{{define "nav"}}<nav aria-label="工作台"><a href="/_auth/dsh">DSH</a> <a href="/_auth/browser" target="_blank" rel="noopener">打开浏览器</a> <a href="/_auth/control">浏览器控制</a> <a href="/_auth/account">账户</a></nav>{{end}}

@@ -8,12 +8,13 @@ const launchFile = '/run/dsh-runtime/launch-url'
 const bind = process.env.DSH_BIND_IP
 const port = Number(process.env.DSH_BIND_PORT ?? 3080)
 const args = ['web', '--no-open']
+const tls = process.env.WORKSTATION_INTERNAL_TLS === '1'
 
 function listener() {
   if (!isIPv4(bind ?? '') || !Number.isInteger(port) || port < 1024 || port > 65535) {
     throw Error('set DSH_BIND_IP to the concrete container IPv4 address and use a valid DSH_BIND_PORT')
   }
-  return new URL(`http://${bind}:${port}/`)
+  return new URL((tls ? 'https://' : 'http://') + bind + ':' + port + '/')
 }
 
 async function readyPage(launch, target) {
@@ -49,6 +50,7 @@ async function run() {
       throw Error('DSH_PUBLIC_ORIGIN must be an HTTP(S) origin')
     }
     await rm(launchFile, { force: true })
+    if (tls) args.push('--tls-cert', '/run/secrets/runtime_cert', '--tls-key', '/run/secrets/runtime_key')
     args.push('--host', bind, '--port', String(port), '--public-url', publicRoot.href, '--trusted-host', publicRoot.host)
   } else {
     args.push('--port', '0')

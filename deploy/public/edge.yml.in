@@ -1,0 +1,62 @@
+http:
+  routers:
+    auth:
+      entryPoints: [https]
+      rule: Host(@DOMAIN_RULE@) && PathPrefix(@AUTH_RULE@)
+      tls: {certResolver: public}
+      middlewares: [security]
+      service: auth
+    browser:
+      entryPoints: [https]
+      rule: Host(@DOMAIN_RULE@) && PathPrefix(@BROWSER_RULE@) && !PathPrefix(@TOKENS_RULE@)
+      tls: {certResolver: public}
+      middlewares: [security, signin, browser-frame]
+      service: selkies
+    dsh:
+      entryPoints: [https]
+      rule: Host(@DOMAIN_RULE@) && !PathPrefix(@AUTH_RULE@) && !Path(@AUTH_BASE@) && !PathPrefix(@BROWSER_RULE@) && !Path(@BROWSER_BASE@)
+      tls: {certResolver: public}
+      middlewares: [security, signin]
+      service: dsh
+  middlewares:
+    security:
+      headers:
+        stsSeconds: 31536000
+        contentTypeNosniff: true
+        referrerPolicy: no-referrer
+        customRequestHeaders:
+          X-Forwarded-User: ""
+          Remote-User: ""
+          X-Workstation-User: ""
+    signin:
+      forwardAuth:
+        address: http://auth:8081/verify
+        trustForwardHeader: false
+        preserveLocationHeader: true
+        authRequestHeaders: [Cookie, Accept, Sec-Fetch-Mode, Sec-Fetch-Dest, Upgrade]
+        maxResponseBodySize: 4096
+    browser-frame:
+      headers:
+        customRequestHeaders:
+          Selkies-Authorization: ""
+        customResponseHeaders:
+          Content-Security-Policy: "frame-ancestors 'self'"
+          X-Frame-Options: SAMEORIGIN
+  serversTransports:
+    dsh-tls:
+      serverName: runtime
+      rootCAs: [/run/secrets/runtime_ca]
+  services:
+    auth:
+      loadBalancer:
+        servers:
+          - url: http://auth:8080
+    dsh:
+      loadBalancer:
+        serversTransport: dsh-tls
+        servers:
+          - url: https://runtime:3080
+    selkies:
+      loadBalancer:
+        servers:
+          - url: http://chromium:3000

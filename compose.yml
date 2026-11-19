@@ -1,0 +1,228 @@
+name: dsh-workstation
+
+x-runtime: &runtime
+  image: dsh-workstation-runtime:0.2.0
+  build: ./runtime
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  volumes:
+    - dsh-home:/dsh-home
+    - workspace:/workspace
+    - backups:/backup
+    - runtime-launch:/run/dsh-runtime
+
+x-provider: &provider
+  image: dsh-workstation-provider:0.1.0
+  build:
+    context: .
+    dockerfile: provider/Dockerfile
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  edge:
+    image: traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4
+    restart: unless-stopped
+    user: "${WORKSTATION_EDGE_UID:?run deploy/public/init.sh}:${WORKSTATION_EDGE_GID:?run deploy/public/init.sh}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command:
+      - --entrypoints.http.address=172.30.244.2:8080
+      - --entrypoints.http.http.redirections.entrypoint.to=:443
+      - --entrypoints.http.http.redirections.entrypoint.scheme=https
+      - --entrypoints.https.address=172.30.244.2:8443
+      - --entrypoints.https.forwardedHeaders.insecure=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --certificatesresolvers.public.acme.email=${ACME_EMAIL:?set ACME_EMAIL}
+      - --certificatesresolvers.public.acme.storage=/acme/acme.json
+      - --certificatesresolvers.public.acme.httpchallenge.entrypoint=http
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ${WORKSTATION_STATE:-./.workstation}/edge:/etc/traefik/dynamic:ro
+      - ${WORKSTATION_STATE:-./.workstation}/acme:/acme
+    secrets: [runtime_ca]
+    networks:
+      public-entry: {ipv4_address: 172.30.244.2}
+      edge-auth: {ipv4_address: 172.30.242.2}
+      runtime-route: {}
+      browser-route: {}
+
+  auth:
+    image: dsh-workstation-auth:0.1.0
+    build: ./auth
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
+      AUTH_IDLE: ${AUTH_IDLE:-30m}
+      AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-12h}
+      AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-8}
+    secrets: [auth_key, m0_controller, m0_admin, runtime_ca]
+    volumes:
+      - auth-data:/data
+      - runtime-launch:/run/dsh-runtime:ro
+    networks:
+      edge-auth: {ipv4_address: 172.30.242.3}
+      runtime-route: {}
+      control: {}
+    healthcheck:
+      test: ["CMD", "workstation-auth", "health"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+
+  runtime:
+    <<: *runtime
+    restart: "on-failure:5"
+    environment:
+      DSH_INITIAL_VERSION: 0.2.2-rc.1
+      DSH_BIND_IP: 172.30.241.2
+      DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
+      WORKSTATION_INTERNAL_TLS: "1"
+      WORKSTATION_BROWSER_MCP: "1"
+      NODE_EXTRA_CA_CERTS: /run/secrets/runtime_ca
+    secrets: [runtime_ca, runtime_cert, runtime_key, browser_enroll]
+    healthcheck:
+      test: ["CMD", "dsh-runtime", "health"]
+      interval: 15s
+      timeout: 6s
+      retries: 4
+      start_period: 4m
+    networks:
+      runtime-route: {ipv4_address: 172.30.241.2}
+      mcp: {}
+      runtime-egress: {}
+
+  maintenance:
+    <<: *runtime
+    profiles: [maintenance]
+    command: ["status"]
+    networks: [runtime-egress]
+
+  chromium:
+    image: lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      SUBFOLDER: /browser/
+      CHROME_CLI: --user-data-dir=/config/chromium --remote-debugging-port=9222 --no-first-run
+      SELKIES_MODE: websockets
+      SELKIES_ENABLE_DUAL_MODE: "false"
+      SELKIES_ALLOWED_ORIGINS: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
+      SELKIES_FRAME_ANCESTORS: "'self'"
+      SELKIES_ENABLE_BASIC_AUTH: "false"
+      FILE__SELKIES_MASTER_TOKEN: /run/secrets/m0_master
+      SELKIES_ENABLE_COLLAB: "false"
+      SELKIES_ENABLE_SHARING: "false"
+      SELKIES_FILE_TRANSFERS: none
+      SELKIES_ENABLE_CLIPBOARD: "false"
+      SELKIES_GAMEPAD_ENABLED: "false"
+      SELKIES_MICROPHONE_ENABLED: "false"
+      SELKIES_WEBCAM_ENABLED: "false"
+      SELKIES_COMMAND_ENABLED: "false"
+    volumes:
+      - browser-profile:/config
+    secrets: [m0_master]
+    networks:
+      browser-route: {}
+      cdp: {ipv4_address: 172.30.231.2}
+      browser-egress: {}
+
+  cdp-relay:
+    <<: *provider
+    restart: unless-stopped
+    network_mode: service:chromium
+    depends_on:
+      chromium: {condition: service_started, restart: true}
+    command: ["node", "relay.mjs"]
+
+  provider:
+    <<: *provider
+    restart: unless-stopped
+    environment:
+      WORKSTATION_PROVIDER: "1"
+      BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
+    volumes:
+      - provider-state:/state
+    # Playwright attaches to Chromium; it never downloads or launches a browser.
+    secrets: [m0_master, m0_controller, m0_sentinel, m0_admin, browser_enroll]
+    networks:
+      cdp: {}
+      mcp: {ipv4_address: 172.30.232.2}
+      control: {ipv4_address: 172.30.233.2}
+
+networks:
+  cdp:
+    internal: true
+    driver_opts: &isolated
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam:
+      config: [{subnet: 172.30.231.0/24}]
+  mcp:
+    internal: true
+    driver_opts: *isolated
+    ipam:
+      config: [{subnet: 172.30.232.0/24}]
+  control:
+    internal: true
+    driver_opts: *isolated
+    ipam:
+      config: [{subnet: 172.30.233.0/24}]
+  runtime-route:
+    internal: true
+    driver_opts: *isolated
+    ipam:
+      config: [{subnet: 172.30.241.0/24}]
+  edge-auth:
+    internal: true
+    driver_opts: *isolated
+    ipam:
+      config: [{subnet: 172.30.242.0/24}]
+  browser-route:
+    internal: true
+    driver_opts: *isolated
+  public-entry:
+    ipam:
+      config: [{subnet: 172.30.244.0/24}]
+  runtime-egress: {}
+  browser-egress: {}
+
+secrets:
+  auth_key:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/auth-key
+  runtime_ca:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/runtime-ca.pem
+  runtime_cert:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/runtime.pem
+  runtime_key:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/runtime-key.pem
+  m0_admin:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/provider-admin
+  m0_master:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/selkies-master
+  m0_controller:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/selkies-controller
+  m0_sentinel:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/selkies-sentinel
+  browser_enroll:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/browser-enroll
+
+volumes:
+  auth-data:
+  dsh-home:
+  workspace:
+  backups:
+  runtime-launch:
+  browser-profile:
+  provider-state:

@@ -81,6 +81,15 @@ case "${1:-}" in
       install_version "$version"
       select_version "$version"
     fi
+    if [[ ${WORKSTATION_BROWSER_MCP:-} == 1 ]]; then
+      bundle="$DSH_HOME/profiles/web/.workstation-browser-0.1.0"
+      if [[ ! -f $bundle ]]; then
+        [[ $active == 0.2.2-rc.1 ]] || die 'browser bundle requires the verified DSH 0.2.2-rc.1'
+        if [[ -d $DSH_HOME/profiles/web ]]; then snapshot; fi
+        "$(bin "$active")" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check file:/opt/workstation-browser
+        touch "$bundle"
+      fi
+    fi
     # Keep the lock for the lifetime of the supervisor and its Web process.
     exec node "$web" serve "$(bin "$active")"
     ;;
