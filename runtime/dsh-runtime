@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+root="$DSH_HOME/runtime"
+selection="$root/selection"
+web=/usr/local/lib/dsh-runtime/web.mjs
+mkdir -p "$root/versions"
+
+die() { printf 'dsh-runtime: %s\n' "$*" >&2; exit 1; }
+exact() { [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; }
+bin() { printf '%s/versions/%s/node_modules/.bin/dsh\n' "$root" "$1"; }
+chosen() {
+  active= previous=
+  if [[ -f $selection ]]; then
+    read -r active previous < "$selection"
+    exact "$active" && { [[ -z $previous ]] || exact "$previous"; } || die 'invalid stored selection'
+  fi
+}
+lock() {
+  exec 9>"$root/.lock"
+  flock -n -x 9 || die 'runtime is serving or being modified; stop it before maintenance'
+  chosen
+}
+install_version() (
+  version=$1
+  exact "$version" || die 'provide an exact npm version'
+  target="$root/versions/$version"
+  if [[ -e $target ]]; then
+    [[ -x $(bin "$version") ]] || die 'existing version directory is incomplete'
+    return
+  fi
+  stage="$(mktemp -d "$root/versions/.install.XXXXXXXX")"
+  trap 'rm -rf -- "$stage"' EXIT
+  printf '{"name":"dsh-workstation-runtime","private":true}\n' > "$stage/package.json"
+  printf 'storeDir: %s\nengineStrict: true\nignoreScripts: true\n' "$DSH_HOME/pnpm/store" > "$stage/pnpm-workspace.yaml"
+  pnpm --dir "$stage" add --registry https://registry.npmjs.org --save-exact --ignore-scripts \
+    --ignore-workspace-root-check "@deepseek-ai/dsh@$version"
+  [[ $("$stage/node_modules/.bin/dsh" --version) == "$version" ]] || die 'installed CLI version does not match'
+  mv -T -- "$stage" "$target"
+  printf 'Installed DSH %s\n' "$version"
+)
+snapshot() (
+  mkdir -p /backup
+  output="$(mktemp /backup/dsh-home.XXXXXXXX.tgz)"
+  trap 'rm -f -- "$output"' EXIT
+  tar -czf "$output" --exclude='./runtime' -C "$DSH_HOME" .
+  trap - EXIT
+  printf 'State backup: %s (active version: %s)\n' "$output" "${active:-none}"
+)
+probe() (
+  version=$1
+  local candidate
+  candidate="$(bin "$version")"
+  [[ -x $candidate ]] || die 'version is not installed'
+  scratch="$(mktemp -d "$root/.probe.XXXXXXXX")" || die 'could not create a readiness directory'
+  trap 'rm -rf -- "$scratch"' EXIT
+  # Keep candidate startup and Profile initialization away from live state.
+  tar -cf - --exclude='./runtime' -C "$DSH_HOME" . | tar -xf - -C "$scratch" ||
+    die 'could not copy Profile state for readiness'
+  DSH_HOME="$scratch" npm_config_store_dir="$scratch/pnpm/store" node "$web" probe "$candidate"
+)
+select_version() {
+  local version=$1 next
+  exact "$version" || die 'provide an exact npm version'
+  [[ $version != "$active" ]] || return 0
+  probe "$version" || die 'candidate failed readiness; stored selection is unchanged'
+  if [[ -n $active ]]; then snapshot; fi
+  next="$(mktemp "$root/.select.XXXXXXXX")"
+  printf '%s %s\n' "$version" "$active" > "$next"
+  mv -Tf -- "$next" "$selection"
+  active=$version
+  printf 'Selected DSH %s\n' "$active"
+}
+
+case "${1:-}" in
+  serve)
+    lock
+    if [[ -z $active ]]; then
+      version=${DSH_INITIAL_VERSION:?set DSH_INITIAL_VERSION to an exact version}
+      install_version "$version"
+      select_version "$version"
+    fi
+    # Keep the lock for the lifetime of the supervisor and its Web process.
+    exec node "$web" serve "$(bin "$active")"
+    ;;
+  install) lock; install_version "${2:-}" ;;
+  select) lock; select_version "${2:-}" ;;
+  rollback) lock; [[ -n $previous ]] || die 'no previous version'; select_version "$previous" ;;
+  backup) lock; snapshot ;;
+  versions) exec pnpm view --registry https://registry.npmjs.org @deepseek-ai/dsh versions --json ;;
+  status)
+    chosen
+    printf 'Active: %s\nPrevious: %s\n' "${active:-none}" "${previous:-none}"
+    for manifest in "$root"/versions/*/package.json; do
+      [[ -f $manifest ]] || continue
+      version=${manifest%/package.json}
+      printf 'Installed: %s\n' "${version##*/}"
+    done
+    ;;
+  launch-url)
+    cat /run/dsh-runtime/launch-url
+    ;;
+  health)
+    exec node "$web" health
+    ;;
+  *) die 'usage: dsh-runtime {serve|install VERSION|select VERSION|rollback|status|versions|backup|health|launch-url}' ;;
+esac

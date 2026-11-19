@@ -1,0 +1,99 @@
+# Single-user access through an SSH tunnel. Keep the published port on loopback.
+name: dsh-workstation-preview
+
+x-runtime: &runtime
+  image: dsh-workstation-runtime:preview
+  build: ./runtime
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  volumes:
+    - dsh-home:/dsh-home
+    - workspace:/workspace
+    - backups:/backup
+
+services:
+  runtime:
+    <<: *runtime
+    restart: "on-failure:5"
+    environment:
+      DSH_INITIAL_VERSION: ${DSH_INITIAL_VERSION:-0.2.2-rc.1}
+      DSH_BIND_IP: 172.30.241.2
+      DSH_PUBLIC_ORIGIN: http://127.0.0.1:3080
+    healthcheck:
+      test: ["CMD", "dsh-runtime", "health"]
+      interval: 15s
+      timeout: 6s
+      retries: 4
+      start_period: 4m
+    networks:
+      runtime-route:
+        ipv4_address: 172.30.241.2
+      runtime-egress: {}
+
+  maintenance:
+    <<: *runtime
+    profiles: [maintenance]
+    command: ["status"]
+    networks: [runtime-egress]
+
+  chromium:
+    image: lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      SUBFOLDER: /browser/
+      CHROME_CLI: --user-data-dir=/config/chromium --no-first-run
+      SELKIES_MODE: websockets
+      SELKIES_ENABLE_DUAL_MODE: "false"
+      SELKIES_ALLOWED_ORIGINS: http://127.0.0.1:3080
+      SELKIES_FRAME_ANCESTORS: "'self'"
+      SELKIES_ENABLE_SHARING: "false"
+      SELKIES_FILE_TRANSFERS: none
+      SELKIES_COMMAND_ENABLED: "false"
+    volumes:
+      - browser-profile:/config
+    networks: [browser-route, browser-egress]
+
+  edge:
+    image: traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command:
+      - --entrypoints.preview.address=172.30.244.2:8080
+      - --providers.file.filename=/etc/traefik/private-preview.yml
+    ports:
+      - "127.0.0.1:3080:8080"
+    volumes:
+      - ./deploy/private-preview.yml:/etc/traefik/private-preview.yml:ro
+    networks:
+      private-entry:
+        ipv4_address: 172.30.244.2
+      runtime-route: {}
+      browser-route: {}
+
+networks:
+  runtime-route:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.241.0/24
+  browser-route:
+    internal: true
+  private-entry:
+    ipam:
+      config:
+        - subnet: 172.30.244.0/24
+  runtime-egress: {}
+  browser-egress: {}
+
+volumes:
+  dsh-home:
+  workspace:
+  backups:
+  browser-profile:

@@ -1,0 +1,36 @@
+name: M1 private preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["m1/**"]
+    paths: [runtime/**, deploy/**, compose.preview.yml, .github/workflows/m1-preview.yml]
+  pull_request:
+    paths: [runtime/**, deploy/**, compose.preview.yml, .github/workflows/m1-preview.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Bring up the private preview and exercise Runtime
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          bash deploy/ci-preview.sh 2>&1 | tee evidence/m1-preview.log
+      - name: Pack the Runtime image for deploy without a build
+        run: |
+          set -o pipefail
+          docker save dsh-workstation-runtime:preview | gzip -1 > evidence/dsh-workstation-runtime.tar.gz
+          docker image inspect --format '{{.Id}}' dsh-workstation-runtime:preview > evidence/runtime-image-id
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: m1-private-preview
+          path: evidence/

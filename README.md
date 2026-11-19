@@ -4,7 +4,7 @@ A Docker Compose-based, self-hosted web workstation built around the official De
 
 ## Project status
 
-**Planning / M0 validation.** This repository is the implementation handoff for Codex. No production-ready image, authentication gateway, browser-control integration, or UI plugin is claimed to exist yet.
+**M1 private preview.** The first Runtime and Compose candidate serves DSH Web and manual Chromium on one loopback origin. The [private bring-up guide](deploy/README.md) covers the Actions build, SSH access and version rollback. Public deployment is pending the authentication gateway.
 
 ## Goals
 
@@ -32,7 +32,7 @@ A Docker Compose-based, self-hosted web workstation built around the official De
 2. Read [SPEC.md](docs/SPEC.md) for product requirements and acceptance criteria.
 3. Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries and deployment topology.
 4. Read the [ADRs](docs/adr/) for decisions and unresolved validation gates.
-5. Start with [M0](docs/roadmap/M0.md). Do not implement later phases until the M0 gates pass.
+5. See [M0 evidence](docs/roadmap/M0-evidence.md) and the [M1 scope](docs/roadmap/M1.md). The browser findings remain open while Runtime work proceeds.
 
 ## Important engineering rule
 

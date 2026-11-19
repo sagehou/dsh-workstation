@@ -1,0 +1,26 @@
+http:
+  routers:
+    dsh:
+      entryPoints: [preview]
+      rule: Host(`127.0.0.1`) && !Path(`/browser`) && !PathPrefix(`/browser/`)
+      service: dsh
+    browser:
+      entryPoints: [preview]
+      rule: Host(`127.0.0.1`) && PathPrefix(`/browser/`) && !PathRegexp(`^/browser/api/tokens/?$`)
+      middlewares: [browser-frame]
+      service: selkies
+  middlewares:
+    browser-frame:
+      headers:
+        customResponseHeaders:
+          Content-Security-Policy: "frame-ancestors 'self'"
+          X-Frame-Options: SAMEORIGIN
+  services:
+    dsh:
+      loadBalancer:
+        servers:
+          - url: http://runtime:3080
+    selkies:
+      loadBalancer:
+        servers:
+          - url: http://chromium:3000
