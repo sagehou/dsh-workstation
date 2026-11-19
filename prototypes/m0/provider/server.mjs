@@ -210,7 +210,7 @@ function cleanTickets() {
   }
 }
 
-function admit(authorization, key) {
+function admit(authorization, key, initialize) {
   const match = /^Bearer (v1\.([a-zA-Z0-9_-]{1,128})\.[a-f0-9]{48}\.([0-9]{13}))\.([a-f0-9]{64})$/.exec(authorization ?? '')
   check(match, 'MCP_CREDENTIAL_REVOKED', 401)
   const [, claim, label, expiry, signature] = match
@@ -219,6 +219,8 @@ function admit(authorization, key) {
   const expected = createHmac('sha256', enroll).update(claim).digest()
   check(timingSafeEqual(expected, Buffer.from(signature, 'hex')), 'MCP_CREDENTIAL_REVOKED', 401)
   check(!usedTickets.has(key), 'MCP_CREDENTIAL_REVOKED', 401)
+  // The official client probes first; a verified legacy response lets it initialize without spending the ticket.
+  check(initialize, 'USE_MCP_INITIALIZE', 400)
   check(tickets.size < 32 && usedTickets.size < 128, 'TOO_MANY_MCP_CONNECTIONS', 429)
   const peer = { id: randomUUID(), label, key, deadline: Number(expiry), tab: true, stream: false }
   usedTickets.set(key, Number(expiry))
@@ -294,7 +296,12 @@ async function mcp(req, res) {
   const body = req.method === 'POST' ? await json(req) : undefined
   if (publicMode) cleanTickets()
   let peer = tickets.get(key)
-  if (publicMode && !peer && isInitializeRequest(body)) peer = admit(req.headers.authorization, key)
+  if (publicMode && !peer) {
+    const initialize = isInitializeRequest(body)
+    if (initialize || (body?.jsonrpc === '2.0' && body.method === 'server/discover')) {
+      peer = admit(req.headers.authorization, key, initialize)
+    }
+  }
   check(peer, 'MCP_CREDENTIAL_REVOKED', 401)
   if (!peer.transport) {
     if (peer.acceptUntil !== undefined && Date.now() >= peer.acceptUntil) {

@@ -54,6 +54,10 @@ const assert = require('node:assert/strict')
     await assert.rejects(fetch(url, { signal: AbortSignal.timeout(1200) }))
   }
   assert.equal((await fetch('http://provider:8080/mcp')).status, 401)
+  assert.equal((await fetch('http://provider:8080/mcp', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'probe', method: 'server/discover' }),
+  })).status, 401, 'unauthenticated MCP version probe')
   console.log('Network: DSH cannot reach CDP, Provider control or ForwardAuth; MCP requires a credential')
 })().catch(() => { console.error('Network isolation check failed'); process.exitCode = 1 })
 NET

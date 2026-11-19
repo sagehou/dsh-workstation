@@ -25,7 +25,7 @@ The desktop opens through `/_auth/browser` and streams at `/browser/` on the sam
 
 Set `BROWSER_TOOL_ORIGINS` in `.env.public` to a comma-separated list of exact HTTPS origins that the Agent may operate on, for example `https://www.example.org,https://docs.example.com`. Recreate the Provider after changing it. An empty list allows humans to browse but admits no Agent navigation, reads or clicks. The Agent uses `mcp__browser__lease_status` to get the current generation before calling `navigate`, `read` or `click`. The origin list bounds commands and returned page text. The Chromium profile keeps normal browser networking, including page scripts and redirects; use trusted origins. Tabs share cookies, so this is a workflow boundary for one operator.
 
-If the Agent's connection or tab is lost, reopen the DSH session to create a new MCP connection and grant again. If the Provider cannot establish that an in-flight operation ended, it refuses a new grant to that Chromium process. Recreate Chromium and its relay together, preserving the profile volume:
+If the Agent's connection or tab is lost, create a new DSH session and grant again. To keep using an existing conversation, restart the Runtime and resume that conversation before granting. The new connection gets a new tab in the same persistent Chromium profile. If the Provider cannot establish that an in-flight operation ended, it refuses a new grant to that Chromium process. Recreate Chromium and its relay together, preserving the profile volume:
 
 ```sh
 docker compose --env-file .env.public up -d --no-build --force-recreate chromium cdp-relay
