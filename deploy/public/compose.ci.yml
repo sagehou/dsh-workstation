@@ -1,0 +1,23 @@
+# GitHub-hosted, disposable TLS and model fixture only.
+services:
+  runtime:
+    environment:
+      DEEPSEEK_BASE_URL: http://fixture:8087/v1
+      DEEPSEEK_API_KEY: ci-mock-model
+      DSH_PERMISSION_MODE: danger-full-access
+  chromium:
+    environment:
+      CHROME_CLI: --user-data-dir=/config/chromium --remote-debugging-port=9222 --no-first-run --ignore-certificate-errors-spki-list=${CI_FIXTURE_SPKI}
+  fixture:
+    image: node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
+    user: node
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["node", "/test/fixture.mjs"]
+    volumes:
+      - ./deploy/public:/test:ro
+      - ./.workstation/fixture:/fixture:ro
+    networks:
+      runtime-egress: {}
+      browser-egress:
+        aliases: [fixture.test]

@@ -46,6 +46,11 @@ jobs:
             --mount "type=bind,source=$PWD/evidence/source/provider,target=/output" \
             -w /tmp node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 \
             sh -ec 'npm install --package-lock-only --ignore-scripts --no-audit --no-fund; cp package-lock.json /output'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: public-compose-source-locks
+          path: evidence/source/
       - name: Verify the Compose stack with HTTPS through Traefik
         run: |
           set -o pipefail
@@ -62,4 +67,6 @@ jobs:
         if: always()
         with:
           name: public-compose-linux-amd64
-          path: evidence/
+          path: |
+            evidence/*
+            !evidence/source/
