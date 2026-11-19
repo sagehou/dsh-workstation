@@ -9,6 +9,9 @@ export function apply(ctx) {
   const key = readFileSync('/run/secrets/browser_enroll', 'utf8').trim()
   if (!/^[0-9a-f]{64}$/.test(key)) throw Error('Invalid workstation MCP admission key')
   const clients = new Map()
+  const report = stage => {
+    if (process.env.WORKSTATION_MCP_DIAGNOSTICS === '1') console.error('Workstation MCP: ' + stage)
+  }
   let stopping = false
 
   ctx.tools.guard(exec => {
@@ -25,8 +28,11 @@ export function apply(ctx) {
   // Agent disposal has already unwound registrations in agent.ctx at this event.
   ctx.on('agent/disposed', ({ agent }) => { clients.delete(agent) })
   ctx.on('agent/created', async ({ agent, signal }) => {
-    if (stopping || signal?.aborted || clients.has(agent) || agent.session.header.parentSession !== undefined) return
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(agent.id)) return
+    if (stopping || signal?.aborted || clients.has(agent) || agent.session.header.parentSession !== undefined ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(agent.id)) {
+      report('skipped')
+      return
+    }
     const claim = 'v1.' + agent.id + '.' + randomBytes(24).toString('hex') + '.' + (Date.now() + 60_000)
     const ticket = claim + '.' + createHmac('sha256', key).update(claim).digest('hex')
     let fiber
@@ -34,6 +40,7 @@ export function apply(ctx) {
       clients.delete(agent)
       void Promise.resolve().then(() => fiber?.dispose()).catch(() => {})
     }
+    let stage = 'config'
     try {
       const headers = { Authorization: 'Bearer ' + ticket }
       const config = McpClient.Config({
@@ -45,6 +52,7 @@ export function apply(ctx) {
         toolCallTimeoutMs: 20_000,
         reconnect: { enabled: false },
       })
+      stage = 'plugin'
       agent.ctx.on('tools/execute', (exec, next) => {
         if (exec.name.startsWith('mcp__browser__') && exec.agent !== agent) {
           throw Error('This browser tool belongs to another session')
@@ -59,8 +67,14 @@ export function apply(ctx) {
       await fiber
       if (stopping || signal?.aborted || clients.get(agent) !== client) return
       client.ready = true
-    } catch {
+      report(ctx.tools.get('mcp__browser__lease_status', agent) ? 'ready' : 'missing')
+    } catch (error) {
       abort()
+      const detail = [error, error?.cause, error?.cause?.cause].map(part => part?.message ?? '').join(' ')
+      const reason = /40[0134]/.test(detail) ? 'http-denied'
+        : /schema/i.test(detail) ? 'schema'
+          : /already in use/.test(detail) ? 'duplicate' : 'unknown'
+      report(stage + ' ' + reason)
       ctx.logger.warn('Workstation browser connection unavailable for this session')
     } finally {
       signal?.removeEventListener('abort', abort)

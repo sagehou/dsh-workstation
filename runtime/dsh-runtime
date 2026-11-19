@@ -86,7 +86,7 @@ case "${1:-}" in
       if [[ ! -f $bundle ]]; then
         [[ $active == 0.2.2-rc.1 ]] || die 'browser bundle requires the verified DSH 0.2.2-rc.1'
         if [[ -d $DSH_HOME/profiles/web ]]; then snapshot; fi
-        "$(bin "$active")" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check file:/opt/workstation-browser
+        "$(bin "$active")" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check link:/opt/workstation-browser
         touch "$bundle"
       fi
     fi

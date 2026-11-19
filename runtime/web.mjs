@@ -79,6 +79,10 @@ async function run() {
   const errors = createInterface({ input: child.stderr })
   errors.on('line', line => {
     if (/skipping profile bundle|is incompatible with dsh|\b(?:entry|entries) did not activate\b/i.test(line)) incompatible = true
+    if (process.env.WORKSTATION_MCP_DIAGNOSTICS === '1' &&
+      /^Workstation MCP: (?:skipped|ready|missing|(?:config|plugin) (?:http-denied|schema|duplicate|unknown))$/.test(line)) {
+      console.error(line)
+    }
   })
   timer = setTimeout(() => expired(null), 90_000)
   try {
