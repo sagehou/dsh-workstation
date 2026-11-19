@@ -34,7 +34,8 @@ node deploy/public/otp.mjs password > "$state/ci-state/password"
 # Keep the bootstrap code valid for the short container startup.
 if (( $(date +%s) % 30 > 20 )); then sleep "$((30 - $(date +%s) % 30 + 1))"; fi
 node deploy/public/otp.mjs bootstrap | compose run --rm -T --no-deps auth bootstrap operator > "$state/ci-state/recovery"
-sudo chown -R 1000:1000 "$state/ci-state"
+viewer_user="$(docker run --rm --entrypoint sh workstation-ci-viewer -c 'printf "%s:%s" "$(id -u)" "$(id -g)"')"
+sudo chown -R "$viewer_user" "$state/ci-state"
 compose up -d --no-build --wait --wait-timeout 360
 for service in auth runtime chromium provider; do
   test -z "$(docker port "$(compose ps -q "$service")")"
@@ -68,5 +69,24 @@ check() {
 }
 check gateway
 check browser
-compose up -d --no-build --wait --wait-timeout 60 --force-recreate auth
+compose stop auth
+restore_volume=dsh-workstation_ci-auth-restore
+docker volume create "$restore_volume" >/dev/null
+restore_compose() {
+  compose -f "$state/auth-restore.yml" "$@"
+}
+cat > "$state/auth-restore.yml" <<'YAML'
+volumes:
+  auth-data:
+    name: dsh-workstation_ci-auth-restore
+YAML
+trap 'restore_compose down --volumes --remove-orphans; compose down --volumes --remove-orphans' EXIT
+# The archive is created only while SQLite is stopped, and stays on the runner.
+docker run --rm --network none --user 0:0 --entrypoint sh \
+  -v dsh-workstation_auth-data:/source:ro -v "$restore_volume":/target \
+  dsh-workstation-provider:0.1.0 -ec '
+    tar -C /source -cf /tmp/auth.tar .
+    tar -C /target -xpf /tmp/auth.tar
+  '
+restore_compose up -d --no-build --wait --wait-timeout 60 --force-recreate auth
 check restore

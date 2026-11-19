@@ -73,6 +73,7 @@ services:
     networks:
       edge-auth: {ipv4_address: 172.30.242.3}
       runtime-route: {}
+      browser-route: {}
       control: {}
     healthcheck:
       test: ["CMD", "workstation-auth", "health"]

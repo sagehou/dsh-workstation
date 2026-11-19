@@ -43,6 +43,8 @@ sed -e "s|@DOMAIN_RULE@|${tick}${domain}${tick}|g" \
   -e "s|@BROWSER_RULE@|${tick}/browser/${tick}|g" \
   -e "s|@BROWSER_BASE@|${tick}/browser${tick}|g" \
   -e "s|@TOKENS_RULE@|${tick}/browser/api/tokens${tick}|g" \
+  -e "s|@UPGRADE_HEADER@|${tick}Upgrade${tick}|g" \
+  -e "s|@UPGRADE_PATTERN@|${tick}(?i)^websocket\$${tick}|g" \
   deploy/public/edge.yml.in > "$state/edge/routes.yml"
 touch "$state/acme/acme.json"
 cat > .env.public <<CONFIG

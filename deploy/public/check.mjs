@@ -33,10 +33,34 @@ try {
     await cdp.send('WebAuthn.addCredential', { authenticatorId, credential })
     await page.goto(root + '/_auth/account')
     await page.getByRole('heading', { name: '账户', exact: true }).waitFor()
+    const dshPage = await context.newPage()
+    await dshPage.goto(root + '/')
+    await dshPage.evaluate(() => new Promise((resolve, reject) => {
+      const socket = new WebSocket('wss://' + location.host + '/api/remote.mux')
+      window.ciGatewaySocket = socket
+      socket.onopen = resolve
+      socket.onerror = () => reject(Error('DSH WebSocket was not admitted'))
+    }))
+    const desktop = await context.newPage()
+    let browserSocket, received = false
+    desktop.on('websocket', socket => {
+      if (new URL(socket.url()).pathname !== '/browser/api/websockets') return
+      socket.on('framereceived', () => {
+        if (!browserSocket) browserSocket = socket
+        received = true
+      })
+    })
+    await desktop.goto(root + '/_auth/browser')
+    await until('restored login admitted Selkies stream', () => received && !browserSocket.isClosed(), 40_000)
     const stolen = await context.cookies()
     assert.equal(await page.locator('form[action="/_auth/sessions/revoke-all"]').count(), 1)
     await page.getByRole('button', { name: '退出所有会话' }).click()
     await page.waitForURL('**/_auth/login')
+    await until('revocation closed the established DSH WebSocket',
+      () => dshPage.evaluate(() => window.ciGatewaySocket.readyState === WebSocket.CLOSED), 8000)
+    await until('revocation closed the established Selkies WebSocket', () => browserSocket.isClosed(), 8000)
+    await desktop.close()
+    await dshPage.close()
     const revoked = await browser.newContext()
     await revoked.addCookies(stolen)
     assert.equal((await revoked.request.get(root + '/api/remote.mux')).status(), 401)
@@ -45,7 +69,14 @@ try {
     await page.getByRole('button', { name: '用 Passkey 登录' }).click()
     await page.waitForURL('**/_auth/account')
     assert.equal(await page.getByRole('button', { name: '移除此 Passkey' }).count(), 1)
-    console.log('Recreated Auth: saved session survived; revoke-all denied the prior cookie; restored passkey completed a separate login')
+    await page.goto(root + '/_auth/login?next=%2F_auth%2Faccount')
+    await page.getByLabel('用户名').fill('operator')
+    await page.getByLabel('密码', { exact: true }).fill(password())
+    await page.getByRole('button', { name: '验证密码' }).click()
+    await page.getByLabel('动态验证码').fill(code(1))
+    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await page.waitForURL('**/_auth/account')
+    console.log('Auth backup restored to a fresh volume: session persisted; revoke-all closed DSH and Selkies sockets; Passkey and password/TOTP logins both passed')
   } else if (phase === 'gateway') {
     await page.goto(root + '/')
     await page.waitForURL('**/_auth/login?*')

@@ -18,6 +18,20 @@ http:
       tls: {certResolver: public}
       middlewares: [security, signin]
       service: dsh
+    browser-ws:
+      entryPoints: [https]
+      rule: Host(@DOMAIN_RULE@) && PathPrefix(@BROWSER_RULE@) && !PathPrefix(@TOKENS_RULE@) && HeaderRegexp(@UPGRADE_HEADER@, @UPGRADE_PATTERN@)
+      priority: 200
+      tls: {certResolver: public}
+      middlewares: [security, signin, browser-frame]
+      service: auth
+    dsh-ws:
+      entryPoints: [https]
+      rule: Host(@DOMAIN_RULE@) && !PathPrefix(@AUTH_RULE@) && !Path(@AUTH_BASE@) && !PathPrefix(@BROWSER_RULE@) && !Path(@BROWSER_BASE@) && HeaderRegexp(@UPGRADE_HEADER@, @UPGRADE_PATTERN@)
+      priority: 200
+      tls: {certResolver: public}
+      middlewares: [security, signin]
+      service: auth
   middlewares:
     security:
       headers:

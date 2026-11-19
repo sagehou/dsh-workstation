@@ -4,7 +4,7 @@ ENV GOTOOLCHAIN=local
 COPY . .
 
 FROM source AS build
-RUN CGO_ENABLED=1 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/auth .
+RUN CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/auth .
 
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 RUN install -d -m 0700 -o 1000 -g 1000 /data

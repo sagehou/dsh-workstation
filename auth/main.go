@@ -25,115 +25,170 @@ import (
 var userPattern = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9_.@-]{0,63}$")
 
 func env(name, fallback string) string {
-	if value := os.Getenv(name); value != "" { return value }
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
 	return fallback
 }
 func duration(name, fallback string) int64 {
-	d, err := time.ParseDuration(env(name,fallback))
-	if err != nil || d < time.Minute || d > 30*24*time.Hour { panic("invalid session duration") }
-	return int64(d/time.Second)
+	d, err := time.ParseDuration(env(name, fallback))
+	if err != nil || d < time.Minute || d > 30*24*time.Hour {
+		panic("invalid session duration")
+	}
+	return int64(d / time.Second)
 }
 
 func run() error {
 	ctx := context.Background()
 	command := "serve"
-	if len(os.Args)>1 { command = os.Args[1] }
-	verifyAddr := env("AUTH_VERIFY_ADDR","172.30.242.3:8081")
+	if len(os.Args) > 1 {
+		command = os.Args[1]
+	}
+	verifyAddr := env("AUTH_VERIFY_ADDR", "172.30.242.3:8081")
 	if command == "health" {
-		client := &http.Client{Timeout:2*time.Second}
-		response,err := client.Get("http://"+verifyAddr+"/health")
-		if err != nil { return err }
+		client := &http.Client{Timeout: 2 * time.Second}
+		response, err := client.Get("http://" + verifyAddr + "/health")
+		if err != nil {
+			return err
+		}
 		response.Body.Close()
-		if response.StatusCode != 204 { return errors.New("auth not ready") }
+		if response.StatusCode != 204 {
+			return errors.New("auth not ready")
+		}
 		return nil
 	}
 	origin := os.Getenv("PUBLIC_ORIGIN")
-	u,err := url.Parse(origin)
-	if err != nil || u.Scheme != "https" || u.Hostname()=="" || u.User!=nil || origin!="https://"+u.Host {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || origin != "https://"+u.Host {
 		return errors.New("PUBLIC_ORIGIN must be a bare HTTPS origin")
 	}
-	box,err := loadKey(env("AUTH_KEY_FILE","/run/secrets/auth_key"))
-	if err != nil { return errors.New("could not load auth master key") }
-	s,err := openStore(env("AUTH_DB","/data/auth.sqlite"),box)
-	if err != nil { return errors.New("could not open auth store") }
+	box, err := loadKey(env("AUTH_KEY_FILE", "/run/secrets/auth_key"))
+	if err != nil {
+		return errors.New("could not load auth master key")
+	}
+	s, err := openStore(env("AUTH_DB", "/data/auth.sqlite"), box)
+	if err != nil {
+		return errors.New("could not open auth store")
+	}
 	defer s.db.Close()
 
 	switch command {
 	case "bootstrap":
-		_,err := s.account(ctx)
-		if !errors.Is(err,sql.ErrNoRows) { return errors.New("bootstrap is unavailable") }
-		if len(os.Args)!=3 || !userPattern.MatchString(os.Args[2]) { return errors.New("usage: workstation-auth bootstrap USER") }
+		_, err := s.account(ctx)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return errors.New("bootstrap is unavailable")
+		}
+		if len(os.Args) != 3 || !userPattern.MatchString(os.Args[2]) {
+			return errors.New("usage: workstation-auth bootstrap USER")
+		}
 		user := os.Args[2]
-		input := bufio.NewScanner(io.LimitReader(os.Stdin,4096))
+		input := bufio.NewScanner(io.LimitReader(os.Stdin, 4096))
 		line := func() string {
-			if !input.Scan() { return "" }
+			if !input.Scan() {
+				return ""
+			}
 			return strings.TrimSpace(input.Text())
 		}
 		var password, code string
 		var seed []byte
 		if term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Fprint(os.Stderr,"New password (at least 12 characters): ")
-			passwordBytes,err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprint(os.Stderr, "New password (at least 12 characters): ")
+			passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Fprintln(os.Stderr)
-			if err != nil { return errors.New("could not read password") }
+			if err != nil {
+				return errors.New("could not read password")
+			}
 			password = string(passwordBytes)
 			seed = random(20)
-			fmt.Printf("TOTP key: %s\n%s\n",totpEncoding.EncodeToString(seed),otpURI(user,origin,seed))
-			fmt.Fprint(os.Stderr,"Current TOTP code: ")
+			fmt.Printf("TOTP key: %s\n%s\n", totpEncoding.EncodeToString(seed), otpURI(user, origin, seed))
+			fmt.Fprint(os.Stderr, "Current TOTP code: ")
 			code = line()
 		} else {
 			// CI or an offline operator can pipe password, TOTP key and code.
-			if input.Scan() { password = input.Text() }
-			seed,err = totpEncoding.DecodeString(strings.ToUpper(line()))
-			if err != nil { return errors.New("invalid enrollment key") }
+			if input.Scan() {
+				password = input.Text()
+			}
+			seed, err = totpEncoding.DecodeString(strings.ToUpper(line()))
+			if err != nil {
+				return errors.New("invalid enrollment key")
+			}
 			code = line()
 		}
-		if len(password)<12 || len(password)>256 { return errors.New("invalid password length") }
-		codes,err := s.bootstrap(ctx,user,password,seed,code)
-		if err != nil { return errors.New("bootstrap failed; account unchanged") }
+		if len(password) < 12 || len(password) > 256 {
+			return errors.New("invalid password length")
+		}
+		codes, err := s.bootstrap(ctx, user, password, seed, code)
+		if err != nil {
+			return errors.New("bootstrap failed; account unchanged")
+		}
 		fmt.Println("Save these recovery codes now:")
-		for _,code := range codes { fmt.Println(code) }
+		for _, code := range codes {
+			fmt.Println(code)
+		}
 		return nil
-	case "enable","disable":
-		return s.change(ctx,"account_"+command,func(tx *sql.Tx) error {
-			if err := one(tx,ctx,"UPDATE account SET enabled=?, epoch=epoch+1 WHERE id=1",command=="enable"); err != nil { return err }
-			return write(tx,ctx,"DELETE FROM sessions; DELETE FROM challenges;")
+	case "enable", "disable":
+		return s.change(ctx, "account_"+command, func(tx *sql.Tx) error {
+			if err := one(tx, ctx, "UPDATE account SET enabled=?, epoch=epoch+1 WHERE id=1", command == "enable"); err != nil {
+				return err
+			}
+			return write(tx, ctx, "DELETE FROM sessions; DELETE FROM challenges;")
 		})
 	case "serve":
-	default: return errors.New("unknown auth command")
+	default:
+		return errors.New("unknown auth command")
 	}
-	a,err := s.account(ctx)
-	if err != nil { return errors.New("create the admin with bootstrap before starting Auth") }
-	if _,err = s.open(a.seed); err != nil { return errors.New("auth master key does not decrypt the existing TOTP seed") }
-	passkeys,err := webauthn.New(&webauthn.Config{
-		RPDisplayName:"DSH Workstation", RPID:u.Hostname(), RPOrigins:[]string{origin},
+	a, err := s.account(ctx)
+	if err != nil {
+		return errors.New("create the admin with bootstrap before starting Auth")
+	}
+	if _, err = s.open(a.seed); err != nil {
+		return errors.New("auth master key does not decrypt the existing TOTP seed")
+	}
+	passkeys, err := webauthn.New(&webauthn.Config{
+		RPDisplayName: "DSH Workstation", RPID: u.Hostname(), RPOrigins: []string{origin},
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
-			ResidentKey:protocol.ResidentKeyRequirementRequired, UserVerification:protocol.VerificationRequired,
+			ResidentKey: protocol.ResidentKeyRequirementRequired, UserVerification: protocol.VerificationRequired,
 		},
 	})
-	if err != nil { return errors.New("invalid WebAuthn configuration") }
-	max,err := strconv.Atoi(env("AUTH_MAX_SESSIONS","8"))
-	idle,absolute := duration("AUTH_IDLE","30m"),duration("AUTH_ABSOLUTE","12h")
-	if err != nil || max<1 || max>100 || idle>absolute { return errors.New("invalid session limits") }
-	g := &gateway{store:s,origin:origin,host:u.Host,edge:env("AUTH_EDGE_IP","172.30.242.2"),wa:passkeys,
-		idle:idle,absolute:absolute,maxSessions:max,hashSlots:make(chan struct{},2)}
-	if net.ParseIP(g.edge)==nil { return errors.New("invalid AUTH_EDGE_IP") }
-	if err := g.initBrowser(); err != nil { return err }
-
-	server := func(addr string,h http.HandlerFunc) *http.Server {
-		return &http.Server{Addr:addr, Handler:h, ReadHeaderTimeout:5*time.Second, ReadTimeout:12*time.Second, WriteTimeout:30*time.Second, IdleTimeout:60*time.Second, MaxHeaderBytes:32<<10}
+	if err != nil {
+		return errors.New("invalid WebAuthn configuration")
 	}
-	verify := server(verifyAddr,g.verify)
-	addr := env("AUTH_ADDR","172.30.242.3:8080")
-	listener,err := net.Listen("tcp",verifyAddr)
-	if err != nil { return err }
+	max, err := strconv.Atoi(env("AUTH_MAX_SESSIONS", "8"))
+	idle, absolute := duration("AUTH_IDLE", "30m"), duration("AUTH_ABSOLUTE", "12h")
+	if err != nil || max < 1 || max > 100 || idle > absolute {
+		return errors.New("invalid session limits")
+	}
+	g := &gateway{store: s, origin: origin, host: u.Host, edge: env("AUTH_EDGE_IP", "172.30.242.2"), wa: passkeys,
+		idle: idle, absolute: absolute, maxSessions: max, hashSlots: make(chan struct{}, 2)}
+	if net.ParseIP(g.edge) == nil {
+		return errors.New("invalid AUTH_EDGE_IP")
+	}
+	if err := g.initBrowser(); err != nil {
+		return err
+	}
+
+	server := func(addr string, h http.HandlerFunc) *http.Server {
+		return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 12 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	}
+	verify := server(verifyAddr, g.verify)
+	addr := env("AUTH_ADDR", "172.30.242.3:8080")
+	listener, err := net.Listen("tcp", verifyAddr)
+	if err != nil {
+		return err
+	}
 	go func() {
-		if err := verify.Serve(listener); err != nil { slog.Error("verification listener stopped"); os.Exit(1) }
+		if err := verify.Serve(listener); err != nil {
+			slog.Error("verification listener stopped")
+			os.Exit(1)
+		}
 	}()
 	slog.Info("Auth ready")
-	return server(addr,g.public).ListenAndServe()
+	return server(addr, g.public).ListenAndServe()
 }
 
 func main() {
-	if err := run(); err != nil { slog.Error("auth stopped","reason",err.Error()); os.Exit(1) }
+	if err := run(); err != nil {
+		slog.Error("auth stopped", "reason", err.Error())
+		os.Exit(1)
+	}
 }
