@@ -81,7 +81,6 @@ check() {
     workstation-ci-viewer node /m0/public/check.mjs "$1"
 }
 check gateway
-check browser
 compose stop auth
 restore_volume=dsh-workstation_ci-auth-restore
 docker volume create "$restore_volume" >/dev/null
@@ -92,8 +91,15 @@ cat > "$state/auth-restore.yml" <<'YAML'
 volumes:
   auth-data:
     name: dsh-workstation_ci-auth-restore
+    external: true
 YAML
-trap 'restore_compose down --volumes --remove-orphans; compose down --volumes --remove-orphans' EXIT
+restore_cleanup() {
+  if (( $? != 0 )); then restore_compose logs --no-color --tail=15 edge auth provider || true; fi
+  restore_compose down --volumes --remove-orphans
+  compose down --volumes --remove-orphans
+  docker volume rm "$restore_volume" >/dev/null
+}
+trap restore_cleanup EXIT
 # The archive is created only while SQLite is stopped, and stays on the runner.
 docker run --rm --network none --user 0:0 --entrypoint sh \
   -v dsh-workstation_auth-data:/source:ro -v "$restore_volume":/target \
@@ -103,3 +109,4 @@ docker run --rm --network none --user 0:0 --entrypoint sh \
   '
 restore_compose up -d --no-build --wait --wait-timeout 60 --force-recreate auth
 check restore
+check browser

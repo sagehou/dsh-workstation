@@ -84,6 +84,7 @@ try {
     await page.getByLabel('动态验证码').fill(code(1))
     await submit(page, '登录', '/_auth/totp')
     await page.waitForURL('**/_auth/account')
+    await context.storageState({ path: '/ci-state/browser.json' })
     console.log('Auth backup restored to a fresh volume: session persisted; revoke-all closed DSH and Selkies sockets; Passkey and password/TOTP logins both passed')
   } else if (phase === 'gateway') {
     await page.goto(root + '/')
@@ -119,16 +120,19 @@ try {
 
   if (phase === 'browser') {
     const desktop = await context.newPage()
-    let frames = 0
+    let video = false
     desktop.on('websocket', ws => {
-      if (new URL(ws.url()).pathname === '/browser/api/websockets') ws.on('framereceived', () => frames++)
+      if (new URL(ws.url()).pathname !== '/browser/api/websockets') return
+      ws.on('framereceived', ({ payload }) => {
+        if (Buffer.isBuffer(payload) && [0x03, 0x04].includes(payload[0])) video = true
+      })
     })
     const response = await desktop.goto(root + '/_auth/browser')
     assert.ok(response?.ok(), 'Selkies page failed')
     assert.equal(new URL(desktop.url()).pathname, '/browser/')
     assert.ok(new URL(desktop.url()).hash.startsWith('#token='))
-    await until('Selkies data frames on the authenticated WebSocket', () => frames >= 3, 40_000)
-    console.log('Same origin: authenticated /browser/ receives Selkies WebSocket data frames')
+    await until('Selkies video on the authenticated WebSocket', () => video, 40_000)
+    console.log('Same origin: authenticated /browser/ receives Selkies WebSocket video')
     await desktop.close()
 
     async function rpc(endpoint, request) {
@@ -139,7 +143,11 @@ try {
       })
       assert.equal(response.status(), 200, endpoint + ' transport')
       const result = await response.json()
-      if (!result.result?.ok) throw Error(endpoint + ' rejected: ' + (result.result?.error?.code ?? 'bad envelope'))
+      if (!result.result?.ok) {
+        const error = result.result?.error
+        const detail = String(error?.message ?? '').replace(/https?:\/\/[^\s"']+/gi, '[url]').slice(0, 220)
+        throw Error(endpoint + ' rejected: ' + (error?.code ?? 'bad envelope') + ' ' + detail)
+      }
       return result.result.value
     }
     async function send(sessionId, label, operation, args = {}) {
@@ -188,6 +196,11 @@ try {
     await action('接管浏览器')
     console.log('Official Web RPC + MCP: two live sessions, two tabs, cross-session and stale-generation calls rejected, first tab retained')
   }
+} catch (error) {
+  // Playwright's request call log can contain Cookie or Authorization headers.
+  const message = String(error?.message).split('\n', 1)[0]
+  console.error(phase + ': ' + message.replace(/([?#]token=)[^\s"']+/gi, '$1[redacted]'))
+  process.exitCode = 1
 } finally {
   await browser.close()
 }
