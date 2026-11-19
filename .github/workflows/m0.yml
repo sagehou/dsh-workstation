@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   runtime:
-    if: github.event.head_commit.message != 'test: run approved M0 native PTY build'
+    if: "github.event.head_commit.message != 'test: run approved M0 native PTY build'"
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -29,7 +29,7 @@ jobs:
           name: m0-runtime
           path: evidence/runtime.log
   browser:
-    if: github.event.head_commit.message != 'test: run approved M0 native PTY build'
+    if: "github.event.head_commit.message != 'test: run approved M0 native PTY build'"
     runs-on: ubuntu-24.04
     timeout-minutes: 18
     steps:
@@ -46,8 +46,26 @@ jobs:
         with:
           name: m0-browser
           path: evidence/browser.log
+  selkies-input:
+    if: "github.event.head_commit.message != 'test: run approved M0 native PTY build'"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Gate C Selkies input boundary
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          bash prototypes/m0/browser/run.sh --exclusive 2>&1 | tee evidence/selkies-input.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: m0-selkies-input
+          path: evidence/selkies-input.log
   native:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'test: run approved M0 native PTY build'
+    if: "github.event_name == 'push' && github.event.head_commit.message == 'test: run approved M0 native PTY build'"
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
