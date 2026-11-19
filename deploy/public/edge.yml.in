@@ -37,7 +37,7 @@ http:
       headers:
         stsSeconds: 31536000
         contentTypeNosniff: true
-        referrerPolicy: no-referrer
+        referrerPolicy: same-origin
         customRequestHeaders:
           X-Forwarded-User: ""
           Remote-User: ""

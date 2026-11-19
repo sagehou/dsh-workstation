@@ -20,6 +20,14 @@ async function until(description, attempt, ms = 28_000) {
   throw Error('Timed out: ' + description)
 }
 
+async function submit(page, label, path, status = 303) {
+  const result = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'POST')
+  await page.getByRole('button', { name: label, exact: true }).click()
+  const response = await result
+  const origin = await response.request().headerValue('origin')
+  assert.equal(response.status(), status, path + ' (Origin: ' + (origin === root ? 'same origin' : origin ? 'other' : 'missing') + ')')
+}
+
 try {
   const page = await context.newPage()
   const cdp = await context.newCDPSession(page)
@@ -72,9 +80,9 @@ try {
     await page.goto(root + '/_auth/login?next=%2F_auth%2Faccount')
     await page.getByLabel('用户名').fill('operator')
     await page.getByLabel('密码', { exact: true }).fill(password())
-    await page.getByRole('button', { name: '验证密码' }).click()
+    await submit(page, '验证密码', '/_auth/password')
     await page.getByLabel('动态验证码').fill(code(1))
-    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await submit(page, '登录', '/_auth/totp')
     await page.waitForURL('**/_auth/account')
     console.log('Auth backup restored to a fresh volume: session persisted; revoke-all closed DSH and Selkies sockets; Passkey and password/TOTP logins both passed')
   } else if (phase === 'gateway') {
@@ -82,12 +90,12 @@ try {
     await page.waitForURL('**/_auth/login?*')
     await page.getByLabel('用户名').fill('operator')
     await page.getByLabel('密码', { exact: true }).fill(password())
-    await page.getByRole('button', { name: '验证密码' }).click()
+    await submit(page, '验证密码', '/_auth/password')
     await page.waitForURL('**/_auth/totp?*')
     assert.equal(await page.locator('[name=password]').count(), 0)
     assert.ok(!(await context.cookies()).some(c => c.name === '__Host-dsh_session'))
     await page.getByLabel('动态验证码').fill(code())
-    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await submit(page, '登录', '/_auth/totp')
     await page.waitForURL(root + '/')
     const cookies = await context.cookies()
     for (const name of ['__Host-dsh_session', 'dsh-auth-']) {
