@@ -1,0 +1,101 @@
+# Paths are relative to ../browser/compose.yml, the first Compose file.
+x-runtime: &runtime
+  image: dsh-m0-provider-runtime
+  build: ../runtime
+  environment:
+    DSH_HOME: /dsh-home
+    DSH_TELEMETRY_DISABLED: "1"
+    CI: "true"
+  volumes:
+    - dsh:/dsh-home
+    - workspace:/workspace
+    - ../runtime:/runtime:ro
+    - ../provider:/m0/provider:ro
+
+services:
+  chromium:
+    environment:
+      CHROME_CLI: --user-data-dir=/config/m0-chromium --remote-debugging-port=9222 --no-first-run http://witness:8081/
+      SELKIES_ENABLE_SHARING: "false"
+      SELKIES_FILE_TRANSFERS: none
+      SELKIES_ENABLE_RESIZE: "false"
+
+  provider:
+    build: ../provider
+    init: true
+    command: ["node", "/m0/provider/server.mjs"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ../provider:/m0/provider:ro
+      - fence:/state
+    secrets: [m0_master, m0_controller, m0_sentinel, m0_admin]
+    networks:
+      cdp: {}
+      mcp:
+        ipv4_address: 172.30.232.2
+      control:
+        ipv4_address: 172.30.233.2
+
+  dsh:
+    <<: *runtime
+    init: true
+    command: ["sleep", "infinity"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [mcp]
+
+  install-dsh:
+    <<: *runtime
+    profiles: [setup]
+    command: ["bash", "/runtime/runtime.sh", "install", "0.2.2-rc.1"]
+    networks: [setup]
+
+  witness:
+    image: node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
+    user: node
+    command: ["node", "/m0/provider/witness.mjs"]
+    volumes:
+      - ../provider:/m0/provider:ro
+    networks: [web]
+
+  viewer:
+    build:
+      context: .
+      target: probe
+    init: true
+    command: ["sleep", "infinity"]
+    volumes:
+      - ../provider:/m0/provider:ro
+    secrets: [m0_controller, m0_admin]
+    networks: [web, control]
+
+networks:
+  mcp:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam:
+      config:
+        - subnet: 172.30.232.0/24
+  control:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam:
+      config:
+        - subnet: 172.30.233.0/24
+  setup: {}
+
+secrets:
+  m0_controller:
+    file: ${M0_CONTROLLER_FILE:?create disposable secrets via provider/run.sh}
+  m0_sentinel:
+    file: ${M0_SENTINEL_FILE:?create disposable secrets via provider/run.sh}
+  m0_admin:
+    file: ${M0_ADMIN_FILE:?create disposable secrets via provider/run.sh}
+
+volumes:
+  dsh:
+  workspace:
+  fence:
