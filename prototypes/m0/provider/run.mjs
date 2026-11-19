@@ -177,6 +177,7 @@ try {
     await assert.rejects(fetch('http://' + endpoint + '/json/version', { signal: AbortSignal.timeout(1200) }), 'host reached private endpoint')
   }
   compose('exec', '-T', 'dsh', 'node', '/m0/provider/agent.mjs', '--network')
+  assert.equal(await viewer.call('no-cdp'), true, 'Selkies web peer reached Chromium CDP')
   await recover()
   console.log('CDP bridge endpoints: Chromium/relay and Provider only; Provider alone attached to Chromium 156.0.8078.79 (CDP 1.3)')
 

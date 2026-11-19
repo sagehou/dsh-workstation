@@ -18,7 +18,7 @@ cleanup() {
 }
 trap cleanup EXIT
 compose build provider dsh viewer
-compose run --rm --no-deps --no-build -T install-dsh
+compose run --rm --no-deps -T install-dsh
 compose up --no-build -d fixture witness chromium cdp-relay edge provider dsh viewer
 
 for service in chromium cdp-relay provider edge dsh; do

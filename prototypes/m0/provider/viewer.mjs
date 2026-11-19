@@ -14,6 +14,15 @@ const input = createInterface({ input: process.stdin })
 
 async function command(method, args) {
   switch (method) {
+    case 'no-cdp': {
+      for (const host of ['172.30.231.2:9223', 'chromium:9223', 'chromium:9222']) {
+        try {
+          await fetch('http://' + host + '/json/version', { signal: AbortSignal.timeout(1200) })
+          return false
+        } catch {}
+      }
+      return true
+    }
     case 'connect': {
       const auth = await context.request.get(origin + '/__m0/bootstrap', { timeout: 4000 })
       if (auth.status() !== 204) throw Error('fixture auth unavailable')

@@ -74,8 +74,8 @@ async function recover() {
     if (page.url() !== fixture) await page.goto(fixture, { timeout: 5000 })
     await page.bringToFront()
     await input(false)
-    check(browser.isConnected(), 'BROWSER_LOST')
     await rm(fencePath, { force: true })
+    check(browser.isConnected(), 'BROWSER_LOST')
     state = 'HUMAN'
     reason = 'RECOVERED'
     return { state, browser: info.Browser, protocol: info['Protocol-Version'] }
@@ -115,8 +115,8 @@ async function handover(cause) {
     check(state === 'HANDOVER' && browser.isConnected(), 'ACTION_UNCERTAIN')
     lease = undefined
     await input(false)
-    check(state === 'HANDOVER' && browser.isConnected(), 'BROWSER_LOST')
     await rm(fencePath, { force: true })
+    check(state === 'HANDOVER' && browser.isConnected(), 'BROWSER_LOST')
     state = 'HUMAN'
     return { state }
   } catch (error) {
