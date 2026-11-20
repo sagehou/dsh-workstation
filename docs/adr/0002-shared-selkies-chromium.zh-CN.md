@@ -1,26 +1,26 @@
-# ADR-0002：人工和 Agent 共享 Selkies Chromium
+# ADR-0002 — 人工和 Agent 共享 Selkies Chromium
 
 [English](0002-shared-selkies-chromium.md) · 简体中文
 
-状态：已接受，仍需 M0 实证。
+**已接受，仍需 M0 实证**
 
 ## 背景
 
-工作台需要支持完整的人工浏览和 Agent 自动化，两者必须共享登录状态、标签页、Cookie 和浏览器配置目录。
+人工操作和 Agent 浏览器自动化需要共享登录状态、标签页、Cookie 和浏览器配置。
 
 ## 决策
 
-- 运行一个带 Selkies 的 LinuxServer Chromium 容器，使用同一份持久化浏览器配置目录。
-- 人工通过同源的 `/browser/` 使用 Selkies。
-- Agent 通过 CDP/Playwright 连接现有 Chromium 进程。
-- 不为 Agent 启动第二个浏览器。
-- 不把 CDP 暴露到宿主机或公网接口。
-- 通过服务端独占租约控制浏览器。
-- Agent 持有控制权时，必须在 Selkies 输入边界拦截人工输入。
+| 领域 | 选择 |
+| --- | --- |
+| 浏览器 | 一个带 Selkies 的 LinuxServer Chromium 容器和一份持久化配置。 |
+| 人工访问 | 通过同源 `/browser/` 使用 Selkies。 |
+| Agent 访问 | 用 CDP/Playwright 连接现有进程。CDP 不发布到宿主机和公网接口。 |
+| 控制权 | 服务端独占租约。Agent 控制时在 Selkies 输入边界拦截人工输入。 |
 
 ## 后果和验收门槛
 
-- 必须针对固定 Chromium 版本测试 Playwright 的 CDP 限制。
-- 必须验证 Selkies 子路径、iframe CSP、WebSocket 和 Traefik 的行为。
-- Agent 命令和 Selkies 人工输入都实际受控时，才能认为实现了独占模式。
-- 如果不维护集成层就无法可靠拦截 Selkies 输入，停下来请用户做架构决策。不要用界面状态模拟独占。
+- 按固定版本验证 Playwright 的 CDP 限制、Selkies 子路径、iframe CSP、WebSocket 和 Traefik。
+- 宣称独占模式前，必须验证 Agent 命令和实际人工输入都受控制。
+- 如果可靠的输入拦截需要维护集成层，先停下来做架构决策。界面状态无法代替实际拦截。
+
+[M0 结果](../roadmap/M0-evidence.zh-CN.md#b--同一个浏览器进程与配置目录) · [独占控制结果](../roadmap/M0-provider-evidence.zh-CN.md#实际结果)

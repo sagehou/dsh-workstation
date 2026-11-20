@@ -2,79 +2,161 @@
 
 English · [简体中文](README.zh-CN.md)
 
-Use this stack for one trusted operator on Linux x86-64 with rootful Docker Engine 28+ and Compose v2. It reuses a Traefik container on the same Docker host with an HTTPS entrypoint and a directory watched by the file provider. GitHub Actions uses Traefik `3.7.19`. Traefik continues to publish ports 80 and 443 and manage public certificates. Point the domain's DNS record at that Traefik host. The two subnets in [compose.yml](../../compose.yml) must be free on the host.
+[Install](#install) · [Use the browser](#use-the-browser) · [Maintain](#maintain) · [Back up and restore](#back-up-and-restore)
 
-Run the commands as a non-root Docker operator with GitHub CLI access to the repository. Set the domain, a trusted Docker network connected to Traefik, the Traefik container, and the host directory watched by its file provider. Use the entrypoint and certificate resolver names configured in Traefik. Set `WORKSTATION_TRAEFIK_RESOLVER=''` to use an HTTPS entrypoint that already provides the certificate. The script reads Traefik's IPv4 address from the selected network, and Auth uses that exact address. The [GitHub Actions artifact](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/artifacts/14607841816) contains the images built from the stated commit.
+## Before you start
+
+- Use a **Linux amd64** host with rootful Docker Engine 28+ and Compose v2. Use a non-root user with Docker access and an authenticated GitHub CLI.
+- Point **DNS** at the Traefik host. Traefik serves public ports 80 and 443 and manages the certificates.
+- Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. CI uses Traefik `3.7.19`. [Verification](../../docs/roadmap/public-compose.md)
+- Check that neither **Docker subnet** overlaps your host routes. [Compose](../../compose.yml)
+
+## Install
+
+Run these steps in order on the deployment host, in the same shell.
+
+### 1. Load the verified images
 
 ```bash
-(
-  set -e
-  domain='workstation.example.net'
-  proxy='proxy'
-  traefik='traefik'
-  traefik_dynamic='/srv/traefik/dynamic'
+gh repo clone sagehou/dsh-workstation && cd dsh-workstation
 
-  gh repo clone sagehou/dsh-workstation
-  cd dsh-workstation
-
-  images_dir="$(mktemp -d)"
-  gh run download 44688814854 --repo sagehou/dsh-workstation \
-    --name public-compose-linux-amd64 --dir "$images_dir"
-  release_commit='333e6f332ad054723ca32c8b9436c8109bb62ad4'
-  test "$(cat "$images_dir/source-commit")" = "$release_commit"
-  git switch --detach "$release_commit"
+images_dir="$(mktemp -d)"
+release_commit='333e6f332ad054723ca32c8b9436c8109bb62ad4'
+gh run download 44688814854 --repo sagehou/dsh-workstation \
+  --name public-compose-linux-amd64 --dir "$images_dir" &&
+  test "$(cat "$images_dir/source-commit")" = "$release_commit" &&
+  git switch --detach "$release_commit" &&
   (
-    cd "$images_dir"
-    sha256sum -c workstation-images-linux-amd64.sha256
+    cd "$images_dir" &&
+    sha256sum -c workstation-images-linux-amd64.sha256 &&
     docker load -i workstation-images-linux-amd64.tar.gz
   )
-
-  WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-    bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
-
-  docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap admin
-  docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
-  docker network connect dsh-workstation_workstation "$traefik"
-  docker network connect dsh-workstation_browser "$traefik"
-  install -m 0644 .workstation/edge/routes.yml "$traefik_dynamic/.dsh-workstation.tmp"
-  mv "$traefik_dynamic/.dsh-workstation.tmp" "$traefik_dynamic/dsh-workstation.yml"
-  docker compose --env-file .env.public ps
-)
 ```
 
-Join the two workstation networks in Traefik's own Compose configuration as external networks if you regularly recreate that container. If its IP on the proxy network changes, rerun `init.sh` with the same domain and arguments and run `docker compose --env-file .env.public up -d --no-build auth` to refresh the trusted peer. Keep the existing TLS entrypoint and resolver settings when rerunning the initializer.
+[Image archive](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/artifacts/14607841816)
 
-For an existing installation, stop the previous Compose with `down` before switching commits. Keep `.env.public`, `.workstation/` and the named volumes, run the new initializer with the same domain, then skip the admin bootstrap. Existing DSH and Chromium data stay on their original volumes. If Chromium sees a stale lock from the old container hostname, confirm the old Chromium has stopped and remove only the `SingletonLock`, `SingletonSocket` and `SingletonCookie` symlinks in `/config/chromium` on the browser profile volume before starting the new container. [Chromium profile locking](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
+### 2. Set the domain and Traefik values
 
-If the image artifact expires, run [Public Compose](../../.github/workflows/public-compose.yml) on the intended revision and use the successful run ID and the matching `source-commit` in the example.
+Replace the example values below. The initializer records Traefik's IPv4 address on the chosen network and generates the routes file. Set `WORKSTATION_TRAEFIK_RESOLVER=''` if the HTTPS entrypoint already provides a certificate.
 
-Bootstrap prompts for a new password and displays an enrollment key. Add the key in a TOTP authenticator, enter its current code and save the printed recovery codes offline. The bootstrap is disabled after the first account is created. The enrollment code itself cannot be used again; wait for the authenticator to show a new code before signing in at `https://<domain>/`. Supply the DeepSeek key in official DSH **Settings → Models**. Login and credential management are at `/_auth/account`; a separate Passkey login is available after registering one there. Password-based security changes require a fresh two-step login after the five-minute step-up window expires.
+```bash
+domain='workstation.example.net'
+proxy='proxy'
+traefik='traefik'
+traefik_dynamic='/srv/traefik/dynamic'
 
-The first Runtime start installs official DSH `0.2.2-rc.1` and the workstation Bundle into the persistent Web Profile through the official Plugin Manager. Runtime and Profile installation keep package lifecycle scripts disabled. The Bundle is verified with this DSH version; leave it pinned until another version is validated against it.
+WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
+```
 
-The desktop opens through `/_auth/browser` and streams at `/browser/` on the same origin. The workstation passes the desktop credential without requiring a separate login. Use `/_auth/control` to grant a live DSH session a lease of up to 120 seconds. The first grant creates a tab in the same Chromium profile; later grants to that live session reuse its tab. Release the mouse and keys before granting. Use **接管浏览器** to stop admission of new Agent calls, drain the pending call and return control.
+### 3. Create the administrator
 
-Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins, for example `https://www.example.org,https://docs.example.com`. Recreate the Provider after changing it. An empty list allows humans to browse but admits no Agent navigation, reads or clicks. The Agent uses `mcp__browser__lease_status` to get the current generation before calling `navigate`, `read` or `click`. The origin list bounds commands and returned page text. The Chromium profile keeps normal browser networking, including page scripts and redirects; use trusted origins. Tabs share cookies, so this is a workflow boundary for one operator.
+```bash
+docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap admin
+```
 
-If the Agent's connection or tab is lost, create a new DSH session and grant again. To keep using an existing conversation, restart the Runtime and resume that conversation before granting. The new connection gets a new tab in the same persistent Chromium profile. If the Provider cannot establish that an in-flight operation ended, it refuses a new grant to that Chromium process. Recreate Chromium and its relay together, preserving the profile volume and Chromium hostname:
+1. Set the password.
+2. Add the displayed TOTP key to your authenticator and enter the current code.
+3. Save the displayed recovery codes offline. Bootstrap closes after the first account is created.
 
-```sh
+### 4. Start Compose and add the routes
+
+Connect Traefik once to each workstation network. The routes file goes in the host directory watched by Traefik.
+
+```bash
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360 &&
+  docker network connect dsh-workstation_workstation "$traefik" &&
+  docker network connect dsh-workstation_browser "$traefik" &&
+  install -m 0644 .workstation/edge/routes.yml "$traefik_dynamic/.dsh-workstation.tmp" &&
+  mv "$traefik_dynamic/.dsh-workstation.tmp" "$traefik_dynamic/dsh-workstation.yml" &&
+  docker compose --env-file .env.public ps
+```
+
+### 5. Sign in
+
+1. Open `https://<domain>/`.
+2. Sign in as `admin` with the password and a fresh TOTP code. The enrollment code has already been used.
+3. Set the DeepSeek API key in DSH **Settings → Models**.
+4. Optionally register a Passkey at `/_auth/account`. You can then use the separate Passkey login.
+
+## Use the browser
+
+| To | Open or choose |
+| --- | --- |
+| Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
+| Let an Agent use a tab | Open `/_auth/control`, select a live DSH session, and grant a lease for up to 120 seconds. Release the mouse buttons and keys first. The first grant creates a tab, and later grants reuse the tab for that live session. |
+| Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
+| Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate the Provider. An empty list leaves browsing to the operator. |
+
+The Agent gets the current generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. The allowlist limits those tools and the page text they return. Chromium still handles scripts and redirects normally, and tabs share cookies. Use trusted origins.
+
+For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
+
+## Maintain
+
+### Traefik
+
+- To retain the two workstation networks across Traefik recreation, declare them as external networks in Traefik's Compose.
+- If Traefik's IP on the proxy network changes, rerun the initializer with the same domain, entrypoint, and resolver. Then run `docker compose --env-file .env.public up -d --no-build auth`.
+
+### Browser recovery
+
+If the Provider cannot confirm that a pending browser operation ended, it rejects new grants to that Chromium process. Recreate Chromium and the relay on the same profile volume and keep the configured hostname.
+
+```bash
 docker compose --env-file .env.public up -d --no-build --force-recreate chromium cdp-relay
 ```
 
-The Provider attempts to recover its attachment automatically after browser process loss. If the control page still reports DISCONNECTED, use **连接浏览器** after the replacement Chromium is ready.
+The Provider tries to reconnect automatically. If the control page still shows `DISCONNECTED` after Chromium is ready, choose **连接浏览器**.
 
-The session defaults are 30 minutes idle, 12 hours absolute and eight sessions. Optional `AUTH_IDLE`, `AUTH_ABSOLUTE` and `AUTH_MAX_SESSIONS` settings go in `.env.public`. HTTP requests and a new WebSocket handshake update idle time. Established DSH and Selkies WebSockets check the session every two seconds and close on expiry or revocation. The account page can revoke one or all sessions. The host operator can disable or re-enable the account with the same bootstrap service command, replacing `bootstrap admin` with `disable` or `enable`; both invalidate existing sessions.
+### Account and sessions
 
-Keep `.workstation/` private and back it up separately from the database; do not regenerate it over a live installation. It contains the TOTP encryption key, service credentials, and internal TLS keys. Keep the public domain the same when restoring Passkeys. Stop the stack before snapshotting its named volumes. Keep `dsh-home`, `workspace`, `browser-profile`, `auth-data` and `provider-state`. Session launch URLs are regenerated. Do not use `down -v` on a deployment you want to preserve. For example, after `docker compose --env-file .env.public stop`, archive Auth's volume from the deployed provider image to a private location:
+| Setting in `.env.public` | Default |
+| --- | --- |
+| `AUTH_IDLE` | 30 minutes |
+| `AUTH_ABSOLUTE` | 12 hours |
+| `AUTH_MAX_SESSIONS` | 8 |
 
-```sh
-umask 077
-docker run --rm --network none --user 0:0 --entrypoint tar \
-  -v dsh-workstation_auth-data:/data:ro dsh-workstation-provider:0.2.0 \
-  --numeric-owner -C /data -cf - . > auth-data.tar
+- HTTP requests and new WebSocket handshakes refresh the idle timer. Open DSH and Selkies WebSockets check the session every two seconds and close on expiry or revocation.
+- Revoke one or all sessions at `/_auth/account`. For password-based security changes, repeat password and TOTP if the five-minute step-up window has passed.
+- To disable or enable the account from the host, replace `bootstrap admin` in the administrator command with `disable` or `enable`. Both commands invalidate current sessions.
+
+### DSH versions
+
+On first start, Runtime installs official DSH `0.2.2-rc.1`. The official Plugin Manager adds the Workstation Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
+
+Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenance commands against the public Compose with `--env-file .env.public`. A version rollback changes the selected install. Restoring migrated data requires a matching backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
+
+### Replace the original standalone stack
+
+1. Use `down` from the old checkout. Keep the named volumes, `.env.public`, and `.workstation/`.
+2. Load the new images and rerun the initializer with the same domain.
+3. Skip admin bootstrap and start the new Compose.
+
+If the old hostname left a browser profile lock, confirm that the old Chromium has stopped before removing the `SingletonLock`, `SingletonSocket`, and `SingletonCookie` symlinks in `/config/chromium` on the profile volume. [Chromium profile locking](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
+
+### Refresh an expired image archive
+
+Run **Public Compose** for the intended revision on GitHub Actions. Use the successful run ID and its `source-commit` in step 1. [Workflow](../../.github/workflows/public-compose.yml)
+
+## Back up and restore
+
+| Keep | Why |
+| --- | --- |
+| `.workstation/`, backed up separately from SQLite | TOTP encryption key, service credentials, and internal TLS keys. Keep the existing directory when reinstalling. |
+| Named volumes `dsh-home`, `workspace`, `browser-profile`, `auth-data`, and `provider-state` | DSH and browser state, Auth, and Provider state. Stop Compose before taking snapshots and avoid `down -v` on volumes you need. |
+
+For an Auth backup, archive the stopped volume to a private location.
+
+```bash
+docker compose --env-file .env.public stop && (
+  umask 077
+  docker run --rm --network none --user 0:0 --entrypoint tar \
+    -v dsh-workstation_auth-data:/data:ro dsh-workstation-provider:0.2.0 \
+    --numeric-owner -C /data -cf - . > auth-data.tar
+)
 ```
 
-Restore with the stack stopped into an empty `auth-data` volume using the matching archive and `.workstation/secrets/auth-key`. Preserve the tar file's numeric owners and modes. Back up DSH_HOME before changing any Profile or version. Use [the Runtime maintenance commands](../README.md#upgrade-and-rollback) with `--env-file .env.public` and the public Compose. Runtime rollback changes the selected npm installation; a data migration requires a matching backup.
+Restore into an empty `auth-data` volume with the stack stopped. Use the matching `.workstation/secrets/auth-key`, preserve numeric owners and modes, and keep the public domain for Passkeys. The Runtime generates fresh launch URLs.
 
-Only Traefik has published ports. The full held-input handoff and the native DSH Sidebar are deferred. The browser remains usable in a separate tab now. See [test evidence and remaining limits](../../docs/roadmap/public-compose.md).
+Only Traefik publishes ports. The desktop opens in its own tab while native Sidebar and release of held input during handoff are tracked in [#1](https://github.com/sagehou/dsh-workstation/issues/1). [Test evidence](../../docs/roadmap/public-compose.md)

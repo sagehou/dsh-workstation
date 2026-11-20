@@ -4,96 +4,83 @@
 
 ## 组件边界
 
-### DSH Runtime 镜像
+| 组件 | 职责 |
+| --- | --- |
+| Runtime 镜像 | 提供 Node.js、固定版本 pnpm、Git/SSH、CA 证书和常用原生构建工具。DSH npm 安装保存在持久化存储，由专用 CLI 或 API 管理。 |
+| Runtime 管理器 | 写操作持锁。每个确切版本独立安装，验证后原子切换指针，检查启动，失败则回滚。活动安装保持完整。 |
+| DSH Profile | 由官方 CLI 和 Plugin Manager 管理。沿用固定版本目录结构，将 DSH_HOME 放在同一文件系统，让 pnpm 链接可访问 Store。 |
+| Go Auth | 处理密码、TOTP、WebAuthn、恢复码、会话、CSRF、审计、限流、ForwardAuth 和浏览器租约协调。状态存入 SQLite WAL。Agent 由 Runtime 执行。 |
+| Workstation 插件 | 原生右侧栏是产品目标。使用公开客户端 API 嵌入同源 `/browser/`，并调用认证或浏览器控制接口。依赖未公开内部实现须有 ADR 依据，保留官方 DSH 核心。 |
+| 浏览器 Provider | 接收官方 MCP 调用，验证租约，通过 CDP 连接 Chromium。 |
+| Chromium 和 Selkies | 使用一个 Chromium 进程和一份持久化配置。人工通过 Selkies 操作，Provider 自动化控制同一个浏览器。 |
+| Traefik | 路由公网 HTTPS 请求，由 Go Auth 验证 DSH 和 Selkies 的访问。 |
 
-可复用的运行环境镜像，提供兼容的 Node.js、固定版本的 pnpm、Git/SSH、CA 证书和常见原生构建工具链。镜像不包含固定 DSH npm 版本；各版本保存在持久化存储中，由专用 CLI 或 API 管理。
+## 公网 Compose 网络
 
-### Runtime 管理器
+```mermaid
+flowchart LR
+    Person["使用者"] -->|"HTTPS"| Edge["已有 Traefik"]
+    Edge -->|"认证和 WebSocket"| Auth["Go Auth"]
+    Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
+    Edge -->|"桌面 HTTP"| Browser["Chromium 和 Selkies"]
+    Auth -->|"租约管理"| Provider["浏览器 Provider"]
+    DSH -->|"官方 MCP"| Provider
+    Provider -->|"Unix socket"| Relay["CDP 中继"]
+    Relay -->|"Chromium 回环"| Browser
+```
 
-将官方 DSH npm 包的确切版本安装到 DSH_HOME 中相互独立的目录，先验证，再原子切换当前版本指针，检查服务启动健康，失败时回滚。文件系统锁或进程锁须保证写操作串行。不得就地修改活动版本。
+| 网络 | 端点 |
+| --- | --- |
+| 已有代理网 | Traefik 与 Auth。Auth 的公开和校验监听器绑定在这张网。 |
+| `workstation` | Runtime、MCP 监听器，以及 Traefik 和 Auth 连接 DSH 的路径。 |
+| `browser` | Chromium、Provider 管理监听器，以及 Traefik 和 Auth 连接 Selkies 的路径。 |
 
-### DSH Profile
+中继与 Chromium 共用网络命名空间。仅中继和 Provider 挂载 CDP socket 卷。Auth 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[已验证拓扑](roadmap/public-compose.zh-CN.md)
 
-由官方 DSH CLI 和 Plugin Manager 管理。保留固定上游版本的实际目录结构。将 DSH_HOME 整体挂载到同一个持久化卷，避免把 pnpm 符号链接和 Store 分到不同文件系统。工作区单独挂载。
+## 路由
 
-### 认证网关
+| 路径 | 上游和访问方式 |
+| --- | --- |
+| `/` | DSH，由 ForwardAuth 保护。 |
+| `/browser/` | Selkies，使用同一 ForwardAuth，由 Traefik 保留前缀。 |
+| `/_auth/` | 登录和账户界面及 API。这些路由不经过自己的 ForwardAuth。 |
+| 内部校验端点 | Go Auth，信任 Traefik 对端。 |
 
-使用 SQLite WAL 的 Go HTTP 服务。负责密码、TOTP、WebAuthn 流程，恢复码，不透明会话，CSRF 防护，审计，限流，ForwardAuth 校验和浏览器控制租约协调。不会执行 DSH Agent。
-
-### Workstation 插件
-
-DSH 客户端插件，由所选版本的公开 API 注册右侧栏浏览器桌面标签页。嵌入同源 `/browser/`，并与认证服务和浏览器控制 API 通信。不得修改 DSH 核心；依赖未公开内部实现须有 ADR 依据。
-
-### Chromium
-
-LinuxServer Chromium/Selkies 使用同一个 Chromium 进程和同一份持久化浏览器配置目录。人工通过 Selkies 操作，Agent 通过 CDP 自动化。始终共享同一个浏览器进程。CDP 仅在 Docker 私网可用，不发布到宿主机或公网。
-
-### Traefik
-
-- `/` → DSH，使用 ForwardAuth。
-- `/browser/` → Chromium Selkies，使用同一 ForwardAuth，保留前缀。
-- `/_auth/` → 公开登录及账户界面和 API，不应用自身的 ForwardAuth。
-- 内部 ForwardAuth 校验端点 → 认证服务，只允许 Traefik 访问。
-
-对子路径支持、响应头、CSP、WebSocket 和登录行为的判断，须经确切上游版本的测试。
+按确切上游版本验证子路径、响应头、CSP、WebSocket 和登录行为。
 
 ## 数据归属和持久化
 
-- DSH_HOME：Runtime 版本、Profile 清单、锁文件、node_modules、pnpm Store、会话、设置、凭据和插件配置。使用同一个持久化卷。
-- 工作区：项目文件，使用独立卷或绑定挂载。
-- Chromium `/config`：浏览器配置目录、Cookie、扩展和下载，持久化。
-- 认证数据：SQLite 数据库，使用独立卷。
-- 认证密钥：Docker secrets 或只读密钥文件，与数据库分开存储和备份。
-- 部署配置：保存在 Git，不提交密钥。
+| 存储 | 内容 |
+| --- | --- |
+| DSH_HOME | Runtime 版本、Profile 清单和锁文件、node_modules、pnpm Store、会话、设置、凭据和插件配置。使用同一个持久化卷。 |
+| 工作区 | 项目文件，使用独立卷或绑定挂载。 |
+| Chromium `/config` | 持久化浏览器配置、Cookie、扩展和下载。 |
+| Auth 数据 | SQLite 数据库存放在独立卷。 |
+| Auth 密钥 | Docker secrets 或只读文件。与数据库分开存储和备份。 |
+| 部署配置 | 保存在 Git，密钥留在仓库外。 |
 
 ## 认证流程
 
-密码登录：
+1. **密码登录**时，Auth 验证用户名和密码，发放短期、一次性挑战。用户在独立界面输入 TOTP，每个时间步只验证一次，成功后换发不透明会话 Cookie。
+2. **Passkey 登录**时，Auth 发放一次性 WebAuthn 挑战，要求用户验证，严格检查 RP ID 和 HTTPS 源。断言正确后建立会话。账号仍需绑定 TOTP。
 
-1. 向认证服务 POST 用户凭据。
-2. 验证成功后发放短期、一次性的预认证 Cookie 或挑战。
-3. 切换到独立的 TOTP 界面，不在此处显示密码字段。
-4. 每个有效 TOTP 时间步只接受一次验证码。
-5. 换发带不透明令牌的正式会话 Cookie。
-
-Passkey 登录：
-
-- 发出一次性 WebAuthn 挑战，严格检查 RP ID 和源，要求用户验证。
-- 断言验证成功后建立完整会话。
-- Passkey 是独立的登录流程；账号仍然必须绑定 TOTP。
-
-Cookie：`__Host-dsh_session`，Secure、HttpOnly、SameSite=Lax、Path=/，不设 Domain。
+会话 Cookie 为 `__Host-dsh_session`，使用 `Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`，省略 `Domain`。
 
 ## 浏览器控制
 
-状态：HUMAN、AGENT、HANDOVER、PAUSED、DISCONNECTED。
-
-租约字段包括租约 ID、持有者类型和 ID、DSH 会话 ID、代次、发放时间及过期时间。比较与交换须具备事务语义。每次工具操作前，Provider 必须校验租约。租约过期或进程退出时要回到 HUMAN 或 DISCONNECTED，不能遗留过时的 AGENT 控制权。
-
-Agent 拥有控制权时，必须在 Selkies 输入边界拦截人工键盘及鼠标输入，仅在界面锁定不足以实现独占。如果上游 Selkies 必须修改镜像才能可靠拦截输入，评估小型认证输入网关或代理，或单独维护的集成镜像。验证前不宣称实现独占模式。
-
-Agent 的自动化通过 CDP 连接 Chromium 已有的默认上下文。需要共享 Cookie 或标签页时，不启动第二个浏览器，也不新建隔离上下文。验证 Playwright 的 CDP 限制，禁止工具关闭浏览器或上下文。
+- **控制状态**包括 HUMAN、AGENT、HANDOVER、PAUSED 和 DISCONNECTED。
+- **租约**记录租约 ID、持有者类型和 ID、DSH 会话 ID、代次、发放及过期时间。采用事务式比较并交换。
+- **每次工具调用都要校验租约。**Agent 控制时，在 Selkies 输入边界拦截人工键盘和鼠标。过期或进程退出时回到 HUMAN 或 DISCONNECTED。
+- **通过 CDP 连接** Chromium 的默认上下文，共享标签页和 Cookie。核对 Playwright 的 CDP 限制，避免工具关闭浏览器或上下文。
+- 如果上游不能可靠拦截输入，评估可维护的认证输入网关、代理或集成镜像。实际输入路径通过测试后才能宣称独占。[待补场景](https://github.com/sagehou/dsh-workstation/issues/1)
 
 ## 版本管理
 
-独立维护以下版本：
-
-- Runtime 镜像版本
-- DSH npm 版本
-- 认证镜像版本
-- Workstation 插件版本
-- Chromium 镜像标签和摘要
-
-改变 DSH npm 版本不需要重建 Runtime 镜像。更新 Runtime 镜像不会自动升级 DSH。不假定不同 DSH 版本间的 Profile 和插件数据向后兼容，必须备份并检查迁移。
+Runtime 镜像、DSH npm 包、Auth 镜像、Workstation 插件和 Chromium 镜像分别版本化。更新 Runtime 镜像保留所选 DSH 版本。更新 DSH 保留 Runtime 镜像。Profile 和插件数据可能迁移，升级前须备份并检查迁移。
 
 ## 安全边界
 
-- 不挂载 Docker socket。
-- 不把 CDP 端口发布到宿主机。
-- 不向公网暴露浏览器控制端点。
-- 不信任客户端自带的身份请求头。
-- ForwardAuth 删除或替换客户端输入的身份请求头。
-- 认证服务和登录路由不经过自己的 ForwardAuth。
-- API 和 WebSocket 认证失败时不能返回 HTML 登录页。
-- 浏览器终端拥有访问其容器的强大权限，初期只供可信用户使用。
-- 多个账号可通过认证不等于租户隔离。
+- CDP 和浏览器管理接口保留在私网。工作台不挂载 Docker socket。
+- 入口删除或替换客户端身份请求头。ForwardAuth 信任配置的代理对端。
+- 登录和校验端点不经过自己的 ForwardAuth。拒绝未认证 API 和 WebSocket 时不返回登录页面。
+- 初期只允许可信用户访问。浏览器终端拥有其容器的操作权限，账号认证本身不提供租户隔离。
