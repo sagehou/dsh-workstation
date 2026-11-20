@@ -193,12 +193,7 @@ compose up -d --no-build --force-recreate chromium cdp-relay
 current=''
 for attempt in {1..60}; do
   current="$(browser_id 2>/dev/null || true)"
-  if if [[ -z $current || $current == "$previous" ]]; then
-  echo 'No new CDP instance after recreation. Chromium host and profile lock:' >&2
-  profile_lock >&2 || true
-  browser_id >&2 || true
-  exit 1
-fi; then break; fi
+  if [[ -n $current && $current != "$previous" ]]; then break; fi
   sleep 2
 done
 if [[ -z $current || $current == "$previous" ]]; then
