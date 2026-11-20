@@ -180,7 +180,7 @@ try {
     const generation = await send(first, 'lease1', 'lease_status')
     assert.match(generation, /^[a-f0-9-]{36}:\d+$/)
     assert.equal(await send(second, 'other', 'navigate', { generation, url: 'https://fixture.test/beta' }), 'NOT_OWNER')
-    assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://172.30.231.2:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
+    assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
     assert.equal(await send(first, 'open1', 'navigate', { generation, url: 'https://fixture.test/alpha' }), 'OK')
     assert.equal(await send(first, 'read1', 'read', { generation }), 'WTAB_ALPHA')
     await action('接管浏览器')

@@ -19,7 +19,8 @@ const origins = new Set((process.env.BROWSER_TOOL_ORIGINS ?? '').split(',').map(
 for (const origin of origins) {
   if (!origin.startsWith('https://') || new URL(origin).origin !== origin) throw Error('Expected bare HTTPS browser tool origins')
 }
-const cdp = 'http://172.30.231.2:9223'
+const cdp = publicMode ? 'http://127.0.0.1:9223' : 'http://172.30.231.2:9223'
+const selkies = publicMode ? 'http://dsh-workstation-chromium:3000' : 'http://172.30.231.2:3000'
 const fixture = 'http://witness:8081/'
 const fencePath = '/state/browser-fence'
 const boot = randomUUID()
@@ -42,7 +43,7 @@ function check(condition, code, status) {
 async function input(locked) {
   const table = { [controller]: { role: 'controller', slot: null } }
   if (locked) table[sentinel] = { role: 'viewer', slot: null, mk_control: true }
-  const response = await fetch('http://172.30.231.2:3000/browser/api/tokens', {
+  const response = await fetch(selkies + '/browser/api/tokens', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + master, 'Content-Type': 'application/json' },
     body: JSON.stringify(table),
@@ -395,7 +396,7 @@ function listen(handler, host, port) {
     })
   }).listen(port, host)
 }
-listen(mcp, '172.30.232.2', 8080)
+listen(mcp, publicMode ? '172.30.241.3' : '172.30.232.2', 8080)
 listen(control, '172.30.233.2', 8081)
 
 if (publicMode) {

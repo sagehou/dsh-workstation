@@ -57,12 +57,12 @@ jobs:
           bash deploy/public/ci.sh 2>&1 | tee evidence/public-compose.log
       - name: Package the three workstation images
         run: |
-          docker save dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.0 dsh-workstation-provider:0.1.0 \
+          docker save dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 \
             | gzip -1 > evidence/workstation-images-linux-amd64.tar.gz
           (cd evidence && sha256sum workstation-images-linux-amd64.tar.gz > workstation-images-linux-amd64.sha256)
           git rev-parse HEAD > evidence/source-commit
           docker image inspect --format '{{index .RepoTags 0}} {{.Id}}' \
-            dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.0 dsh-workstation-provider:0.1.0 > evidence/image-ids
+            dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 > evidence/image-ids
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
