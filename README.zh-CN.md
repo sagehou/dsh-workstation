@@ -6,7 +6,7 @@
 
 ## 项目状态
 
-[公网 Compose 部署指南](deploy/public/README.zh-CN.md)涵盖单用户 HTTPS、Go 认证网关和按 DSH 会话绑定标签页的浏览器 Provider。部署前请查阅[远端验证记录](docs/roadmap/public-compose.zh-CN.md)。也可以使用[私有预览](deploy/README.zh-CN.md)，仅监听服务器回环地址，通过 SSH 访问。
+[公网 Compose 部署指南](deploy/public/README.zh-CN.md)说明怎样复用现有 Traefik，部署单用户 HTTPS、Go 认证网关和按 DSH 会话绑定标签页的浏览器 Provider。部署前请查阅[远端验证记录](docs/roadmap/public-compose.zh-CN.md)。也可以使用[私有预览](deploy/README.zh-CN.md)，仅监听服务器回环地址，通过 SSH 访问。
 
 ## 项目目标
 

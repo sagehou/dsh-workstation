@@ -6,7 +6,7 @@ A Docker Compose-based, self-hosted web workstation built around the official De
 
 ## Project status
 
-The [public Compose guide](deploy/public/README.md) covers single-user HTTPS, the Go authentication gateway and session-scoped Browser Provider. See the [remote evidence](docs/roadmap/public-compose.md) before deploying. The [private preview](deploy/README.md) remains available for loopback-only access through SSH.
+The [public Compose guide](deploy/public/README.md) covers single-user HTTPS with an existing Traefik, Go authentication and the session-scoped Browser Provider. See the [remote evidence](docs/roadmap/public-compose.md) before deploying. The [private preview](deploy/README.md) remains available for loopback-only access through SSH.
 
 ## Goals
 
