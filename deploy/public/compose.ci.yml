@@ -19,6 +19,6 @@ services:
       - ./deploy/public:/test:ro
       - ./.workstation/fixture:/fixture:ro
     networks:
-      runtime-egress: {}
-      browser-egress:
+      workstation: {}
+      browser:
         aliases: [fixture.test]

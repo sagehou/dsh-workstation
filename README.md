@@ -2,44 +2,38 @@
 
 English · [简体中文](README.zh-CN.md)
 
-A Docker Compose-based, self-hosted web workstation built around the official DeepSeek Harness (DSH) runtime.
+A self-hosted workstation for the official DeepSeek Harness (DSH) npm package.
 
-## Project status
+## Deploy
 
-The [public Compose guide](deploy/public/README.md) covers single-user HTTPS, the Go authentication gateway and session-scoped Browser Provider. See the [remote evidence](docs/roadmap/public-compose.md) before deploying. The [private preview](deploy/README.md) remains available for loopback-only access through SSH.
+| I want to | Guide |
+| --- | --- |
+| Run on a domain with an existing Traefik | [Public Compose](deploy/public/README.md) |
+| Try DSH Web and the browser over SSH | [Private preview](deploy/README.md) |
 
-## Goals
+## Status
 
-- Run the official DSH npm package without forking DSH core.
-- Keep the DSH runtime version independent from the base Docker image; support installing, selecting, upgrading, and rolling back pinned npm versions.
-- Preserve the official DSH Profile, Bundle, Plugin Manager, pnpm lockfiles, package store, credentials, sessions, and workspace data across container recreation.
-- Provide a shared LinuxServer Chromium instance through Selkies for human interaction and CDP/Playwright automation.
-- Embed Selkies at `/browser/` on the same origin as DSH.
-- Enforce exclusive human/agent browser control with server-side leases, not UI-only state.
-- Provide a small self-hosted Go authentication gateway with password + TOTP, Passkeys/WebAuthn, recovery codes, configurable sessions, and Traefik ForwardAuth.
-- Deploy through Docker Compose and publish project-owned images to GHCR.
+| Area | Current behavior |
+| --- | --- |
+| Runtime | Installs exact DSH versions into persistent storage. Switching and rollback are independent of the Runtime image. |
+| Plugins and data | Uses the official DSH Profile, Bundle, and Plugin Manager. Container recreation preserves their state, pnpm store and lockfiles, credentials, sessions, and separate workspace. |
+| Public access | One operator signs in over HTTPS using password and TOTP or Passkey. The Go gateway provides recovery codes, session controls, and Traefik ForwardAuth. |
+| Browser | The operator and Agent share Chromium. Selkies runs at `/browser/`, and official MCP binds each live DSH session to its own tab. |
+| Open work | Full exclusive handoff, including release of held input, and the native Sidebar. [#1](https://github.com/sagehou/dsh-workstation/issues/1) |
+| Images | GitHub Actions builds the Compose images. Publishing project images to GHCR is a project goal. [Deployment evidence](docs/roadmap/public-compose.md) |
 
-## Non-goals for the first release
+## Project documents
 
-- Forking or patching DSH core.
-- Replacing the DSH Agent runtime or main UI.
-- VNC/noVNC/Xvfb desktop stacks.
-- A separate browser hostname or separate browser login.
-- Windows Companion.
-- Multi-tenant DSH isolation. Supporting several auth accounts does not imply isolated DSH workspaces or browser profiles.
+| For | Read |
+| --- | --- |
+| Product requirements and acceptance | [Specification](docs/SPEC.md) |
+| Services, networks, and data | [Architecture](docs/ARCHITECTURE.md) |
+| Architecture decisions | [Runtime versions](docs/adr/0001-runtime-version-decoupling.md) · [Shared Chromium](docs/adr/0002-shared-selkies-chromium.md) · [Auth gateway](docs/adr/0003-self-hosted-auth-gateway.md) |
+| Reproducing tests | [M0 acceptance](docs/roadmap/M0.md) · [M0 results](docs/roadmap/M0-evidence.md) · [M1 preview](docs/roadmap/M1.md) · [Public Compose](docs/roadmap/public-compose.md) |
+| Working on the repo | [Project instructions](AGENTS.md) |
 
-## Start here
-
-1. Read [AGENTS.md](AGENTS.md) for Codex instructions.
-2. Read [SPEC.md](docs/SPEC.md) for product requirements and acceptance criteria.
-3. Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries and deployment topology.
-4. Read the [ADRs](docs/adr/) for decisions and unresolved validation gates.
-5. See [M0 evidence](docs/roadmap/M0-evidence.md) and the [M1 scope](docs/roadmap/M1.md). The held-input handoff and native Sidebar remain open in [#1](https://github.com/sagehou/dsh-workstation/issues/1).
-
-## Important engineering rule
-
-Treat upstream DSH, LinuxServer Chromium/Selkies, Traefik, and security-library behavior as versioned external contracts. Verify against the exact pinned versions and upstream source before relying on an API, environment variable, path, or CLI option. Do not copy unverified assumptions from planning notes into production code.
+The first release excludes changes to DSH core or its main UI, VNC/noVNC/Xvfb desktop stacks, a separate browser hostname or login, Windows Companion, and tenant isolation.
 
 ## License
 
-No license has been selected yet. Until one is added, all rights are reserved by the repository owner.
+The repository owner reserves all rights until a license is added.

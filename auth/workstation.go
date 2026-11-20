@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const dshUpstream = "https://dsh-workstation-runtime:3080"
+
 func readSecret(name string) (string, error) {
 	data, err := os.ReadFile("/run/secrets/" + name)
 	if err != nil {
@@ -44,10 +46,10 @@ func (g *gateway) initBrowser() error {
 	}
 	g.dshClient = &http.Client{Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "runtime", MinVersion: tls.VersionTLS12}},
 	}
-	g.dshWS = g.socketProxy("https://runtime:3080", g.dshClient.Transport)
-	g.browserWS = g.socketProxy("http://chromium:3000", &http.Transport{ResponseHeaderTimeout: 6 * time.Second})
+	g.dshWS = g.socketProxy(dshUpstream, g.dshClient.Transport)
+	g.browserWS = g.socketProxy("http://dsh-workstation-chromium:3000", &http.Transport{ResponseHeaderTimeout: 6 * time.Second})
 	return nil
 }
 
@@ -125,7 +127,7 @@ func (g *gateway) dsh(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	request, err := http.NewRequestWithContext(r.Context(), "GET", "https://runtime:3080/"+"?"+launch.RawQuery, nil)
+	request, err := http.NewRequestWithContext(r.Context(), "GET", dshUpstream+"/?"+launch.RawQuery, nil)
 	if err != nil {
 		unavailable(w)
 		return
@@ -169,7 +171,7 @@ var providerHTTP = &http.Client{
 }
 
 func (g *gateway) provider(r *http.Request, method, route string, body io.Reader, result any) error {
-	request, err := http.NewRequestWithContext(r.Context(), method, "http://provider:8081"+route, body)
+	request, err := http.NewRequestWithContext(r.Context(), method, "http://172.30.233.2:8081"+route, body)
 	if err != nil {
 		return err
 	}

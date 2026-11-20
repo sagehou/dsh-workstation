@@ -1,26 +1,26 @@
-# ADR-0001: Decouple DSH npm version from Runtime Image
+# ADR-0001 — Decouple DSH npm versions from the Runtime image
 
 English · [简体中文](0001-runtime-version-decoupling.zh-CN.md)
 
-Status: Accepted
+**Accepted**
 
 ## Context
 
-DSH is distributed as an npm package. Baking one DSH version into every Runtime image couples application releases to base-image rebuilds and makes exact-version rollback unnecessarily difficult.
+Baking DSH into each image couples npm releases to image rebuilds and makes it harder to roll back to an exact version.
 
 ## Decision
 
-- Runtime image provides compatible Node.js, pinned pnpm, Git/SSH, CA certificates, and common native build tools.
-- DSH is installed from the official npm registry into persistent DSH_HOME runtime directories.
-- Multiple exact DSH versions coexist.
-- A runtime manager selects an active version using an atomic pointer/manifest update.
-- Install/verify happens before activation. Failed install or health check leaves the previous version active.
-- DSH npm version, Runtime image version, Auth image version, Plugin version, and Chromium image version are independent.
+The Runtime image supplies compatible Node.js, pinned pnpm, Git/SSH, CA certificates, and common native build tools. Multiple exact DSH versions from the official npm registry coexist in persistent DSH_HOME directories.
+
+1. Install a candidate in its own directory and validate Node and plugin compatibility.
+2. Update the active pointer or manifest atomically after verification.
+3. Check readiness and keep or restore the previous selection if installation or the health check fails.
+
+Version DSH npm, the Runtime image, Auth, the plugin, and Chromium independently.
 
 ## Consequences
 
-- DSH upgrades do not rebuild the Runtime image.
-- Runtime manager must validate Node compatibility and plugin compatibility.
-- DSH_HOME must persist and be backed up before migrations.
-- Code rollback does not guarantee data-schema rollback; restore is required when an upgrade migrates persistent state.
-- Never mutate an active npm installation in place.
+- Upgrade DSH without rebuilding the Runtime image. Keep the active npm installation intact during upgrades.
+- Back up DSH_HOME before migrations. If an upgrade migrates state, restoring it requires the corresponding data backup.
+
+[M0 Runtime evidence](../roadmap/M0-evidence.md#a--runtime-and-profile)

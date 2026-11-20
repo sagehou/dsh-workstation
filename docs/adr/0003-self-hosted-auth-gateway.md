@@ -1,34 +1,30 @@
-# ADR-0003: Self-hosted Auth Gateway
+# ADR-0003 — Self-hosted Auth gateway
 
 English · [简体中文](0003-self-hosted-auth-gateway.zh-CN.md)
 
-Status: Accepted
+**Accepted**
 
 ## Context
 
-DSH and Selkies should share one public origin and one login without an external identity platform.
+DSH and Selkies share one public origin and login without an external identity platform.
 
 ## Decision
 
-- Implement a small Go authentication service with SQLite.
-- Traefik ForwardAuth protects DSH and `/browser/`.
-- Auth routes are exempt from their own ForwardAuth.
-- Password login is a two-screen flow: username/password first, then a separate TOTP screen.
-- Accounts must enroll TOTP. Password login requires TOTP.
-- Passkey is a separate WebAuthn login ceremony with required user verification.
-- Recovery codes are one-time and stored hashed.
-- Sessions use opaque random tokens; only token hashes are stored.
-- Cookie is `__Host-dsh_session`, Secure, HttpOnly, SameSite=Lax, Path=/, with no Domain.
-- Session idle timeout, absolute lifetime, and maximum session count are configurable.
+| Area | Choice |
+| --- | --- |
+| Gateway | Independent Go service with SQLite. Traefik ForwardAuth protects DSH and `/browser/`. Auth routes are outside their own ForwardAuth. |
+| Password | Show username and password, then TOTP on a separate screen. Require TOTP enrollment and verification for password login. |
+| Passkey | Separate WebAuthn login with required user verification. |
+| Recovery | Store hashed, single-use recovery codes. |
+| Sessions | Issue opaque random tokens and store only their hashes. Configure idle timeout, absolute lifetime, and maximum session count. |
+| Cookie | `__Host-dsh_session` with Secure, HttpOnly, SameSite=Lax, and Path=/. Omit Domain. |
 
 ## Security requirements
 
-- Strict RP ID and HTTPS Origin validation.
-- One-time WebAuthn challenges and TOTP time-step replay prevention.
-- Argon2id password hashing.
-- Encrypt TOTP seeds with an external master key.
-- CSRF and Origin checks for state-changing requests.
-- Rate-limit login, TOTP, Passkey, and recovery flows.
-- Never log credentials, OTPs, assertions, recovery codes, session tokens, or secrets.
-- Do not return HTML signin pages to API or WebSocket requests.
-- Do not trust client-supplied identity headers.
+- Verify exact RP ID and HTTPS origin. Use one-time WebAuthn challenges and reject TOTP time-step replay.
+- Use Argon2id password hashes. Encrypt TOTP seeds with an external master key.
+- Check CSRF and origin on writes. Rate-limit login, TOTP, Passkey, and recovery.
+- Keep credentials, OTPs, assertions, recovery codes, session tokens, and secrets out of logs.
+- Reject unauthenticated API and WebSocket traffic without returning HTML sign-in. Discard client-supplied identity headers.
+
+[Auth verification](../roadmap/public-compose.md)

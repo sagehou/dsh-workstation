@@ -2,141 +2,95 @@
 
 English · [简体中文](SPEC.zh-CN.md)
 
-Status: Approved product direction; technical assumptions remain subject to M0 verification.
+The approved direction is a self-hosted Web workstation around official DSH and its plugin ecosystem. Technical assumptions go through M0. [Acceptance criteria](roadmap/M0.md) · [Observed results](roadmap/M0-evidence.md)
 
-## 1. Product
+## Users and scope
 
-A self-hosted web workstation that retains the official DSH application and plugin ecosystem while adding a remotely accessible shared browser, a secure authentication gateway, and operational management.
+| Area | Requirement |
+| --- | --- |
+| User | One trusted operator initially. The Auth data model can allow 2–5 accounts. |
+| Isolation | Separate DSH_HOME, workspace, and browser profile per tenant are prerequisites for multi-user isolation. |
+| Clients | Desktop browsers first, with basic mobile browser usability. |
+| Deployment | Docker Compose and one public HTTPS origin. |
 
-## 2. Users and scope
+## DSH Runtime and plugins
 
-- Initial use: one trusted user.
-- Auth model: allow a small number of accounts (2–5) in the data model.
-- Multi-user isolation is not in v1. Multiple authenticated users must not be represented as isolated tenants unless DSH_HOME, workspace, and browser profile are independently isolated.
-- Clients: desktop browsers first; mobile browser basic usability.
-- Deployment: Docker Compose, one public origin.
+| Area | Requirement |
+| --- | --- |
+| Base image | Compatible Node.js, pinned pnpm, Git/SSH, CA certificates, and a toolchain for common native Node dependencies. |
+| Install | Install official DSH npm packages at runtime into persistent storage. Retain multiple exact versions and allow listing, installation, selection, upgrade, validation, rollback, and removal of inactive versions. |
+| Switch | Check Node and DSH compatibility and available plugin metadata. Validate before atomic selection. An install or health failure preserves the previous version. Keep installed releases intact and leave Profile dependencies unchanged during switching. |
+| Versions | Version the Runtime image and DSH npm independently. |
+| Plugin Manager | Retain the official Profile and Plugin Manager. Support npm, pinned versions, Git HTTPS with pinned commits, supported local paths, ESM/CommonJS, and common native modules. |
+| Data | Keep manifests, lockfiles, node_modules links and content, pnpm store, Bundle manifests, settings, credentials, sessions, and plugin configuration in one DSH_HOME filesystem. Keep workspace separate. |
+| Dependency scripts | Review pnpm and native build scripts individually. Document additional system prerequisites such as ffmpeg or libvips. Use optional services or documented extensions when required. |
 
-## 3. Product requirements
+## Browser
 
-### 3.1 DSH runtime and version management
+| Area | Requirement |
+| --- | --- |
+| Chromium | Run one LinuxServer Chromium separately from Runtime. The Agent and operator share its process, persistent profile, and downloads. |
+| Access | Serve Selkies at same-origin `/browser/` using the DSH login. Keep CDP inside a private Docker service boundary. |
+| Automation | Use official DSH Browser Use/Playwright MCP where supported, attached to the same Chromium over CDP. |
+| Control | Track HUMAN, AGENT, HANDOVER, PAUSED, and DISCONNECTED. Enforce server-side leases. Block human input at Selkies while the Agent owns control and reject Agent calls during human control. |
+| Takeover | Stop new Agent actions, finish or cancel the active action safely, revoke the lease, then enable human input. The actual input boundary must pass validation. |
+| Recovery | Display disconnect and reconnect states and provide recovery after a browser restart. |
 
-- Base Docker image contains compatible Node.js, pinned pnpm, Git/SSH, CA certificates, and a toolchain for common native Node dependencies.
-- DSH is installed from the official npm package at runtime into a persistent data volume.
-- User can query available npm versions, install an exact version, retain multiple versions, select a version, update, verify, and roll back.
-- Version switching is transactional and never overwrites an installed version.
-- Runtime image version and DSH npm version are independent.
-- A failed install or health check must leave the prior version active.
-- Before switching, validate DSH/Node compatibility and installed plugin compatibility where metadata is available.
-- Do not automatically mutate Profile dependencies on DSH version switch.
-- Back up DSH_HOME before migrations or dependency operations.
+### Workstation plugin
 
-### 3.2 Plugin ecosystem and persistence
+- Register a Browser Desktop tab with supported right Sidebar APIs for the exact DSH release. Embed the relative URL `/browser/`.
+- Use native pane lifecycle APIs for docking, floating, resizing, maximizing and restoring, hiding, reconnect, and status.
+- Keep the iframe mounted across tab switches or hides when supported. Hiding leaves Chromium running.
+- Display human or Agent control, owner, task status, and takeover and return actions. Keep the official DSH chat, session, file, diff, and terminal interfaces.
 
-- Preserve official DSH Profile and Plugin Manager behavior.
-- Support npm packages, pinned versions, Git HTTPS, Git pinned commit, local package paths where supported by upstream, ESM/CommonJS, and common native-module builds.
-- Persist DSH_HOME as a coherent filesystem, including Profile package manifests, lockfiles, node_modules links/content, pnpm store, Bundle manifests, settings, credentials, sessions, and plugin configuration.
-- Keep workspace separate from DSH_HOME.
-- Installation, activation, compatibility, and runtime health are distinct states in UI.
-- Review pnpm build scripts and native dependencies; never globally approve arbitrary install scripts.
-- Special system dependencies (e.g. ffmpeg, libvips) may require optional services or documented host/runtime extensions; do not promise every third-party plugin works without its system prerequisites.
+## Authentication
 
-### 3.3 Shared Chromium/Selkies browser
+| Area | Requirement |
+| --- | --- |
+| Service | Independent Go service with SQLite WAL. Bootstrap closes after the first admin is created. |
+| Password and TOTP | Hash passwords with Argon2id. Require RFC 6238 TOTP enrollment and a separate TOTP screen after password succeeds. |
+| Passkey | Separate WebAuthn login with configured RP ID, exact HTTPS origin, required user verification, one-time challenges, and multiple credentials per user. |
+| Recovery codes | Show once and store hashes. Each code is single use, and regeneration invalidates old codes. |
+| Sessions | Generate cryptographically random opaque tokens and store only hashes. Configure idle and absolute limits and concurrent count. Revoke one session or all sessions. |
+| Cookie | `__Host-dsh_session` with Secure, HttpOnly, SameSite=Lax, and Path=/. Omit Domain. |
+| Protection | Rate limiting, CSRF and origin checks, protection against account enumeration, and secure secret management. Require step-up for sensitive account changes. |
+| Audit | Record successful and failed logins, MFA and credential changes, session changes, and account disable or recovery. |
 
-- Use LinuxServer Chromium image; do not embed Chromium or a desktop stack in DSH runtime.
-- One Chromium process and one persistent profile are shared by human and Agent.
-- Human UI is Selkies served under the same origin at `/browser/`.
-- Agent uses the official DSH Browser Use/Playwright MCP extension where supported, attaching via CDP to the same Chromium instance.
-- No separate browser hostname or browser-specific login.
-- CDP must not be published to host/public interfaces. Restrict it to a private Docker network/service boundary.
-- Browser profile and downloads persist.
-- Browser restart/reconnect must be visible and recoverable.
-- Exclusive control: HUMAN, AGENT, HANDOVER, PAUSED, DISCONNECTED states. Server-side lease validation is mandatory. Human input must be blocked while Agent owns control, and Agent tool calls must be blocked while Human owns control.
-- Takeover must stop admission of new Agent actions, safely finish/cancel the in-flight action, revoke lease, then enable human input.
-- If Selkies cannot reliably gate human input, this requirement is not met; do not simulate it with a UI-only lock.
+### Login screens
 
-### 3.4 Workstation UI plugin
+1. Show only username and password on the first screen.
+2. On success, create a short-lived pre-auth challenge and open a separate screen or modal.
+3. Show only TOTP entry, back or restart, and a recovery-code option.
+4. Create a full session on a valid code and redirect to a validated same-origin relative path.
+5. Offer Passkey as a separate visible login option.
 
-- Use supported DSH client plugin and right-sidebar APIs for the exact pinned DSH version.
-- Add Browser Desktop as a right-sidebar tab.
-- Support dock, float, resize, maximize/restore, hide, reconnect, and status display, using DSH-native pane lifecycle APIs.
-- Keep iframe mounted when switching tabs/hiding if supported; hiding must not terminate Chromium.
-- Browser frame uses relative same-origin `/browser/` URL.
-- Add explicit Human/Agent control state, current owner, task status, and takeover action.
-- Avoid reimplementing the DSH main chat, session, file, diff, or terminal interfaces.
+## Routing and deployment
 
-### 3.5 Authentication gateway
+| Path or boundary | Requirement |
+| --- | --- |
+| `https://<host>/` | DSH and one shared session cookie. |
+| `/browser/` | Selkies with LinuxServer's supported subfolder configuration. Preserve the prefix unless upstream explicitly requires stripping it. |
+| `/_auth/` | Auth UI and API. Auth and the verification endpoint are exempt from their own ForwardAuth. |
+| ForwardAuth | Protect DSH and Selkies. Unauthenticated APIs return 401 and WebSocket upgrades are denied. |
+| Browser control | Internal or authenticated endpoints. Keep management off unauthenticated public routes. |
+| Compose | Orchestrate DSH, Auth, and Chromium. Reuse an external Traefik on shared networks where applicable. |
 
-- Independent Go service; SQLite WAL.
-- Password hashing: Argon2id.
-- TOTP: RFC 6238; enrollment mandatory for accounts; password login requires a separate TOTP step.
-- TOTP UX: first screen contains username/password only. After password verification, replace it with a distinct second screen/modal containing only TOTP input. Never show password and TOTP fields together.
-- Passkeys: WebAuthn with exact configured RP ID and HTTPS origin, required user verification, one-time challenges, multiple credentials per user.
-- Passkey may be a separate login ceremony; it is not silently treated as Password+TOTP. Sensitive account changes require step-up authentication.
-- Recovery codes: one-time, hashed at rest, shown only once; regeneration invalidates old codes.
-- Sessions: opaque cryptographically random tokens, only token hashes stored; configurable idle timeout, absolute lifetime, max sessions, per-session revoke, revoke-all.
-- Cookie: `__Host-dsh_session`, Secure, HttpOnly, SameSite=Lax, Path=/, no Domain attribute.
-- Auth endpoints and ForwardAuth verification endpoint must not be protected by their own ForwardAuth middleware.
-- ForwardAuth protects DSH and `/browser/`; API and WebSocket unauthenticated behavior must be correct (401/deny upgrade, not an HTML login page).
-- Audit events for login success/failure, MFA changes, credential changes, session changes, account disable/recovery.
-- Rate limiting, CSRF protection, origin checks, anti-enumeration behavior, secure secret management.
-- Bootstrap is one-time and disabled after initial admin creation.
+## User interface and operations
 
-### 3.6 Routing and deployment
+| Area | Requirement |
+| --- | --- |
+| Browser | Render the full Selkies UI in the native DSH Browser Desktop tab. Show ownership, takeover and return, and reconnect status. |
+| Runtime | Show active, installed, and available versions, compatibility, logs, backup status, and health. |
+| Plugins | Show installed, marketplace or source, and updates. List source, version, compatibility, dependencies, and script approval. Use official Plugin Manager to install, enable, disable, update, and remove. Show logs and distinguish installation, activation, compatibility, and health. |
+| Account | Manage password, Passkeys, TOTP, recovery codes, sessions, and audit. Require step-up for sensitive changes. |
+| Releases | Version the Runtime image, DSH npm, Auth image, Workstation plugin, and Chromium independently. Pin release tags and digests. |
+| Backups | Back up DSH_HOME before migrations or dependency operations. Cover DSH_HOME, workspace, Chromium profile, Auth DB, and encryption secrets. Restore tests must prove TOTP and existing Passkeys still work. |
+| Health and recovery | Check actual readiness. Document and test upgrades and rollback. |
 
-- One origin: `https://<host>/`.
-- DSH at `/`.
-- Selkies at `/browser/`, using LinuxServer-supported subfolder configuration and preserving path prefix through Traefik (no StripPrefix unless upstream documentation explicitly requires otherwise).
-- Auth UI/API at `/_auth/`.
-- Browser control APIs are internal-only or authenticated and never exposed as an unauthenticated public management surface.
-- Traefik ForwardAuth protects DSH and browser routes using the same session cookie.
-- Docker Compose orchestrates DSH, Auth, Chromium; Traefik may be an existing external service on the shared network.
-- No Authentik, Browserless, Redis, PostgreSQL, VNC/noVNC, or separate browser domain in the initial design.
+## Out of scope
 
-### 3.7 Operations
+Windows Companion, tenant orchestration, Kubernetes, a custom Agent runtime or editor, hosting a public plugin marketplace, and multiple simultaneous browsers. The initial deployment excludes Authentik, Browserless, Redis, PostgreSQL, VNC/noVNC, and a separate browser domain or login.
 
-- Independent versions for runtime image, DSH npm package, Auth image, Workstation plugin, and Chromium image.
-- Pin release tags/digests in production.
-- Backup/restore for DSH_HOME, workspace, Chromium profile, Auth DB, and encryption secrets.
-- Restore test must prove TOTP and Passkey registration remains usable.
-- Health checks must test actual readiness, not only process existence.
-- Upgrade/rollback documented and tested.
+## Definition of Done
 
-## 4. UX requirements
-
-### Login
-1. Password screen: username and password only.
-2. On valid password, server creates short-lived pre-auth challenge and navigates to a separate TOTP screen.
-3. TOTP screen: code only, back/restart and recovery-code option.
-4. Successful TOTP creates full session and redirects only to a validated same-origin relative return path.
-5. Passkey is a separate visible login option.
-
-### Browser
-- Right-side Browser Desktop tab.
-- Native DSH floating/docking lifecycle.
-- Full Selkies UI.
-- Human/Agent state and ownership visible.
-- Clear takeover/return controls.
-- Reconnect and disconnected states.
-
-### Runtime
-- Current version, installed versions, available versions.
-- Install exact version, activate, rollback, remove inactive version.
-- Compatibility report, logs, backup status, health status.
-
-### Plugins
-- Installed, Marketplace/source, Updates.
-- Show source/version/DSH compatibility/dependencies/build-script approval.
-- Install/enable/disable/update/remove via official DSH Plugin Manager.
-- Show operation logs and distinguish installed vs activated vs healthy.
-
-### Security
-- Password change, passkey management, TOTP management, recovery code regeneration, session list/revocation, audit log.
-- Sensitive changes require step-up authentication.
-
-## 5. Out of scope
-
-Windows Companion, multi-tenant orchestration, Kubernetes deployment, custom agent runtime, custom editor, public plugin marketplace hosting, and multiple concurrent browser instances.
-
-## 6. Definition of Done
-
-A feature is done only when implementation, automated tests, documented configuration, security implications, and recovery behavior are included. A running container alone is not acceptance.
+A feature includes implementation, automated tests, configuration docs, security implications, and coverage of recovery behavior.

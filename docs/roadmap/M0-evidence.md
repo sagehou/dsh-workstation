@@ -4,23 +4,34 @@ English · [简体中文](M0-evidence.zh-CN.md)
 
 [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1) · [Acceptance criteria](M0.md) · [Experiment design](M0-design.md)
 
-**Proceed with [M1 Runtime and private bring-up](M1.md).** The Runtime and Profile persistence experiment and the shared Chromium experiment passed. The owner approved starting Runtime work while carrying the browser limitations forward. The held mouse button failure in Selkies and the missing native Sidebar operations remain unresolved; this decision does not turn either result into a pass.
+Gates A and B passed for the tested releases. The owner approved proceeding with Runtime while C and D remained open. [M1 Runtime and private bring-up](M1.md)
 
 | Gate | Status | Evidence |
 | --- | --- | --- |
 | A — Runtime and Profile | Pass for the tested packages and upgrade pair | [Runtime job](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353929974), [native job](https://github.com/sagehou/dsh-workstation/actions/runs/44460118655/job/135344573520) |
 | B — Shared Chromium | Pass for the pinned stack and fixture | [Shared tabs, same-origin routing and profile restart](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930294) |
-| C — Exclusive | Agent lease and drain passed in the fixture; Human-to-Agent handover blocked on held input | [Independent Provider evidence](M0-provider-evidence.md#observed-result) |
-| D — DSH plugin API | Browser tool calls were gated through official MCP in ACP; native floating maximize/restore remains blocked | [Sidebar lifecycle job](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930328) |
+| C — Exclusive | Agent lease and drain passed in the fixture. Held input blocked Human-to-Agent handover. | [Independent Provider evidence](M0-provider-evidence.md#observed-result) |
+| D — DSH plugin API | Browser tool calls were gated through official MCP in ACP. Native floating maximize and restore remain blocked. | [Sidebar lifecycle job](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930328) |
 
 ## Exact upstream versions
 
-- The official [npm metadata](https://registry.npmjs.org/@deepseek-ai%2fdsh) reports `latest=0.2.2-rc.1`, `next=0.2.2-rc.5`, and `alpha=0.2.2-alpha.3`. `latest` is still a release candidate. Both tested packages declare Node `>=24.9.0` and the `dsh` bin at `lib/bin.js`. Exact source: [`dsh-v0.2.2-rc.1`](https://github.com/deepseek-ai/deepseek-harness/tree/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db), [`dsh-v0.2.2-rc.5`](https://github.com/deepseek-ai/deepseek-harness/tree/9c2670d3bce5275e0d1610272958121af87787bb).
-- Runtime base: `node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54`, pnpm `11.28.5`, Git `2.39.5` in the observed Runtime build, UID `1000`. Native fixture: `node-pty@1.2.0-beta.15`, `node-gyp@11.5.0`, using the Node headers shipped with the base.
-- Browser: `lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2`, Chromium `156.0.8078.79` and CDP protocol `1.3`. The official registry's `linux/amd64` manifest is `sha256:995fa4a4278d8ee90a13c33e983c45606aec8bd69bf6236b7c68cf07c89d16f4`. Its config labels identify [the Chromium scripts](https://github.com/linuxserver/docker-chromium/tree/4ec00555069627093b9110daff841d363f9a95f8/root), and its build history identifies [baseimage-selkies `debiantrixie-60ce2ea6-ls152`](https://github.com/linuxserver/docker-baseimage-selkies/releases/tag/debiantrixie-60ce2ea6-ls152) with [Selkies `2.2.1`](https://github.com/selkies-project/selkies/tree/d6b9351421bd503ffa89bdee78e2bce758b1ffe5), Pixelflux `2.2.3`, and PCMFlux `2.2.1`.
-- Edge and driver: `traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4`, `mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48`, `playwright@1.61.1`. This Playwright package is the test driver; the DSH Browser Use provider is a separate `0.2.2-rc.1` package using `@playwright/mcp@0.0.80`.
+| Component | Recorded version and sources |
+| --- | --- |
+| DSH | `latest=0.2.2-rc.1`, `next=0.2.2-rc.5`, and `alpha=0.2.2-alpha.3` at verification time. Both tested releases declare Node `>=24.9.0` and the `dsh` bin at `lib/bin.js`. [npm metadata](https://registry.npmjs.org/@deepseek-ai%2fdsh) · [`dsh-v0.2.2-rc.1`](https://github.com/deepseek-ai/deepseek-harness/tree/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db) · [`dsh-v0.2.2-rc.5`](https://github.com/deepseek-ai/deepseek-harness/tree/9c2670d3bce5275e0d1610272958121af87787bb) |
+| Runtime | Node `24.22.3` Bookworm slim, pnpm `11.28.5`, observed Git `2.39.5`, UID `1000`. |
+| Native probe | `node-pty@1.2.0-beta.15` and `node-gyp@11.5.0`, using the base image's Node headers. |
+| Browser | Chromium `156.0.8078.79`, CDP `1.3`, Selkies `2.2.1`, Pixelflux `2.2.3`, PCMFlux `2.2.1`. [the Chromium scripts](https://github.com/linuxserver/docker-chromium/tree/4ec00555069627093b9110daff841d363f9a95f8/root) · [baseimage-selkies `debiantrixie-60ce2ea6-ls152`](https://github.com/linuxserver/docker-baseimage-selkies/releases/tag/debiantrixie-60ce2ea6-ls152) · [Selkies `2.2.1`](https://github.com/selkies-project/selkies/tree/d6b9351421bd503ffa89bdee78e2bce758b1ffe5) |
+| Proxy and test driver | Traefik `3.7.19` and `playwright@1.61.1`. The separate official DSH Browser Use package `0.2.2-rc.1` uses `@playwright/mcp@0.0.80`. |
 
-Read-only commands to recheck release metadata:
+### Image digests
+
+- Runtime `node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54`
+- Browser `lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2`
+- Browser `linux/amd64` registry manifest `sha256:995fa4a4278d8ee90a13c33e983c45606aec8bd69bf6236b7c68cf07c89d16f4`
+- Proxy `traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4`
+- Driver `mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48`
+
+### Check upstream metadata
 
 ```sh
 curl -fsS 'https://registry.npmjs.org/@deepseek-ai%2fdsh' | jq '."dist-tags"'
@@ -34,9 +45,10 @@ docker buildx imagetools inspect 'lscr.io/linuxserver/chromium:075b0b99-ls64'
 
 ## Remote reproduction
 
-Use a disposable remote Docker host with a fresh checkout and no existing DSH or Chromium volumes. The [workflow](../../.github/workflows/m0.yml) runs on GitHub Actions `ubuntu-24.04` for pushes to `m0/issue-1` that change an experiment or the workflow. The runs above report Docker `28.0.4` and Compose `2.38.2`. The scripts use isolated Compose project names and remove their test volumes. Keep DSH startup URLs, tokens and cookies out of logs.
+- Use GitHub Actions `ubuntu-24.04` with fresh state, Docker `28.0.4`, and Compose `2.38.2`. Pushes to `m0/issue-1` that change probes or the workflow trigger the jobs. [workflow](../../.github/workflows/m0.yml)
+- The scripts use isolated Compose project names and remove the test volumes. Keep DSH launch URLs, tokens, and cookies out of logs.
 
-The [final run at `93a31de`](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576) passed all four experiment jobs below. The separate native build was skipped. The run verifies the assertions implemented in the probes; the remaining C and D acceptance criteria are still blocked.
+The four probe jobs at `93a31de` passed their assertions. The separate native job was skipped. The outstanding C and D criteria remain open. [final run at `93a31de`](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576)
 
 ```sh
 # Gate A — Runtime and Profile.
@@ -50,32 +62,52 @@ bash prototypes/m0/browser/run.sh --exclusive
 bash prototypes/m0/browser/sidebar/run.sh
 ```
 
-The separate native job was explicitly approved for one remote build. Its recorded command at [`058e789`](https://github.com/sagehou/dsh-workstation/commit/058e789) was:
+### One approved native build
+
+The recorded command for the separate build at `058e789` ran once with explicit approval. [`058e789`](https://github.com/sagehou/dsh-workstation/commit/058e789)
 
 ```sh
 docker compose -f prototypes/m0/runtime/compose.yml run --build --rm --no-deps -T runtime bash /m0/native.sh
 ```
 
-Any repeat of that native build requires separate approval. The job installed dependencies with `--ignore-scripts`, removed the `node-pty` prebuilds, then ran the pinned `node-gyp` rebuild as UID `1000`. Output: `gyp info ok` and `source-built node-pty emitted expected PTY output as uid 1000`. The assertion checks that the loaded module is `build/Release/pty.node`. This was a standalone PTY check, not a general plugin lifecycle approval or a test of DSH's Web terminal.
+- The job installed with `--ignore-scripts`, removed the `node-pty` prebuilds, and ran the pinned `node-gyp` rebuild as UID `1000`.
+- The loaded module was `build/Release/pty.node`. The output included `gyp info ok` and `source-built node-pty emitted expected PTY output as uid 1000`.
+- Repeating the build requires separate approval. The check covered a standalone PTY. Plugin lifecycle scripts and the DSH Web terminal were outside its scope.
 
 ## A — Runtime and Profile
 
-The official [CLI reference](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/apps/cli/reference/README.md) and [Plugin Manager reference](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/boot/plugin-manager/README.md) describe the contract exercised here. `dsh web --no-open --port 0` initializes the shipped Web Profile as needed. It announces a launch URL after startup; the probe exchanges that URL for a cookie and asserts an authenticated HTTP 200 boot page. `--host 0.0.0.0` is rejected by these releases; the intentional failure uses that real startup path. For later reverse proxy work consult the [Web app bind, Host/Origin and session rules](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/bundle/web-app/README.md#public-deployments).
+### Web startup
 
-`dsh plugin --profile web add` calls the official package operations with pnpm; the PoC uses `--save-exact --ignore-scripts --ignore-workspace-root-check`. The npm fixture was `@deepseek-ai/dsh-experimental-badge-skill-bundle@0.2.2-rc.1`. The Git HTTPS fixture was `git+https://github.com/sagehou/dsh-workstation.git#8a1d8c03ff3e2f94abc82792ed0771bc82b6fb63&path:/prototypes/m0/runtime/fixture`. Saved dependencies are distinct from enabled `dsh.profile.bundles`, and enabled is distinct from a successfully loaded bundle. The Git fixture writes a fresh startup marker in each health run so the test does not infer activation from installation alone. Bundle layers load before the Profile patch, the home patch and CLI overlays, in that order. The in-box bundles resolve from the selected DSH install; external bundles resolve from the Profile when not provided by the installation.
+- `dsh web --no-open --port 0` initializes the bundled Web Profile as needed. The probe exchanges the startup URL for a cookie and checks for an authenticated HTTP 200 boot page. [CLI reference](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/apps/cli/reference/README.md)
+- The tested versions reject `--host 0.0.0.0`. The intentionally failed readiness check uses that path. [Web app bind, Host/Origin and session rules](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/bundle/web-app/README.md#public-deployments)
 
-The Plugin Manager service supplies the Web Plugins page and the `plugin_manager` tool. Its documented `inspect`, `installBundle`, and `listBundles` operations distinguish source metadata, package installation and activation. With Profile HMR, changes can apply live; startup-only profiles can require restart. The [compatibility contract](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/boot/plugin-manager/README.md#version-compatibility-and-exemptions) checks declared `engines.dsh` and DSH peer ranges. Git metadata is checked after fetching; a rejected operation can leave downloaded files in the store. Exact-version exemptions live in the Profile's `compatibility.json`, separate from dependency script approval. The recorded tests exercised the CLI, with no exemptions or script grants.
+### Plugin installation and activation
+
+[Plugin Manager reference](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/boot/plugin-manager/README.md)
+
+- `dsh plugin --profile web add` invokes the official pnpm operations. The probe uses `--save-exact --ignore-scripts --ignore-workspace-root-check`.
+- The npm fixture is `@deepseek-ai/dsh-experimental-badge-skill-bundle@0.2.2-rc.1`.
+- The Git HTTPS fixture is `git+https://github.com/sagehou/dsh-workstation.git#8a1d8c03ff3e2f94abc82792ed0771bc82b6fb63&path:/prototypes/m0/runtime/fixture`.
+- A saved dependency, an enabled entry in `dsh.profile.bundles`, and a successfully loaded Bundle are distinct states. The Git fixture writes a fresh marker during each health run.
+- Load order is Bundle layers → Profile patch → home patch → CLI overlays. Resolve built-in Bundles from the selected DSH install and other Bundles from the Profile.
+
+- Plugin Manager serves the Web Plugins page and the `plugin_manager` tool. `inspect`, `installBundle`, and `listBundles` distinguish source metadata, package installation, and activation. Profile HMR can apply changes live. Startup-only profiles may need a restart.
+- Compatibility checks use declared `engines.dsh` and DSH peer ranges. Git metadata is checked after fetch, so rejected operations can leave files in the store. Exact exemptions live in the Profile's `compatibility.json`, separate from script approval. The CLI test used neither. [compatibility contract](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/boot/plugin-manager/README.md#version-compatibility-and-exemptions)
+
+### Persistence map
 
 | Path in the Runtime container | Owner and evidence |
 | --- | --- |
-| `/dsh-home/runtime/versions/<version>` and `/dsh-home/runtime/current` | PoC only. Staging and atomic symlink updates under `flock`; `current` is the active pointer. |
-| `/dsh-home/profiles/web/package.json`, `cordis.patch.yml`, `compatibility.json` | Upstream dependency and ordered bundle manifest; Profile overlays; optional exact compatibility exemptions. Manifest and patch digests matched before/after recreation and in both directions of the version switch. |
+| `/dsh-home/runtime/versions/<version>` and `/dsh-home/runtime/current` | PoC only. Staging and atomic symlink updates under `flock`. `current` is the active pointer. |
+| `/dsh-home/profiles/web/package.json`, `cordis.patch.yml`, `compatibility.json` | Upstream dependency and ordered Bundle manifest, Profile overlays, and optional exact compatibility exemptions. Manifest and patch digests matched before/after recreation and in both directions of the version switch. |
 | `/dsh-home/profiles/web/pnpm-lock.yaml`, `pnpm-workspace.yaml`, `node_modules/.pnpm` | Plugin lock, PoC store and script policy, and resolved package links. Both fixture package manifests/patches and link destinations matched. |
-| `/dsh-home/pnpm/store/v11` | Chosen store path, not an upstream default. pnpm reported content-addressable store hardlinks; store membership fingerprint matched across recreation. |
-| `/dsh-home/cordis.patch.yml`, `.credentials.yaml`, `sessions/`, `storages/` | Upstream home overlay and data from the [base profile](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/bundle/base/cordis.patch.yml). Kept on the same volume; actual credentials, saved conversation migration and restore were not exercised. |
+| `/dsh-home/pnpm/store/v11` | Chosen store path, not an upstream default. pnpm reported content-addressable store hardlinks. The store membership fingerprint matched across recreation. |
+| `/dsh-home/cordis.patch.yml`, `.credentials.yaml`, `sessions/`, `storages/` | The home overlay and base Profile data stay on one volume. The probe did not exercise real credentials or saved conversation migration and restore. [Base Profile](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/bundle/base/cordis.patch.yml) |
 | `/workspace`, `/backup` | Separate volumes. The PoC snapshots DSH_HOME before Profile dependency changes or version switches. |
 
-The [passing Runtime job at `5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/44460212791/job/135344880883) shows:
+### Observed switch and rollback
+
+[passing Runtime job at `5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/44460212791/job/135344880883)
 
 ```text
 installed DSH 0.2.2-rc.1 in /dsh-home/runtime/versions/0.2.2-rc.1
@@ -89,13 +121,21 @@ active DSH 0.2.2-rc.1
 runtime/plugins: tested both DSH versions, recreation and two rollback paths on one image
 ```
 
-The store and locked plugin dependencies are preserved without reinstalling after recreation. The two releases both booted this Profile and loaded the Git fixture without dependency edits. Pointer rollback cannot reverse a data migration. The tests do not establish compatibility for every plugin, prove native builds inside Plugin Manager, approve Git `prepare` scripts, or cover plugins with extra system libraries. In the official manager, reviewed dependency scripts can be approved by exact pending `allowBuilds` keys per Profile; broad approval is outside this test.
+- Both releases booted the Profile, loaded the Git fixture without dependency edits, and preserved the Store and locked plugin dependencies after recreation.
+- Pointer rollback cannot undo data migration. Plugin Manager builds, Git `prepare` scripts, extra system libraries, and compatibility with other plugins were outside this test.
+- The official manager supports approval of reviewed scripts by exact pending `allowBuilds` keys per Profile.
 
 ## B — One browser process and profile
 
-LinuxServer's [`autostart_wayland`](https://github.com/linuxserver/docker-chromium/blob/4ec00555069627093b9110daff841d363f9a95f8/root/defaults/autostart_wayland) passes `CHROME_CLI` to [`wrapped-chromium`](https://github.com/linuxserver/docker-chromium/blob/4ec00555069627093b9110daff841d363f9a95f8/root/usr/bin/wrapped-chromium). The probe uses `/config/m0-chromium` and CDP port `9222`. A relay in the same network namespace forwards to the loopback listener from an isolated Docker bridge only. There are no published host ports. The browser job tests host access and uses `/json/version` and `/json/list` from a peer.
+### Setup
 
-At [`d71856d`](https://github.com/sagehou/dsh-workstation/actions/runs/44461308475/job/135348481161), a keystroke through the human Selkies UI opened a tab discovered over CDP and set a persistent test cookie in Playwright's existing default context. A Playwright-created tab then accepted Selkies input and saw the same cookie. The job counted one Chromium main process, verified the command line and profile path, and checked for the cookie on disk before restart. The test uses a separate headless viewer to drive Selkies; only the managed desktop Chromium is the target of both users. The passing job reported:
+- LinuxServer passes `CHROME_CLI` through to Chromium. The probe uses `/config/m0-chromium` and CDP port `9222`. [`autostart_wayland`](https://github.com/linuxserver/docker-chromium/blob/4ec00555069627093b9110daff841d363f9a95f8/root/defaults/autostart_wayland) · [`wrapped-chromium`](https://github.com/linuxserver/docker-chromium/blob/4ec00555069627093b9110daff841d363f9a95f8/root/usr/bin/wrapped-chromium)
+- A relay in Chromium's network namespace reaches its loopback listener from one isolated Docker bridge. The probe checks that the host cannot connect and checks `/json/version` and `/json/list` from a peer.
+
+### Observed sharing and restart
+
+- Selkies input opened a CDP-visible tab and set a persistent cookie. A tab created through Playwright accepted Selkies input and read the same cookie in the default context.
+- The job counted one desktop Chromium main process, checked its command line and profile path, and confirmed the cookie on disk before restart. A separate headless viewer only drove Selkies. [`d71856d`](https://github.com/sagehou/dsh-workstation/actions/runs/44461308475/job/135348481161)
 
 ```text
 no host ports published; host CDP probes denied
@@ -108,34 +148,62 @@ test cookie committed to the persistent Chromium profile
 persistent cookie still present in the default context after Chromium restart
 ```
 
-Earlier runs failed on the post-restart cookie assertion ([`496a285`](https://github.com/sagehou/dsh-workstation/actions/runs/44459609588/job/135342898428)) and on UI keyboard navigation before persistence was reached ([`5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/44460212791/job/135344880671)). The passing probe waits for an actual video frame and uses a focused link in the initial Chromium tab so the proof does not depend on the viewer forwarding several browser shortcuts in sequence.
+Earlier runs failed to find the cookie after restart or stopped before persistence at the keyboard navigation step. The passing probe waits for a video frame, then activates a focused link in the first Chromium tab. [`496a285`](https://github.com/sagehou/dsh-workstation/actions/runs/44459609588/job/135342898428) · [`5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/44460212791/job/135344880671)
 
-Traefik kept `/browser/` unchanged using LinuxServer `SUBFOLDER=/browser/`; the [bundled Nginx template](https://github.com/linuxserver/docker-baseimage-selkies/blob/6379480bcbd4ba42c1f5d4ab5eca49304fdedf83/root/defaults/default.conf) expects the prefix and proxies its API to Selkies. The same fixture ForwardAuth denied unauthenticated app and `/browser/` API requests, and the authenticated same-origin iframe streamed over WebSocket. Traefik explicitly sets `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`; a second HTTPS origin on the same site was refused by the browser's frame policy. The app route used a fixture, so this does not establish single sign-on with DSH's own launch-token exchange or production Auth behavior.
+### Routing and limits
 
-The attachment uses `browser.contexts()[0]`, not a newly isolated context. The successful probes disconnected and returned to the running desktop. Do not grant Agent operations that shut down the external browser/context. Full CDP parity, download persistence and recovery after a provider disconnect are outside the observed results.
+- Set LinuxServer `SUBFOLDER=/browser/` and preserve the prefix at Traefik. The bundled Nginx expects that path and proxies the API to Selkies. [bundled Nginx template](https://github.com/linuxserver/docker-baseimage-selkies/blob/6379480bcbd4ba42c1f5d4ab5eca49304fdedf83/root/defaults/default.conf)
+- Fixture ForwardAuth denied unauthenticated app and `/browser/` API requests. The authenticated same-origin iframe streamed over WebSocket.
+- Traefik applied `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`. The browser rejected an iframe on a second HTTPS origin on the same site.
+- The app route used a fixture. The experiment did not exercise official DSH launch-token exchange or production Auth.
+
+- The probe attaches to `browser.contexts()[0]`, disconnects, and leaves the desktop running. Agent operations must not shut down the shared browser or context.
+- Full CDP parity, download persistence, and recovery after a Provider disconnect were outside this probe.
 
 ## C — Exclusive control
 
-Selkies `2.2.1` documents [`SELKIES_MASTER_TOKEN` and `POST /api/tokens`](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/docs/secure-mode.md). Its [input authority rule](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/sessions.py#L62) is used by both transports. This experiment forces WebSocket transport. It sends keyboard and mouse frames directly and checks event counts in the CDP target; the server verdict alone is insufficient. The same connected socket delivered input before and after the lock. During the lock, event counts stayed unchanged while new video arrived. The passing run at `d71856d` reported:
+### Selkies input path
+
+- Selkies `2.2.1` uses its secure-mode input authority rule across both transports. This probe forces WebSockets. [`SELKIES_MASTER_TOKEN` and `POST /api/tokens`](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/docs/secure-mode.md) · [input authority rule](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/sessions.py#L62)
+- Send raw keyboard and mouse frames and count actual events in the CDP target. Input arrived before and after the lock on the same connection. While locked, the count stayed flat and fresh video arrived.
+
+Observed at `d71856d`.
 
 ```text
 Selkies server denied raw keyboard and mouse frames while the same socket received new video
 restoring the token table re-enabled keyboard and mouse on the existing socket
 ```
 
-At [`5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/44460212791/job/135344880925), the job stopped with `Selkies secure-mode control plane unavailable`. The passing fixture uses a one-line Compose secret with no trailing newline and adds status-only diagnostics. It keeps the token administration route off the Traefik browser router. WebRTC, alternate input/device paths, held key/button state across handover, and fail-closed behavior across Selkies restart still need evidence as applicable to the final integration.
+- The first secure-mode run at `5686d9e` stopped at `Selkies secure-mode control plane unavailable`. The passing probe uses a one-line Compose secret with no trailing newline, reports status only, and keeps token administration off the public browser route. [`5686d9e`](https://github.com/sagehou/dsh-workstation/actions/runs/44460212791/job/135344880925)
+- WebRTC, alternate input and device paths, held keys or buttons at handover, and fail-closed behavior after a Selkies restart need evidence where applicable.
 
-The unsecured CDP relay in Gate B is for the experiment only. The official DSH [Browser Use Playwright MCP provider](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/experimental/browser-use-playwright-mcp/README.md) documents `mode: attach` and `endpoint`. Its Session reservation is local to the provider instance. The shared `ctx.browserUse` service only registers a provider; there is no shared action interception API. DSH's public [`ctx.tools.guard`](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/tools.md#ctxtools--tools) can veto tool admission; the [pipeline](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/core/tools/src/pipeline.ts#L213) checks it before dispatch. A guard in DSH does not enforce a lease on direct CDP reachable from the Agent's execution environment.
+### DSH tool and CDP paths
 
-The approved [independent Provider experiment](M0-provider-evidence.md) used DSH's documented [Streamable HTTP MCP integration](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/mcp.md) in its ACP profile. Only the Provider could reach private CDP. Lease admission, takeover drain, expiry, concurrency, stale generations and DSH, Chromium and Provider process loss/restart passed in the fixture. The job failed the held pointer assertion: a mouse-down before the grant remained in effect until input authority returned to HUMAN. Gate C needs a supported way to quiesce and release already accepted input before granting Agent control.
+- Gate B's CDP relay belongs to the experiment.
+- The official Browser Use Playwright MCP provider documents `mode: attach` and `endpoint`. Its Session reservations are local to each provider. `ctx.browserUse` registers providers and supplies no shared action hook. [Browser Use Playwright MCP provider](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/experimental/browser-use-playwright-mcp/README.md)
+- `ctx.tools.guard` can reject admission before dispatch. Direct CDP from the Agent environment bypasses that guard, so keep CDP outside its network. [`ctx.tools.guard`](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/tools.md#ctxtools--tools) · [pipeline](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/core/tools/src/pipeline.ts#L213)
+
+- The separately approved Provider used official Streamable HTTP MCP in the ACP profile. Its fixture passed leases, takeover drain, expiry, concurrency, stale generations, and DSH, Chromium, and Provider disconnect or restart. Only the Provider had access to private CDP. [independent Provider experiment](M0-provider-evidence.md) · [Streamable HTTP MCP integration](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/mcp.md)
+- **The held-pointer case failed.** If the user held a mouse button before the grant, it stayed pressed until control returned to HUMAN. A supported handoff must stop and release already accepted input before granting Agent control.
 
 ## D — Native Sidebar lifecycle
 
-The exact [Sidebar docs](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/sidebar-right.md) and [client module contract](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/client-modules.md) identify `dsh.client`, the `./client` bundle export, `ctx.sidebarRightTabs.register`, the `sidebar.right.pane.tab` slot, and `keepMounted`. The probe installs a local Bundle through Plugin Manager and uses those public services. Its tiny client artifact uses the documented bundled format produced by the [pinned upstream preset](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/tsdown.client.ts#L1-L12). The frame is a same-origin response fixture, not the live Selkies UI. It uses a load count and a value inside the iframe as witnesses of its browsing context, rather than only checking that an iframe element still exists.
+### Public API and fixture
 
-The [public service](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/service.ts#L249-L298) has `float` and `dock`. The floating [header and resize handle](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-dockkit/src/components/FloatLayer.tsx#L311-L345) provide native drag, resize and dock UI, without a floating maximize/restore operation. Fullscreen applies to the [docked column](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx#L273-L292). The documented [`hide` implementation](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/service.ts#L577-L585) closes a floating tab. `keepMounted` does not make a closed tab survive. Closing an iframe is distinct from stopping the separate Chromium container. The corresponding service and float header in [`0.2.2-rc.5`](https://github.com/deepseek-ai/deepseek-harness/tree/9c2670d3bce5275e0d1610272958121af87787bb/packages/client) have the same limits.
+- The public surface exposes `dsh.client`, the `./client` Bundle export, `ctx.sidebarRightTabs.register`, the `sidebar.right.pane.tab` slot, and `keepMounted`. [Sidebar docs](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/sidebar-right.md) · [client module contract](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/docs/subsystems/client-modules.md)
+- The probe installs a local Bundle via Plugin Manager, with the client bundled by the pinned upstream preset. The frame loads a same-origin fixture. Load count and a value inside the frame prove whether its browsing context survives. [pinned upstream preset](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/tsdown.client.ts#L1-L12)
 
-The diagnostic run [`f4cd89a`](https://github.com/sagehou/dsh-workstation/actions/runs/44462375518/job/135351996893) reported `web boot: 1 entry did not activate` (`dsh-m0-sidebar-probe: failed`). The subsystem summary presents a `guide` entry's fields; the published [`SidebarRightTabDefinition`](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/tab-registry.ts#L61-L137) requires `guide?: readonly SidebarRightGuideEntry[]` with an `id` per entry. Both the npm `./client` declaration and the registry implementation confirm the array form. After that correction and a fix to the conversation locator, the [remote Sidebar job at `93a31de`](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930328) ran the fixture against the actual npm Web app. A loopback model fixture settled the session with no DeepSeek account:
+| Capability | Upstream behavior |
+| --- | --- |
+| Float and dock | The public service exposes `float` and `dock`. The floating header supports drag, resize, and dock. [public service](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/service.ts#L249-L298) · [header and resize handle](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-dockkit/src/components/FloatLayer.tsx#L311-L345) |
+| Maximize and restore | Fullscreen and restore apply to the docked column. Floating maximize and restore are unavailable. [docked column](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx#L273-L292) |
+| Hide | The public `hide` closes a floating tab. `keepMounted` cannot preserve the closed iframe. The separate Chromium container keeps running. [`hide` implementation](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/service.ts#L577-L585) |
+| Second tested release | `0.2.2-rc.5` has the same service and floating header limits. [`0.2.2-rc.5`](https://github.com/deepseek-ai/deepseek-harness/tree/9c2670d3bce5275e0d1610272958121af87787bb/packages/client) |
+
+### Observed lifecycle
+
+- The first probe reported `web boot: 1 entry did not activate` (`dsh-m0-sidebar-probe: failed`). The published `SidebarRightTabDefinition` requires `guide?: readonly SidebarRightGuideEntry[]`, with an `id` per entry. The npm `./client` declaration and registry implementation confirm the array. [`f4cd89a`](https://github.com/sagehou/dsh-workstation/actions/runs/44462375518/job/135351996893) · [`SidebarRightTabDefinition`](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-sidebar-right/src/client/tab-registry.ts#L61-L137)
+- After correcting the entry and conversation locator, the npm Web app ran the probe with a loopback model fixture and no DeepSeek account. [remote Sidebar job at `93a31de`](https://github.com/sagehou/dsh-workstation/actions/runs/44462971576/job/135353930328)
 
 ```text
 npm DSH loaded the external client plugin through its Profile bundle
@@ -145,6 +213,7 @@ iframe retained across docked fullscreen and restore
 upstream floating hide closes the tab; its iframe does not survive
 ```
 
-The agreed native floating lifecycle waits for upstream support. The standalone Provider demonstrated gated browser tool calls through official MCP in ACP without DSH core changes. Neither the official Playwright MCP Browser Use package nor credential binding to Web Profile sessions was validated under a lease.
+- Native floating behavior waits for upstream support.
+- The standalone ACP Provider gated browser calls through official MCP without changes to DSH core. The official Playwright MCP Browser Use package and Web Profile credential binding under a lease were outside this experiment.
 
-Evidence collected 2026-11-19 UTC. These experiments are disposable and are not production deployments.
+M0 evidence collected 2026-11-19 UTC on disposable test environments.
