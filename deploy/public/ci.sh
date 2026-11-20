@@ -56,6 +56,7 @@ spki() { openssl x509 -in "$1" -pubkey -noout | openssl pkey -pubin -outform DER
 export CI_EDGE_SPKI="$(spki "$edge_dir/cert.pem")"
 export CI_FIXTURE_SPKI="$(spki "$state/fixture/cert.pem")"
 export BROWSER_TOOL_ORIGINS=https://fixture.test
+export WORKSTATION_CI_STATE="$state/ci-state"
 
 compose config -q
 compose build auth runtime provider
@@ -135,7 +136,10 @@ expect_status() {
   local wanted="$1" observed
   shift
   observed="$(curlhere -o /dev/null -w '%{http_code}' "$@")"
-  test "$wanted" = "$observed"
+  if [[ $observed != "$wanted" ]]; then
+    printf 'Expected HTTPS %s, received %s for %s\n' "$wanted" "$observed" "${@: -1}" >&2
+    return 1
+  fi
 }
 test "$(curl -sS --max-time 10 --resolve workstation.test:80:127.0.0.1 -o /dev/null -w '%{redirect_url}' http://workstation.test/)" = 'https://workstation.test/'
 expect_status 303 -H 'Accept: text/html' https://workstation.test/
