@@ -98,6 +98,8 @@ services:
     networks: [workstation]
 
   chromium:
+    # Chromium records the hostname in its persistent profile lock.
+    hostname: dsh-workstation-chromium
     image: lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2
     restart: unless-stopped
     shm_size: 1gb

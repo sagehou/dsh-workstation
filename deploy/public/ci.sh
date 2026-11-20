@@ -182,16 +182,31 @@ browser_id() {
     console.log(new URL((await response.json()).webSocketDebuggerUrl).pathname)
   '
 }
+profile_lock() {
+  compose exec -T chromium sh -c 'hostname; readlink /config/chromium/SingletonLock || true'
+}
 previous="$(browser_id)"
+echo 'Chromium host and profile lock before replacement'
+profile_lock
 compose kill -s SIGKILL cdp-relay
 compose up -d --no-build --force-recreate chromium cdp-relay
 current=''
 for attempt in {1..60}; do
   current="$(browser_id 2>/dev/null || true)"
-  if [[ -n $current && $current != "$previous" ]]; then break; fi
+  if if [[ -z $current || $current == "$previous" ]]; then
+  echo 'No new CDP instance after recreation. Chromium host and profile lock:' >&2
+  profile_lock >&2 || true
+  browser_id >&2 || true
+  exit 1
+fi; then break; fi
   sleep 2
 done
-[[ -n $current && $current != "$previous" ]]
+if [[ -z $current || $current == "$previous" ]]; then
+  echo 'No new CDP instance after recreation. Chromium host and profile lock:' >&2
+  profile_lock >&2 || true
+  browser_id >&2 || true
+  exit 1
+fi
 compose up -d --no-build --wait --wait-timeout 120 provider
 echo 'Chromium and killed relay recreated; Provider reached a new Chromium instance through the reused socket volume'
 check browser
