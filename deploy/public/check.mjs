@@ -186,6 +186,68 @@ try {
     assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
     assert.equal(await send(first, 'open1', 'navigate', { generation, url: 'https://fixture.test/alpha' }), 'OK')
     assert.equal(await send(first, 'read1', 'read', { generation }), 'WTAB_ALPHA')
+
+    // #4 on the real Selkies instance: a human presses and holds a pointer
+    // button on the live desktop, then hands the tab to the Agent.
+    //
+    // The desk below is the operator's own Selkies session reached through the
+    // input gate, authorised by the real token table. The press is a real
+    // protocol frame on that socket, and the witness is the page the desktop is
+    // actually driving -- the Agent's own tab. So `mousedown` and `mouseup` are
+    // what Chromium received, not what the gate or the page claimed.
+    await action('接管浏览器')
+    const heldRedirect = await context.request.get(root + '/_auth/browser', { maxRedirects: 0 })
+    assert.equal(heldRedirect.status(), 303, 'the desk entry point did not redirect')
+    const heldToken = decodeURIComponent((heldRedirect.headers().location ?? '').split('#token=')[1] ?? '')
+    assert.match(heldToken, /^[0-9a-f]{32,}$/, 'the desk entry point carried no session token')
+    const desk = await context.newPage()
+    // An authenticated same-origin document with no WebSocket of its own, so the
+    // socket below is the only one and does not fight the page's own session.
+    await desk.goto(root + '/_auth/account')
+    // Selkies takes the token from the `selkies.token.<base64url>` subprotocol
+    // (stream_server.py:1321-1346), which is what the real page offers.
+    const heldProtocol = 'selkies.token.' + Buffer.from(heldToken, 'utf8').toString('base64url')
+    await desk.evaluate(protocol => {
+      // Speak the data protocol directly, which is how the page drives the
+      // desktop and what makes a client-side toggle irrelevant here.
+      const ws = new WebSocket('wss://' + location.host + '/browser/api/websockets', ['selkies', protocol])
+      window.ciDesk = { ws, mk: null }
+      ws.addEventListener('open', () => ws.send('SETTINGS,' + JSON.stringify({
+        displayId: 'primary', tabId: 'ci-hold', encoder: 'jpeg',
+        initialClientWidth: 1024, initialClientHeight: 768,
+      })))
+      ws.addEventListener('message', ({ data }) => {
+        if (data === 'MK_ACCESS,1' || data === 'MK_ACCESS,0') window.ciDesk.mk = data.at(-1)
+      })
+    }, heldProtocol)
+    await until('the desk socket to be granted input authority', async () =>
+      desk.evaluate(() => window.ciDesk.mk === '1'), 30_000)
+    // Press and hold, and leave it down: this is the state M0 recorded
+    // surviving the whole Agent lease. The motion first is what M0's own pulse
+    // does; Selkies needs a pointer position before it will act on a button.
+    await desk.evaluate(() => window.ciDesk.ws.send('m,320,240,0,0'))
+    await wait(300)
+    await desk.evaluate(() => window.ciDesk.ws.send('m,320,240,1,0'))
+    await wait(700)
+
+    // Hand the tab over while the button is still down. The Provider refuses
+    // the lease when its handover fails, so reaching AGENT here already means
+    // the gate proved a release on this socket.
+    await action('将标签页交给 Agent', first)
+    const heldGeneration = await send(first, 'lease-held', 'lease_status')
+    assert.match(heldGeneration, /^[a-f0-9-]{36}:\d+$/,
+      'the grant was refused over a socket holding a button, so no release was proven')
+    const held = await send(first, 'hold-witness', 'read', { generation: heldGeneration })
+    const counts = /HOLD:(\d+):(\d+)/.exec(held ?? '')
+    assert.ok(counts, 'the held-input witness was not readable: ' + held)
+    const downs = Number(counts[1])
+    const ups = Number(counts[2])
+    // Positive control: without a press that actually landed, "released" would
+    // prove nothing at all.
+    assert.ok(downs >= 1, 'the press never reached the Agent tab, so this proves nothing: ' + held)
+    assert.ok(ups >= downs, 'the desktop was left mid-press by the handover: ' + held)
+    console.log('Held pointer: a button pressed and held on the real desktop was released at the Selkies boundary before the Agent took the tab')
+    await desk.close()
     await action('接管浏览器')
     await action('将标签页交给 Agent', second)
     const other = await send(second, 'lease2', 'lease_status')

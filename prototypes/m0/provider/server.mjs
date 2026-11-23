@@ -136,6 +136,10 @@ async function bindTab(peer) {
   if (peer.binding) return peer.binding
   const id = browserId
   const tab = await browser.contexts()[0].newPage()
+  // The Agent's tab has to be the one on the shared desktop: a binding that is
+  // not foregrounded would take input without the Agent or the operator being
+  // able to see what it is driving.
+  await tab.bringToFront()
   check(state === 'HANDOVER' && browserId === id && browser.isConnected() && peer.stream, 'OWNER_LOST_DURING_GRANT')
   const onClose = () => {
     if (state === 'AGENT' && lease?.peer === peer) void handover('TAB_CLOSED').catch(() => {})
