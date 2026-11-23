@@ -93,7 +93,7 @@ channel and the install guide no longer uses it.
 
 | Check | Evidence |
 | --- | --- |
-| A digest reference pulls and runs | CI publishes a build to a loopback registry, resolves `localhost:<port>/name:version@sha256:...` through the real resolver, removes the local tags and pulls it back, then inspects the image ID. |
+| A digest reference pulls and runs | CI publishes a build to a loopback registry, resolves `localhost:<port>/name:version@sha256:...` through the real resolver, removes the local tags and pulls it back, then inspects the image ID. The `release-compose` job also pulls the four real GHCR digests with no credential, builds nothing, and passes the same stack checks. |
 | Upgrade follows a new digest | A second build under a new version produces a distinct digest, and the resolver follows it. |
 | Rollback restores exactly the earlier image | Restoring the first digest pulls back an image whose ID equals the original pull. |
 | A missing digest fails rather than drifting to a tag | The resolver, its 18 shell checks and the initializer all fail. Verified by temporarily making the resolver fall back to a tag, which made three resolver checks and the `--release` initializer check fail. |
@@ -103,17 +103,43 @@ channel and the install guide no longer uses it.
 The loopback registry is deliberate: `WORKSTATION_IMAGE_REGISTRY` accepts only
 GHCR or a loopback address, so this test cannot masquerade as a publish.
 
+### The first release, 2026-11-23
+
+Tag `v0.2.0` published four images:
+
+| Image | Version | Manifest list digest |
+| --- | --- | --- |
+| `dsh-workstation-runtime` | 0.2.0 | `sha256:61dddb88c65ac8ee9cd891317b1b6f675384266c87f6ef428ba1b13e5cc33cff` |
+| `dsh-workstation-auth` | 0.1.1 | `sha256:7a25eb333de2091ec1d1a622864cfa83b1aed5b22c42522a741e6fd946e1a2f6` |
+| `dsh-workstation-provider` | 0.2.0 | `sha256:240c662037662cd3719eb50a572f972f5d8b1434df90e90448ce21658412393f` |
+| `dsh-workstation-browser-gate` | 0.1.0 | `sha256:fc265c6f36806def3401c86925588671721f6cade13070c55aaf7284d3606c5f` |
+
+Checked against the registry independently of the workflow: each tag's
+`Docker-Content-Digest` equals the recorded value, each manifest list carries a
+`linux/amd64` target, and each digest resolves with an **anonymous** pull token,
+which is what shows the packages are public rather than merely present.
+
+The first attempt failed, and the failures were real:
+
+1. The build job ran `${reference%%:*}` on the resolver's whole
+   `name=reference` line, producing the tag
+   `ghcr.io/sagehou/runtime=dsh-workstation-runtime:0.2.0`. Two further call
+   sites in the `record` job had the same bug. Fixed, and `images.test.sh` now
+   asserts every workflow assignment from the resolver is followed by the
+   prefix strip.
+2. `public-compose.yml` did not watch `.github/workflows/publish-images.yml`, so
+   the guard that would have caught (1) never ran on the change that broke it.
+3. The `record` job failed **after** all four pushes succeeded, on its own test:
+   two tests had assumed the checked-in matrix was unpublished, so filling in
+   real digests broke them. Pulls and visibility were then verified by hand.
+   The tests now construct the unpublished state instead of reading it.
+
 ## Not yet verified
 
-- **No image has been pushed to GHCR yet.** The registry round-trip above is
-  proved against a loopback registry on a real daemon, not GHCR. What remains
-  unproven is GHCR-specific: package visibility actually being public, the
-  anonymous pull from a host with no credential, and the `ghcr-release`
-  environment approval.
 - Approval gating requires an administrator to add required reviewers to the
   `ghcr-release` environment. Until that is done a tag push publishes without a
-  gate. This cannot be asserted from code.
-- Upgrade and rollback across two real releases on a host has not been run;
-  there is only one release to date.
-- The workflow has passed `actionlint` 1.7.7 and its `plan` and `record` scripts
-  have been executed by hand, but the workflow itself has never run on GitHub.
+  gate, which is what happened for `v0.2.0`. This cannot be asserted from code.
+- Upgrade and rollback across two real releases on a deployment host has not
+  been run; there is only one release. The digest mechanism itself is proven,
+  but not the operator procedure on a real host.
+- Only `linux/amd64` is published. There is no multi-architecture claim.
