@@ -11,7 +11,8 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 compose() { docker compose -f compose.preview.yml "$@"; }
 tool() { compose run --rm --no-deps -T maintenance "$@"; }
-in_image() { compose run --rm --no-deps -T --entrypoint sh maintenance -ec "$1"; }
+# The Runtime image ships bash, and these snippets use bash conditionals.
+in_image() { compose run --rm --no-deps -T --entrypoint bash maintenance -ec "$1"; }
 active() { tool status | sed -n 's/^Active: //p'; }
 trap 'compose down --volumes --remove-orphans' EXIT
 
@@ -22,6 +23,9 @@ expect() { [[ $2 == "$3" ]] || fail "$1" "expected $3, got $2"; }
 FROM=0.2.2-rc.1
 TO=0.2.2-rc.5
 INTERNAL=/dsh-home/profiles/web
+# A synthetic Profile for the gate cases. DSH scans every directory under
+# profiles/, so a separate one is enough to exercise the gate.
+DSH_GATE_PROFILE=/dsh-home/profiles/drill-gate
 
 # A hosted runner can still hold a previous run's project, and Docker then
 # fails the static-IP attach with "Address already in use". That is host state,
@@ -46,14 +50,18 @@ pass initial 'preview ready; Runtime image captured for the image-rollback step'
 # 1. An installed Profile bundle that pins another DSH version blocks the
 #    switch. This is the real production constraint: the Workstation Bundle
 #    declares engines.dsh, so DSH cannot move without a matching Bundle.
-# Save the real Profile manifest first, so the drill can put it back after the
-# synthetic cases and the readiness probe runs against real data.
-in_image 'cp -a '"$INTERNAL"'/package.json /dsh-home/.drill-package.json 2>/dev/null || printf %s "{}" > /dsh-home/.drill-package.json'
+#
+#    The synthetic bundle goes in its own Profile so the real one is never
+#    mutated: the readiness probe runs against live Profile data, and corrupting
+#    it would make a failing probe look like a candidate defect.
+GATE=$DSH_GATE_PROFILE
 in_image '
-  mkdir -p '"$INTERNAL"'/node_modules/dsh-drill-pin
+  mkdir -p '"$GATE"'/node_modules/dsh-drill-pin
+  printf %s "{\"name\":\"drill-gate\",\"version\":\"1.0.0\",\"private\":true,\"dependencies\":{\"dsh-drill-pin\":\"1.0.0\"}}" \
+    > '"$GATE"'/package.json
+  printf %s "lockfileVersion: 9" > '"$GATE"'/pnpm-lock.yaml
   printf %s "{\"name\":\"dsh-drill-pin\",\"version\":\"1.0.0\",\"engines\":{\"dsh\":\"'"$FROM"'\"}}" \
-    > '"$INTERNAL"'/node_modules/dsh-drill-pin/package.json
-  printf %s "{\"name\":\"web\",\"dependencies\":{\"dsh-drill-pin\":\"1.0.0\"}}" > '"$INTERNAL"'/package.json
+    > '"$GATE"'/node_modules/dsh-drill-pin/package.json
 '
 # Remove the candidate if an earlier drill left it installed, so this step
 # proves a blocked upgrade still installs the candidate beside the active one.
@@ -69,11 +77,12 @@ pass compat "a bundle pinning $FROM blocked $TO; the pointer and the audit log a
 
 # 2. Unapproved Profile lifecycle scripts block by exact package identity.
 in_image '
-  rm -rf '"$INTERNAL"'/node_modules/dsh-drill-pin
-  printf %s "{\"name\":\"web\",\"dependencies\":{}}" > '"$INTERNAL"'/package.json
-  mkdir -p '"$INTERNAL"'/node_modules/native-drill
+  rm -rf '"$GATE"'/node_modules/dsh-drill-pin
+  printf %s "{\"name\":\"drill-gate\",\"version\":\"1.0.0\",\"private\":true,\"dependencies\":{\"native-drill\":\"1.0.0\"}}" \
+    > '"$GATE"'/package.json
+  mkdir -p '"$GATE"'/node_modules/native-drill
   printf %s "{\"name\":\"native-drill\",\"version\":\"1.0.0\",\"scripts\":{\"postinstall\":\"node-gyp rebuild\"}}" \
-    > '"$INTERNAL"'/node_modules/native-drill/package.json
+    > '"$GATE"'/node_modules/native-drill/package.json
 '
 tool upgrade "$TO" >/tmp/scripts.log 2>&1 && fail scripts 'an unapproved postinstall did not block the upgrade'
 grep -q 'native-drill@1.0.0 declares postinstall' /tmp/scripts.log || fail scripts "unexpected refusal: $(cat /tmp/scripts.log)"
@@ -81,8 +90,8 @@ expect scripts "$(active)" "$FROM"
 pass scripts 'an unapproved postinstall blocked the switch by package name'
 
 # 3. Approving exactly that package version clears the gate. The synthetic
-#    package is then removed before the real upgrade, so the DSH readiness
-#    probe runs against a Profile that contains only real packages.
+#    Profile is then removed, so the real upgrade and its readiness probe run
+#    against the real Profile only.
 tool approve native-drill@1.0.0 >/tmp/approve.log 2>&1 || fail approve "approval failed: $(cat /tmp/approve.log)"
 if tool approve 'native-drill@^1.0.0' >/dev/null 2>&1; then
   fail approve 'a semver range was accepted as an approval'
@@ -92,10 +101,7 @@ if tool approve 'native-drill@1.0.0extra' >/dev/null 2>&1; then
 fi
 tool compat "$TO" >/tmp/compat.log 2>&1 || fail approve "the approval did not clear the gate: $(cat /tmp/compat.log)"
 grep -q '0 unapproved' /tmp/compat.log || fail approve 'the gate still reported an unapproved script'
-in_image '
-  rm -rf '"$INTERNAL"'/node_modules/native-drill
-  if [[ -f /dsh-home/.drill-package.json ]]; then cp -a /dsh-home/.drill-package.json '"$INTERNAL"'/package.json; fi
-'
+in_image 'rm -rf '"$GATE"
 pass approve 'an exact package@version approval cleared the gate; a range and a suffix were refused'
 
 # 3b. The real upgrade runs against the real Profile.
