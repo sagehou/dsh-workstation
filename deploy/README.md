@@ -139,7 +139,7 @@ preview run --rm --no-deps maintenance restore 20260101T120000Z.a1b2c3d4e5f6
 preview up -d --no-build --wait --wait-timeout 360 runtime
 ```
 
-A restore replaces every top-level entry of DSH_HOME except `runtime`, so the installed versions and the audit log survive it. It does not touch the workspace, Chromium profile, or Auth database: restore those from their own backups when the migration affected them.
+A restore replaces every top-level entry of DSH_HOME except `runtime` and `pnpm`, so the installed versions, the pnpm store and the audit log survive it. It does not touch the workspace, Chromium profile, or Auth database: restore those from their own backups when the migration affected them.
 
 Record the observed outcome in the deployment log. `preview run --rm --no-deps maintenance audit` prints the transaction trail (`start`, `switched`, `verified`, `pointer-rollback`, `restored`, `script-approved`) with no credentials.
 

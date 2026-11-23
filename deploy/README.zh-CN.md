@@ -137,7 +137,7 @@ preview run --rm --no-deps maintenance restore 20260101T120000Z.a1b2c3d4e5f6
 preview up -d --no-build --wait --wait-timeout 360 runtime
 ```
 
-恢复会替换 DSH_HOME 除 `runtime` 之外的每个顶层条目，因此已安装版本和审计日志得以保留。它不改动工作区、Chromium 配置和 Auth 数据库：迁移涉及它们时，用各自的备份恢复。
+恢复会替换 DSH_HOME 除 `runtime` 与 `pnpm` 之外的每个顶层条目，因此已安装版本、pnpm 存储和审计日志得以保留。它不改动工作区、Chromium 配置和 Auth 数据库：迁移涉及它们时，用各自的备份恢复。
 
 把实际结果记入部署日志。`preview run --rm --no-deps maintenance audit` 输出事务轨迹（`start`、`switched`、`verified`、`pointer-rollback`、`restored`、`script-approved`），不含凭据。
 

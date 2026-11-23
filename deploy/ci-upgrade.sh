@@ -174,7 +174,12 @@ pass pointer "active returned to $FROM while the migrated data stayed in place"
 # 8. A matched data restore returns the pre-migration Profile state.
 tool restore "$backup_id" >/tmp/restore.log 2>&1 || fail restore "restore failed: $(cat /tmp/restore.log)"
 expect restore "$(active)" "$FROM"
-in_image '! grep -q "# drill migration" '"$INTERNAL"'/pnpm-lock.yaml' || fail restore 'the migration marker survived'
+# The real Profile has no lockfile, so the synthetic migration created one.
+# Assert both halves positively: the marker is gone, and the Profile itself
+# still exists. `! grep -q` alone would also pass if restore had deleted the
+# whole directory.
+in_image '! test -e '"$INTERNAL"'/pnpm-lock.yaml && test -f '"$INTERNAL"'/package.json' ||
+  fail restore 'the migration marker survived, or the Profile manifest was lost'
 pass restore "restored $backup_id and removed the simulated migration"
 
 # 8b. The restore must not delete what the archive never contained: the
