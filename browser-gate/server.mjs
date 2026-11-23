@@ -133,12 +133,15 @@ function handover () {
 
 async function handoverStep () {
   const current = link
+  // An unproven release leaves the desktop's held state unknown, so it stays
+  // unknown until some handover actually proves a release. Without a connection
+  // that currently holds authority, there is nothing that could prove it now,
+  // so the refusal has to outrank both the idle and the not-yet-granted cases.
+  const cannotProve = !current || !current.gate.authority
+  if (cannotProve && unproven) {
+    throw new Error('a previous handover could not be proven: ' + unproven)
+  }
   if (!current) {
-    // An unproven release leaves the desktop's held state unknown, so it must
-    // not be reported as clear just because no page is currently attached.
-    if (unproven) {
-      throw new Error('a previous handover could not be proven: ' + unproven)
-    }
     // Nothing is connected, so nothing is currently held.
     return { released: true, frames: 0, barrierMs: 0, note: 'no operator connection' }
   }

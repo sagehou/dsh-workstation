@@ -511,3 +511,35 @@ test('a page that sends its handshake before the gate reaches upstream is not dr
     slowHTTP.close()
   }
 }, { concurrency: false })
+
+test('an unproven release is not forgotten by a connection that has not been granted yet', async () => {
+  // The idle case is only safe to report because nothing can still be held.
+  // A page that has reconnected but not yet been granted authority is not the
+  // same thing: the press the gate failed to clear may still be down, and
+  // "this connection never held authority" says nothing about it.
+  const operator = await humanHoldingInput()
+  session.autoPong = false
+  assert.notEqual((await call('/handover')).status, 200)
+  operator.close()
+  await waitFor(async () => (await call('/status')).body.connected === false,
+    'the operator connection did not go away')
+
+  // Reconnect, but make Selkies withhold the grant so no release can be proven.
+  session.autoPong = true
+  const reconnected = await connectOperator()
+  await waitFor(async () => (await call('/status')).body.connected === true,
+    'the gate did not see the reconnected operator')
+  const status = await call('/status')
+  assert.equal(status.body.authority, false, 'this test needs a socket without authority')
+  const refused = await call('/handover')
+  assert.notEqual(refused.status, 200, 'an unproven release was reported as clear')
+  assert.equal(refused.body.released, false)
+
+  // A real grant does allow the proof, and that clears the mark.
+  session.ws.send('MK_ACCESS,1')
+  await waitFor(async () => (await call('/status')).body.state === 'OPEN', 'the grant did not arrive')
+  const proven = await call('/handover')
+  assert.equal(proven.status, 200, JSON.stringify(proven.body))
+  assert.equal(proven.body.released, true)
+  reconnected.close()
+}, { concurrency: false })
