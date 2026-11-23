@@ -85,12 +85,15 @@ function pass(name, detail) {
 }
 
 // 2. ForwardAuth still denies API and document traffic without a session, and
-//    identity headers cannot be spoofed through the proxy.
+//    identity headers cannot be spoofed through the proxy. The forged headers
+//    are kept separate from Accept so the document/API branch stays explicit.
 {
+  const forged = { 'X-Workstation-User': 'operator', 'X-Forwarded-User': 'operator', 'Remote-User': 'operator' }
   assert.equal((await get('/api/remote.mux', { Accept: 'application/json' })).status, 401, 'unauthenticated API')
-  const forged = { Accept: 'application/json', 'X-Workstation-User': 'operator', 'X-Forwarded-User': 'operator', 'Remote-User': 'operator' }
-  assert.equal((await get('/api/remote.mux', forged)).status, 401, 'forged identity headers must not authenticate')
-  assert.equal((await get('/', { Accept: 'text/html', ...forged })).status, 303, 'forged identity headers must not skip login')
+  assert.equal((await get('/api/remote.mux', { Accept: 'application/json', ...forged })).status, 401,
+    'forged identity headers must not authenticate an API call')
+  assert.equal((await get('/', { Accept: 'text/html', ...forged })).status, 303,
+    'forged identity headers must not skip login for a document')
   const document = await get('/', { Accept: 'text/html' })
   assert.equal(document.status, 303, 'unauthenticated document redirect')
   assert.match(document.headers.location ?? '', /_auth\/login/, 'redirect target')
