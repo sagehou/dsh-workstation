@@ -19,8 +19,8 @@
 | --- | --- | --- | --- |
 | 00 | [#7](https://github.com/sagehou/dsh-workstation/issues/7) | Issue-first 开发和 Agent 进度纪律 | 所有任务都必须遵守；AGENTS 规范已提交，后续任务需验证实际执行。 |
 | 01 | [#3](https://github.com/sagehou/dsh-workstation/issues/3) | Traefik 3.7.14 与 3.7.19 兼容性矩阵 | 目标主机部署前完成。 |
-| 02 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | DSH/Profile 升级事务与数据恢复 | 在用户数据上执行原地升级或迁移前完成。 |
-| 03 | [#8](https://github.com/sagehou/dsh-workstation/issues/8) | Docker 子网可配置和冲突预检 | 目标主机部署前完成。固定 IP、健康检查和证书 SAN 从同一配置生成。 |
+| 02 | [#8](https://github.com/sagehou/dsh-workstation/issues/8) | DSH/Profile 升级事务与数据恢复 | 在用户数据上执行原地升级或迁移前完成。 |
+| 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Docker 子网可配置和冲突预检 | 目标主机部署前完成。固定 IP、健康检查和证书 SAN 从同一配置生成。 |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | 浏览器输入独占和安全交接 | 开放 Agent 控制共享浏览器前完成。 |
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR 镜像发布和不可变部署引用 | 宣布具备可重复的正式镜像分发前完成。 |
 | 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8。#4 通过前关闭 Agent 浏览器控制；#11 通过前关闭不可信网站浏览。 |
