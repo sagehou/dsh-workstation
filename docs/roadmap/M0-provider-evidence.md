@@ -4,7 +4,7 @@ English · [简体中文](M0-provider-evidence.zh-CN.md)
 
 [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1) · [M0 decision](M0-evidence.md) · [Approved experiment design](M0-design.md)
 
-**Gate C remains open.** The fixture enforced Agent leases and drained calls, but it failed to release a mouse button held before the handoff.
+**Gate C failed in this experiment and is now closed by [ADR-0005](../adr/0005-release-held-input-at-selkies.md).** The fixture enforced Agent leases and drained calls, but it failed to release a mouse button held before the handoff. The cause is an ordering property of the pinned Selkies, not a client gap; the release path is recorded below.
 
 ## Experiment topology
 
@@ -67,9 +67,21 @@ The job at `2fbed01` exercised each scenario and exited **1** at the held-pointe
 AssertionError [ERR_ASSERTION]: Gate C BLOCKED: a mouse button held before grant was not released by the live Selkies token update
 ```
 
+## Why the held button failed
+
+The release cannot be issued after the revocation, and the experiment shows why from the server's side.
+
+- Input authority is evaluated per frame against the live token table (`websockets_mode.py:6235`).
+- `provision_tokens()` installs the new table **before** `reconcile_clients()` announces the change (`:8071-8072`, `:8356`).
+- `reconcile_clients()` pushes `MK_ACCESS,0` but never calls `_release_held_input()`. That primitive exists and runs only on socket teardown and reconnect-grace expiry (`:6287`, `:6303`).
+
+So the frame that would release a held button is dropped by the same rule that makes the gate work, and the client only learns of the change once it can no longer act on it. No upstream setting exposes release-on-authority-loss; a `reconcile_clients()` patch would still run after the table install.
+
 ## Decision
 
-Before granting Agent control, stop prior human input, release held devices, and confirm release. In the pinned Selkies version, token reconciliation updates input authority on the live connection. The disconnect path releases held devices. This experiment used neither an input proxy nor a UI toggle. [token reconciliation](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L8297) · [release of held input](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L3103)
+Before granting Agent control, stop prior human input, release held devices, and confirm the release. This experiment used neither an input proxy nor a UI toggle, and the gap it recorded is closed by a server-side WebSocket peer in front of the data socket. [ADR-0005](../adr/0005-release-held-input-at-selkies.md) · [token reconciliation](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L8297) · [release of held input](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L3103)
+
+The gate releases with upstream's own primitives (`kr`, `m2,0,0,0,0,<seq>`), ordered before the Provider flips the table, and proves dispatch with a PING/PONG barrier on the same connection. See [M1](M1.md) for the observed results.
 
 - The experiment used **one Provider**, a pinned Docker topology, and WebSocket Selkies with keyboard and mouse only. File transfers were disabled. A trusted ACP driver issued per-session credentials.
 - Outside this run were Web Profile credential binding, official Playwright MCP Browser Use under a lease, network partitions, and host power loss.
