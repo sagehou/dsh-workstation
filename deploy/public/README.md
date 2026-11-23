@@ -81,7 +81,7 @@ To satisfy yourself that a digest still names the same image, compare it
 against what the registry reports. The value must match exactly:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.0 \
+docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 \
   --format '{{json .Manifest.Digest}}'
 ```
 

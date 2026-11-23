@@ -66,7 +66,7 @@ bash deploy/public/images.sh
 如需核实摘要仍指向同一镜像，把它与仓库报告的摘要比对，必须完全一致：
 
 ```bash
-docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.0 \
+docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 \
   --format '{{json .Manifest.Digest}}'
 ```
 

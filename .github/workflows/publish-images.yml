@@ -172,6 +172,42 @@ jobs:
             echo "instead of republishing over a digest a deployment may already use." >&2
             exit 1
           fi
+      - name: Smoke-test the pushed image
+        # A published tag is a promise. The runtime once shipped with its module
+        # directory at mode 0644, so the container could not enter it and exited
+        # with "cannot locate compat.mjs" -- while the build itself succeeded, and
+        # the failure only appeared in a full-stack run. Run the image here so a
+        # broken artifact is caught at publish time rather than at deploy time.
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ matrix.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          reference="ghcr.io/sagehou/dsh-workstation-${IMAGE}:${VERSION}@${DIGEST}"
+          docker pull --quiet "$reference"
+          case "$IMAGE" in
+            runtime)
+              for path in /usr/local/lib/dsh-runtime \
+                          /usr/local/lib/dsh-runtime/compat.mjs \
+                          /usr/local/lib/dsh-runtime/state.mjs \
+                          /usr/local/lib/dsh-runtime/web.mjs; do
+                docker run --rm --entrypoint sh "$reference" -c "test -e $path" ||
+                  { echo "the runtime image is missing $path" >&2; exit 1; }
+              done
+              # The container runs as an unprivileged user, so entering the
+              # directory is the property that matters, not its existence.
+              docker run --rm --entrypoint sh "$reference" -c \
+                'test -x /usr/local/lib/dsh-runtime && test -r /usr/local/lib/dsh-runtime/compat.mjs' ||
+                { echo 'the runtime image cannot read its own modules as its own user' >&2; exit 1; }
+              docker run --rm --entrypoint dsh-runtime "$reference" health >/dev/null 2>&1 || true
+              ;;
+            auth|provider|browser-gate)
+              docker run --rm --entrypoint sh "$reference" -c 'exit 0' >/dev/null ||
+                { echo "$IMAGE cannot start" >&2; exit 1; }
+              ;;
+          esac
+          echo "Smoke-tested $reference"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: digest-${{ matrix.image }}

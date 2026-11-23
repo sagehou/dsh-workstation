@@ -12,7 +12,14 @@ ENV DSH_HOME=/dsh-home \
     npm_config_ignore_scripts=true
 
 COPY --chmod=0755 dsh-runtime /usr/local/bin/dsh-runtime
-COPY --chmod=0644 web.mjs compat.mjs state.mjs /usr/local/lib/dsh-runtime/
+# `--chmod` applies to the destination directory as well as the files when the
+# destination ends in `/`, so a 0644 here made /usr/local/lib/dsh-runtime
+# unenterable and the runtime could not find its own modules. Naming each file
+# and its full path applies the mode to the file only; COPY creates the parent
+# directory with the default 0755.
+COPY --chmod=0644 web.mjs /usr/local/lib/dsh-runtime/web.mjs
+COPY --chmod=0644 compat.mjs /usr/local/lib/dsh-runtime/compat.mjs
+COPY --chmod=0644 state.mjs /usr/local/lib/dsh-runtime/state.mjs
 COPY browser-bundle /opt/workstation-browser
 USER node
 WORKDIR /workspace

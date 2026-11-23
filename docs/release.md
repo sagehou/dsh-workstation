@@ -71,10 +71,10 @@ bash deploy/public/images.sh --field digest runtime
 
 # What the registry reports for that tag. The two must match exactly.
 docker buildx imagetools inspect \
-  ghcr.io/sagehou/dsh-workstation-runtime:0.2.0 --format '{{json .Manifest.Digest}}'
+  ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 --format '{{json .Manifest.Digest}}'
 
 # An anonymous pull, which is what a deployment host does.
-docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.0@sha256:...
+docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
 ```
 
 ## Platform
@@ -123,7 +123,7 @@ The first attempt failed, and the failures were real:
 
 1. The build job ran `${reference%%:*}` on the resolver's whole
    `name=reference` line, producing the tag
-   `ghcr.io/sagehou/runtime=dsh-workstation-runtime:0.2.0`. Two further call
+   `ghcr.io/sagehou/runtime=dsh-workstation-runtime:0.2.1`. Two further call
    sites in the `record` job had the same bug. Fixed, and `images.test.sh` now
    asserts every workflow assignment from the resolver is followed by the
    prefix strip.

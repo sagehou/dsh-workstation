@@ -35,8 +35,13 @@ check_status() {
 # Every image is listed exactly once, and the four names match compose.yml.
 check 'lists four images' 'runtime auth provider browser-gate' "$(bash "$resolver" --names | tr '\n' ' ' | sed 's/ $//')"
 
-# `--local` produces the development tags that compose.yml builds.
-check 'local runtime tag' 'runtime=dsh-workstation-runtime:0.2.0' "$(bash "$resolver" --local runtime)"
+# `--local` produces the development tags that compose.yml builds, for the
+# version the matrix currently names. Deriving it keeps this check from breaking
+# every time a version is bumped -- which is what happened when the runtime
+# needed a new version and this line was the only thing that failed.
+local_version="$(awk '$1 == "runtime" { print $2 }' "$matrix")"
+[[ -n $local_version ]] || fail 'the matrix has no runtime version'
+check 'local runtime tag' "runtime=dsh-workstation-runtime:$local_version" "$(bash "$resolver" --local runtime)"
 
 # An unpublished version is refused, and nothing is printed on stdout.
 #
@@ -44,7 +49,7 @@ check 'local runtime tag' 'runtime=dsh-workstation-runtime:0.2.0' "$(bash "$reso
 # happened, so the unpublished state is constructed here rather than assumed.
 # Reading the checked-in file would make this test pass or fail depending on
 # whether a release had run -- which is exactly how the first release broke it.
-printf 'runtime 0.2.0\n' > "$matrix"
+printf 'runtime 9.9.9\n' > "$matrix"
 set +e
 out="$(bash "$resolver" runtime 2>/dev/null)"; status=$?
 set -e
@@ -52,19 +57,19 @@ check_status 'unpublished image exits non-zero' 1 "$status"
 check 'unpublished image prints no reference' '' "$out"
 
 # The same holds for JSON, which would otherwise be valid but empty.
-printf 'runtime 0.2.0\n' > "$matrix"
+printf 'runtime 9.9.9\n' > "$matrix"
 set +e
 bash "$resolver" --json >/dev/null 2>&1; status=$?
 set -e
 check_status 'json refuses an unpublished image' 1 "$status"
 
 # With a digest recorded, the reference is registry-qualified, tagged and pinned.
-printf 'runtime 0.2.0 %s\n' "$digest" > "$matrix"
+printf 'runtime 9.9.9 %s\n' "$digest" > "$matrix"
 check 'pinned reference' \
-  "runtime=ghcr.io/sagehou/dsh-workstation-runtime:0.2.0@$digest" \
+  "runtime=ghcr.io/sagehou/dsh-workstation-runtime:9.9.9@$digest" \
   "$(bash "$resolver" runtime)"
 check 'digest field' "$digest" "$(bash "$resolver" --field digest runtime)"
-check 'version field' '0.2.0' "$(bash "$resolver" --field version runtime)"
+check 'version field' '9.9.9' "$(bash "$resolver" --field version runtime)"
 
 # Tag without digest would still be resolvable as a bare tag if the code were
 # careless, so pin the exact shape: the reference must contain "@sha256:".
@@ -96,7 +101,7 @@ set -e
 check_status 'duplicate image is refused' 1 "$status"
 
 # An unknown name must not be silently treated as a known one.
-printf 'runtime 0.2.0 %s\n' "$digest" > "$matrix"
+printf 'runtime 9.9.9 %s\n' "$digest" > "$matrix"
 set +e
 bash "$resolver" not-an-image >/dev/null 2>&1; status=$?
 set -e
@@ -145,7 +150,7 @@ pass 'compose.yml has no image override without a published image'
 # --- every workflow use of the resolver strips the name= prefix ---
 #
 # The resolver prints `name=reference`. Consuming that line directly produced
-# `runtime=dsh-workstation-runtime:0.2.0` as a Docker tag, which failed the first
+# `runtime=dsh-workstation-runtime:0.2.1` as a Docker tag, which failed the first
 # real publish with "invalid reference format". Assert that each workflow call
 # site strips the prefix rather than trusting review to catch it.
 for workflow in .github/workflows/publish-images.yml; do

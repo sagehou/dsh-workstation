@@ -153,9 +153,12 @@ digest=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik
 (( status == 0 )) || fail "the local-build init failed: $out"
-grep -Fxq 'WORKSTATION_RUNTIME_IMAGE=dsh-workstation-runtime:0.2.0' .env.public ||
+# Derive the expected tags from the matrix: hardcoding them made this check fail
+# on every version bump instead of on a real regression.
+local_tag() { awk -v name="$1" '$1 == name { printf "dsh-workstation-%s:%s", name, $2 }' deploy/public/images.env; }
+grep -Fxq "WORKSTATION_RUNTIME_IMAGE=$(local_tag runtime)" .env.public ||
   fail 'the default mode did not record the local runtime tag'
-grep -Fxq 'WORKSTATION_GATE_IMAGE=dsh-workstation-browser-gate:0.1.0' .env.public ||
+grep -Fxq "WORKSTATION_GATE_IMAGE=$(local_tag browser-gate)" .env.public ||
   fail 'the default mode did not record the local gate tag'
 grep -q '@sha256:' .env.public && fail 'the default mode wrote a digest reference'
 pass 'without --release the four images are recorded as local build tags'
@@ -176,7 +179,7 @@ run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik --release
 (( status != 0 )) || fail '--release accepted an unpublished image'
 grep -q 'is not published yet' <<<"$out" || fail "--release did not explain the missing digest: $out"
-grep -Fxq 'WORKSTATION_RUNTIME_IMAGE=dsh-workstation-runtime:0.2.0' .env.public ||
+grep -Fxq "WORKSTATION_RUNTIME_IMAGE=$(local_tag runtime)" .env.public ||
   fail 'a failed --release run damaged the existing image keys'
 pass '--release refuses an unpublished image and leaves the recorded keys intact'
 

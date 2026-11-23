@@ -56,10 +56,10 @@ bash deploy/public/images.sh --field digest runtime
 
 # 仓库为该标签报告的摘要。两者必须完全一致。
 docker buildx imagetools inspect \
-  ghcr.io/sagehou/dsh-workstation-runtime:0.2.0 --format '{{json .Manifest.Digest}}'
+  ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 --format '{{json .Manifest.Digest}}'
 
 # 匿名拉取，也就是部署主机的行为。
-docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.0@sha256:...
+docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
 ```
 
 ## 平台
@@ -104,7 +104,7 @@ manifest list 含 `linux/amd64` 目标、且每个摘要都能用**匿名**拉�
 首次尝试失败过，且失败都是真问题：
 
 1. 构建作业对解析器输出的整行 `name=reference` 执行 `${reference%%:*}`，产生了
-   标签 `ghcr.io/sagehou/runtime=dsh-workstation-runtime:0.2.0`。`record` 作业中
+   标签 `ghcr.io/sagehou/runtime=dsh-workstation-runtime:0.2.1`。`record` 作业中
    另有两处同样缺陷。已修复，且 `images.test.sh` 现在断言工作流中每次调用解析器
    后都必须剥离前缀。
 2. `public-compose.yml` 未监视 `.github/workflows/publish-images.yml`，导致本可

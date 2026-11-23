@@ -110,6 +110,25 @@ else
   # four is built here.
   echo 'Skipping the image build: this leg runs the published digests.'
 fi
+# A COPY whose destination ends in `/` applies --chmod to the directory as well
+# as to the files. A 0644 there made /usr/local/lib/dsh-runtime unenterable, so
+# the published image could not find its own modules while a locally built one
+# sometimes appeared to work. Assert the runtime can reach them as its own user,
+# in both modes, before the stack is started.
+runtime_image="$(sed -n 's/^WORKSTATION_RUNTIME_IMAGE=//p' .env.public)"
+[[ -n $runtime_image ]] || { echo 'the initializer wrote no runtime image' >&2; exit 1; }
+docker run --rm --entrypoint sh "$runtime_image" -c '
+  for path in /usr/local/lib/dsh-runtime /usr/local/lib/dsh-runtime/compat.mjs \
+              /usr/local/lib/dsh-runtime/state.mjs /usr/local/lib/dsh-runtime/web.mjs; do
+    test -e "$path" || { echo "missing: $path" >&2; exit 1; }
+  done
+  test -x /usr/local/lib/dsh-runtime ||
+    { echo "/usr/local/lib/dsh-runtime is not enterable by $(id -un)" >&2; exit 1; }
+  test -r /usr/local/lib/dsh-runtime/compat.mjs ||
+    { echo "compat.mjs is not readable by $(id -un)" >&2; exit 1; }
+' || { echo "the runtime image $runtime_image cannot read its own modules" >&2; exit 1; }
+echo "Runtime image can read its modules as its own user: $runtime_image"
+
 docker build --target probe -t workstation-ci-viewer -f prototypes/m0/browser/Dockerfile prototypes/m0/browser
 node deploy/public/otp.mjs password > "$state/ci-state/password"
 # Keep the bootstrap code valid for the short container startup.
