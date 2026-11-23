@@ -29,9 +29,9 @@ The job matrix reads its versions only from [`deploy/public/traefik-matrix.env`]
 | `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Passed the full stack at `540ddd5` |
 | `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Passed the full stack at `540ddd5` |
 
-Minimum supported edge version: **v3.7.14**. Both legs passed [run 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598) with identical checks: `v3.7.14` ([job 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)) and `v3.7.19` ([job 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)).
+Lowest version with a recorded pass: **v3.7.14**. Both legs passed [run 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598) with identical checks: `v3.7.14` ([job 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)) and `v3.7.19` ([job 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)); both passed again at `43065af` in [run 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367).
 
-This table is not a claim that any Traefik 3.7 patch works — only versions listed here have a recorded run. A version absent from the table is untested, and `deploy/public/traefik-image.sh` refuses to resolve it rather than silently testing a floating tag.
+Only the versions listed here have a recorded run, and this table does not claim that versions between them work. A version absent from the table is untested, and `deploy/public/traefik-image.sh` refuses to resolve it rather than silently testing a floating tag.
 
 Every leg verifies the HTTP→HTTPS redirect, HSTS/nosniff/referrer headers, ForwardAuth returning 401 for APIs and 303 for documents, forged `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` failing to authenticate, the `/browser/` prefix requiring login, `/browser/api/tokens` staying unrouted, the internal DSH TLS chain, Selkies WebSocket video, and the same-origin frame policy after login.
 
