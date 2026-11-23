@@ -167,13 +167,15 @@ grep -q 'process.env.PROVIDER_IP' prototypes/m0/provider/server.mjs ||
   fail 'the provider does not read PROVIDER_IP from its environment'
 grep -q 'process.env.PROVIDER_CONTROL_IP' prototypes/m0/provider/server.mjs ||
   fail 'the provider does not read PROVIDER_CONTROL_IP from its environment'
-# Auth reaches the provider by network alias, so it needs no address at all.
+# Auth calls the provider's control listener at an address Compose derives.
 if grep -q '"http://172\.30\.[0-9]' auth/workstation.go; then
   fail 'auth still calls the provider by a literal address'
 fi
 grep -q 'providerControlAddr' auth/workstation.go ||
-  fail 'auth does not resolve the provider control listener by name'
-pass 'every consumer takes its address from the derivation, and auth uses a network alias'
+  fail 'auth does not read the provider control address from configuration'
+check_binding compose.yml 'AUTH_PROVIDER_CONTROL_ADDR: \$\{BROWSER_PROVIDER_IP' 'give auth the derived provider control address'
+check_binding auth/main.go 'AUTH_PROVIDER_CONTROL_ADDR' 'read the provider control address from its environment'
+pass 'every consumer takes its address from the derivation'
 
 # A literal address compiled into a shipped image cannot follow a custom subnet.
 # The provider bound 172.30.241.3 from a constant and died with EADDRNOTAVAIL on
@@ -187,6 +189,9 @@ while IFS= read -r line; do
   body=${line#*:*:}
   case $body in
     *'process.env'*|*'??'*|*'publicMode ?'*|*'publicMode &&'*) continue ;;
+    # A fallback assigned when the configured value is empty is still
+    # configured; the guard exists to catch an unconditional literal.
+    *'controlAddr ='*|*'Host ='*) continue ;;
   esac
   printf '%s\n' "$line" >>"$work/baked"
 done < <(grep -nE "$address_re" prototypes/m0/provider/server.mjs auth/workstation.go 2>/dev/null || true)

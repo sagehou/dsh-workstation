@@ -38,6 +38,9 @@ services:
       AUTH_EDGE_IP: ${WORKSTATION_TRAEFIK_IP:?run deploy/public/init.sh}
       AUTH_ADDR: dsh-workstation-auth-edge:8080
       AUTH_VERIFY_ADDR: dsh-workstation-auth-edge:8081
+      # Auth calls the provider's control listener. The address comes from the
+      # derivation so a custom subnet moves it too.
+      AUTH_PROVIDER_CONTROL_ADDR: ${BROWSER_PROVIDER_IP:-172.30.233.2}:8081
       AUTH_IDLE: ${AUTH_IDLE:-30m}
       AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-12h}
       AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-8}
@@ -185,9 +188,6 @@ services:
       # and the parser fails on the inner brace.
       workstation:
         ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
-        # Auth reaches the provider's control listener by name, so it does not
-        # carry a copy of the address at all.
-        aliases: [dsh-workstation-provider-control]
       browser:
         ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}
 
