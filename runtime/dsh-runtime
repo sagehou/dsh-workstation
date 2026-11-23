@@ -427,7 +427,12 @@ EOF
     [[ -f $audit ]] || { printf 'No upgrade records.\n'; exit 0; }
     node -e 'for (const line of require("node:fs").readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean)) { const r = JSON.parse(line); console.log([r.at, r.phase, r.from ? `${r.from} -> ${r.to}` : "", r.backup ?? "", r.migrated === undefined ? "" : `migrated=${r.migrated}`].filter(Boolean).join("  ")) }' "$audit"
     ;;
-  compat) lock; compat_gate "${2:-$active}" ;;
+  compat)
+    lock
+    [[ -n ${2:-$active} ]] || die 'usage: dsh-runtime compat VERSION (no version is selected)'
+    compat_gate "${2:-$active}"
+    printf 'Compatibility gate passed for %s\n' "${2:-$active}"
+    ;;
   inspect)
     # Report what a backup would contain, so an operator can judge size and
     # which bundles pin the DSH version before attempting an upgrade.
