@@ -74,6 +74,6 @@
 
 ## 当前移交入口
 
-[#9 — 可配置 Docker 子网与重叠预检](https://github.com/sagehou/dsh-workstation/issues/9) 已完成：`deploy/network.sh` 从同一份配置推导两个子网、动态地址池、所有固定地址、Provider 的绑定地址、健康检查目标与 Runtime 证书 SAN，并在与宿主机路由或现有 Docker 网络重叠时拒绝执行。已在[运行 45130309765](https://github.com/sagehou/dsh-workstation/actions/runs/45130309765) 中于两种地址方案验证：每个 Traefik 版本在默认值与 `10.71.241.0/24` + `10.71.233.0/24` 下均通过。在已有部署上更换子网仍是有损迁移（重建容器、重连 Traefik），尚未在真实主机上演练；预检也尚未遇到真实 VPN 路由表。下一项是 [#4 — 浏览器独占输入与安全交接](https://github.com/sagehou/dsh-workstation/issues/4)。
+[#4 — 浏览器人工输入独占与安全交接](https://github.com/sagehou/dsh-workstation/issues/4) 正按 [ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) 推进。已固定的 Selkies 会在每个输入帧上按实时令牌表判定权限，并且**先**安装新表**再**通告变更，因此权限收回之后发出的释放帧会被丢弃——这正是 M0 的失败现象从服务端视角的表述。不 fork Selkies，而是在输入边界上增加一个小的 `browser-gate`，用上游自带的 `reset_keyboard()` 与 `release_mouse_buttons()` 原语释放已按住输入，并排在 Provider 切换令牌表之前，用 PING/PONG 屏障证明已被派发。在门禁于真实主机上通过完整状态转移矩阵之前，Agent 浏览器控制保持关闭。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。

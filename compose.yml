@@ -41,6 +41,10 @@ services:
       # Auth calls the provider's control listener. The address comes from the
       # derivation so a custom subnet moves it too.
       AUTH_PROVIDER_CONTROL_ADDR: ${BROWSER_PROVIDER_IP:-172.30.233.2}:8081
+      # The browser data socket is proxied through the input gate (ADR-0005).
+      AUTH_BROWSER_UPSTREAM: http://dsh-workstation-browser-gate:8082
+      # Every other browser WebSocket bypasses the gate.
+      AUTH_BROWSER_DIRECT: http://dsh-workstation-chromium:3000
       AUTH_IDLE: ${AUTH_IDLE:-30m}
       AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-12h}
       AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-8}
@@ -108,6 +112,48 @@ services:
       WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.0}
     networks: [workstation]
 
+  # The browser input gate (ADR-0005). Selkies evaluates input authority
+  # against the live token table on every frame and installs a new table before
+  # it announces the change, so a release sent after a revocation is dropped.
+  # The gate releases held input *before* the Provider flips the table, and is
+  # the only path from the operator's page to the Selkies data socket.
+  browser-gate:
+    image: dsh-workstation-browser-gate:0.1.0
+    build:
+      context: .
+      dockerfile: browser-gate/Dockerfile
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=8m"]
+    environment:
+      GATE_ADDR: ${BROWSER_GATE_IP:-172.30.233.4}:8082
+      GATE_UPSTREAM: ws://dsh-workstation-chromium:3000/browser/api/websockets
+      GATE_PATH: /browser/api/websockets
+      GATE_CONTROL_SECRET: /run/secrets/gate_control
+    secrets: [gate_control]
+    depends_on:
+      chromium: {condition: service_started, restart: true}
+    networks:
+      browser:
+        ipv4_address: ${BROWSER_GATE_IP:-172.30.233.4}
+        aliases: [dsh-workstation-browser-gate]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://' + process.env.GATE_ADDR + '/health', {signal: AbortSignal.timeout(2000)})
+            .then(r => { if (r.status !== 204) process.exitCode = 1 })
+            .catch(() => { process.exitCode = 1 })
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
   chromium:
     # Chromium records the hostname in its persistent profile lock.
     hostname: dsh-workstation-chromium
@@ -161,12 +207,14 @@ services:
       # this container, or it fails with EADDRNOTAVAIL on a custom subnet.
       PROVIDER_IP: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
       PROVIDER_CONTROL_IP: ${BROWSER_PROVIDER_IP:-172.30.233.2}
+      # Every input handover goes through the gate first (ADR-0005).
+      PROVIDER_GATE_URL: http://dsh-workstation-browser-gate:8082
       BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
     volumes:
       - provider-state:/state
       - cdp-socket:/run/workstation-cdp:ro
     # Playwright attaches to Chromium; it never downloads or launches a browser.
-    secrets: [m0_master, m0_controller, m0_sentinel, m0_admin, browser_enroll]
+    secrets: [m0_master, m0_controller, m0_sentinel, m0_admin, browser_enroll, gate_control]
     healthcheck:
       test:
         - CMD
@@ -225,6 +273,8 @@ secrets:
     file: ${WORKSTATION_STATE:-./.workstation}/secrets/selkies-sentinel
   browser_enroll:
     file: ${WORKSTATION_STATE:-./.workstation}/secrets/browser-enroll
+  gate_control:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/gate-control
 
 volumes:
   auth-data:

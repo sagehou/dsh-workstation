@@ -9,6 +9,7 @@ on:
       - runtime/**
       - provider/**
       - prototypes/m0/provider/server.mjs
+      - browser-gate/**
       - compose.yml
       - deploy/public/**
       - .github/workflows/public-compose.yml
@@ -18,6 +19,7 @@ on:
       - runtime/**
       - provider/**
       - prototypes/m0/provider/server.mjs
+      - browser-gate/**
       - compose.yml
       - deploy/public/**
       - .github/workflows/public-compose.yml
@@ -26,6 +28,26 @@ permissions:
   contents: read
 
 jobs:
+  # The input gate is the component that makes exclusive handoff true, so its
+  # tests run on their own before the image builds: a release-order regression
+  # must fail here rather than only inside a full stack run.
+  input-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+      - name: Install the one gate dependency
+        working-directory: browser-gate
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test the input gate against a fake Selkies
+        working-directory: browser-gate
+        run: node --test "test/*.test.mjs"
+
   matrix:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -152,16 +174,18 @@ jobs:
         run: |
           set -o pipefail
           bash deploy/public/ci.sh 2>&1 | tee "evidence/public-compose${EVIDENCE_SUFFIX}.log"
-      - name: Package the three workstation images
+      - name: Package the four workstation images
         run: |
           docker save dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 \
-            | gzip -1 > "evidence/workstation-images-linux-amd64${EVIDENCE_SUFFIX}.tar.gz"
+            dsh-workstation-browser-gate:0.1.0 |
+            gzip -1 > "evidence/workstation-images-linux-amd64${EVIDENCE_SUFFIX}.tar.gz"
           (cd evidence && sha256sum "workstation-images-linux-amd64${EVIDENCE_SUFFIX}.tar.gz" \
             > "workstation-images-linux-amd64${EVIDENCE_SUFFIX}.sha256")
           git rev-parse HEAD > evidence/source-commit
           bash deploy/public/traefik-image.sh "$WORKSTATION_CI_TRAEFIK_VERSION" > "evidence/traefik-image${EVIDENCE_SUFFIX}"
           docker image inspect --format '{{index .RepoTags 0}} {{.Id}}' \
-            dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 > evidence/image-ids
+            dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 \
+            dsh-workstation-browser-gate:0.1.0 > evidence/image-ids
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -171,7 +195,7 @@ jobs:
             !evidence/source/
 
   matrix-summary:
-    needs: [matrix, public-compose]
+    needs: [input-gate, matrix, public-compose]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -183,10 +207,11 @@ jobs:
         env:
           VERSIONS: ${{ needs.matrix.outputs.versions }}
           RESULT: ${{ needs.public-compose.result }}
+          GATE: ${{ needs.input-gate.result }}
         run: |
           {
             printf '## Traefik compatibility matrix\n\n'
-            printf 'Full stack jobs reported `%s`.\n\n' "$RESULT"
+            printf 'Input gate tests reported `%s`. Full stack jobs reported `%s`.\n\n' "$GATE" "$RESULT"
             printf '| Traefik | Pinned digest | Address plan | Scope |\n| --- | --- | --- | --- |\n'
             node --input-type=module -e '
               import { execFileSync } from "node:child_process"
@@ -201,7 +226,7 @@ jobs:
             printf '\nEvery leg runs the same Compose stack, edge probe and authenticated browser checks. Two things vary: the pinned Traefik image, and whether the subnets are the defaults or a custom plan.\n'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail when any pinned version failed
-        if: needs.public-compose.result != 'success'
+        if: needs.public-compose.result != 'success' || needs.input-gate.result != 'success'
         run: |
-          echo "At least one pinned Traefik version failed the full stack; see the per-version jobs." >&2
+          echo "Either the input gate tests or a pinned Traefik version failed; see the jobs." >&2
           exit 1

@@ -74,7 +74,7 @@ export BROWSER_TOOL_ORIGINS=https://fixture.test
 export WORKSTATION_CI_STATE="$state/ci-state"
 
 compose config -q
-compose build auth runtime provider
+compose build auth runtime provider browser-gate
 docker build --target probe -t workstation-ci-viewer -f prototypes/m0/browser/Dockerfile prototypes/m0/browser
 node deploy/public/otp.mjs password > "$state/ci-state/password"
 # Keep the bootstrap code valid for the short container startup.
@@ -88,13 +88,14 @@ docker network connect dsh-workstation_browser "$edge"
 install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
 mv "$edge_dir/.routes.tmp" "$edge_dir/routes.yml"
 
-for service in auth runtime chromium provider cdp-relay; do
+for service in auth runtime chromium provider cdp-relay browser-gate; do
   test -z "$(docker port "$(compose ps -q "$service")")"
 done
 networks="$(docker network ls --filter label=com.docker.compose.project=dsh-workstation --format '{{.Name}}' | sort)"
 test "$networks" = $'dsh-workstation_browser\ndsh-workstation_workstation'
 docker inspect "$edge" "$(compose ps -q auth)" "$(compose ps -q runtime)" \
-  "$(compose ps -q chromium)" "$(compose ps -q provider)" "$(compose ps -q cdp-relay)" |
+  "$(compose ps -q chromium)" "$(compose ps -q provider)" "$(compose ps -q cdp-relay)" \
+  "$(compose ps -q browser-gate)" |
   node --input-type=module -e '
     import assert from "node:assert/strict"
     import { readFileSync } from "node:fs"
@@ -252,3 +253,46 @@ fi
 compose up -d --no-build --wait --wait-timeout 120 provider
 echo 'Chromium and killed relay recreated; Provider reached a new Chromium instance through the reused socket volume'
 check browser
+
+# The exclusive-handoff requirement (#4) at the real Selkies boundary. This is
+# the case M0 recorded as Gate C: a pointer button pressed while HUMAN holds
+# control, then authority moved to the Agent. Before the input gate, the
+# release frame the page sent afterwards was dropped along with every other
+# input frame, so the desktop spent the whole lease mid-drag.
+gate_release() {
+  compose exec -T -e PHASE="$1" provider node --input-type=module -e '
+    import assert from "node:assert/strict"
+    import { readFile } from "node:fs/promises"
+    const secret = (await readFile("/run/secrets/gate_control", "utf8")).trim()
+    const call = (path, method = "POST") => fetch("http://dsh-workstation-browser-gate:8082" + path, {
+      method, headers: { Authorization: "Bearer " + secret }, signal: AbortSignal.timeout(8000),
+    })
+    if (process.env.PHASE === "status") {
+      const response = await call("/status", "GET")
+      assert.equal(response.status, 200, "the gate status endpoint is unreachable")
+      const body = await response.json()
+      assert.ok(["CLOSED", "OPEN", "RELEASING"].includes(body.state), "unexpected gate state " + body.state)
+      console.log("gate state:", body.state, "authority:", body.authority, "permitted:", body.permitted)
+      process.exit(0)
+    }
+    // No operator connection is live in CI, so the handover has nothing held to
+    // release. What this proves is the control path the Provider depends on:
+    // an authenticated handover succeeds and reports that it released, and an
+    // unauthenticated one is refused. The held-input proof itself runs in
+    // browser-gate/test against a fake Selkies that enforces the real ordering.
+    const ok = await call("/handover")
+    assert.equal(ok.status, 200, "authenticated handover was refused")
+    assert.equal((await ok.json()).released, true, "handover did not report a release")
+    const denied = await fetch("http://dsh-workstation-browser-gate:8082/handover", {
+      method: "POST", headers: { Authorization: "Bearer " + "0".repeat(64) },
+    })
+    assert.equal(denied.status, 401, "the gate accepted an unauthenticated handover")
+    console.log("input gate handover is authenticated and reports a completed release")
+  '
+}
+gate_release status
+gate_release handover
+# The gate must be healthy after the handover it just performed.
+compose up -d --no-build --wait --wait-timeout 60 browser-gate
+check browser
+echo 'Input gate verified: authenticated handover, refusal of unauthenticated, stack healthy after'

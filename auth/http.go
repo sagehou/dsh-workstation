@@ -43,9 +43,12 @@ type gateway struct {
 	maxSessions                 int
 	wa                          *webauthn.WebAuthn
 	browserToken, providerAdmin string
-	providerControlAddr          string
+	providerControlAddr         string
+	browserUpstream             string
+	browserDirect               string
 	dshClient                   *http.Client
-	dshWS, browserWS *httputil.ReverseProxy
+	dshWS, browserWS            *httputil.ReverseProxy
+	browserDirectWS             *httputil.ReverseProxy
 	hashSlots                   chan struct{}
 	mu                          sync.Mutex
 	limits                      map[string]*limit

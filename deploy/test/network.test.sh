@@ -207,7 +207,7 @@ node --input-type=module -e '
   import { execFileSync } from "node:child_process"
   import { readFileSync } from "node:fs"
   const derived = JSON.parse(execFileSync("bash", ["deploy/network.sh", "derive", "--json"], { encoding: "utf8" }))
-  const pattern = /\$\{(WORKSTATION_(?:SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)|BROWSER_(?:SUBNET|IP_RANGE|PROVIDER_IP)):-([^}]*)\}/g
+  const pattern = /\$\{(WORKSTATION_(?:SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)|BROWSER_(?:SUBNET|IP_RANGE|PROVIDER_IP|GATE_IP)):-([^}]*)\}/g
   let checked = 0
   const bad = []
   for (const file of ["compose.yml", "compose.preview.yml"]) {

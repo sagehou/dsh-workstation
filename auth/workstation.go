@@ -49,7 +49,13 @@ func (g *gateway) initBrowser() error {
 		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "runtime", MinVersion: tls.VersionTLS12}},
 	}
 	g.dshWS = g.socketProxy(dshUpstream, g.dshClient.Transport)
-	g.browserWS = g.socketProxy("http://dsh-workstation-chromium:3000", &http.Transport{ResponseHeaderTimeout: 6 * time.Second})
+	// Input authority is enforced at the gate, not here: the operator's data
+	// socket goes through it so held input can be released before a handover
+	// (ADR-0005). Static assets and the video pane still talk to Chromium
+	// directly, because only the input boundary needs the gate in its path.
+	g.browserWS = g.socketProxy(g.browserUpstream, &http.Transport{ResponseHeaderTimeout: 6 * time.Second})
+	// Everything else under /browser/ that upgrades goes straight to Selkies.
+	g.browserDirectWS = g.socketProxy(g.browserDirect, &http.Transport{ResponseHeaderTimeout: 6 * time.Second})
 	return nil
 }
 
@@ -84,7 +90,14 @@ func (g *gateway) websocket(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w,r)
 			return
 		}
-		proxy = g.browserWS
+		// Only the data socket carries input, so only it goes through the gate.
+		// Any other browser WebSocket keeps talking to Selkies directly, which
+		// keeps the gate's surface to the one connection it must own.
+		if r.URL.Path == "/browser/api/websockets" {
+			proxy = g.browserWS
+		} else {
+			proxy = g.browserDirectWS
+		}
 	} else if strings.HasPrefix(r.URL.Path, "/_auth/") {
 		http.NotFound(w,r)
 		return

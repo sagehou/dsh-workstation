@@ -21,6 +21,12 @@ for (const origin of origins) {
 }
 const cdp = publicMode ? 'http://127.0.0.1:9223' : 'http://172.30.231.2:9223'
 const selkies = publicMode ? 'http://dsh-workstation-chromium:3000' : 'http://172.30.231.2:3000'
+// The gate's address and control credential come from the environment so a
+// custom subnet moves them too. The prototype path has no gate; the input
+// helpers below keep the non-public behaviour unchanged.
+const gate = process.env.PROVIDER_GATE_URL ?? 'http://dsh-workstation-browser-gate:8082'
+const gateControl = publicMode ? (await readFile('/run/secrets/gate_control', 'utf8')).trim() : ''
+if (publicMode && !/^[0-9a-f]{64}$/.test(gateControl)) throw Error('Invalid gate control credential')
 const fixture = 'http://witness:8081/'
 const fencePath = '/state/browser-fence'
 const boot = randomUUID()
@@ -43,6 +49,22 @@ function check(condition, code, status) {
 async function input(locked) {
   const table = { [controller]: { role: 'controller', slot: null } }
   if (locked) table[sentinel] = { role: 'viewer', slot: null, mk_control: true }
+  // The gate has to release held input *before* the table changes: authority is
+  // evaluated per frame against the live table, and provision_tokens installs
+  // the new table before it announces the change. A release sent after the flip
+  // is dropped, which is how a human's held button used to survive an Agent
+  // lease. Locking therefore means: prove the release, then take authority.
+  if (locked && publicMode) {
+    const released = await fetch(gate + '/handover', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + gateControl },
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null)
+    // No release, no lease. Failing closed here is the whole point.
+    check(released?.ok === true, 'INPUT_GATE_UNAVAILABLE')
+    const body = await released.json().catch(() => ({}))
+    check(body.released === true, 'INPUT_GATE_UNAVAILABLE')
+  }
   const response = await fetch(selkies + '/browser/api/tokens', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + master, 'Content-Type': 'application/json' },
@@ -51,6 +73,18 @@ async function input(locked) {
   })
   await response.body?.cancel()
   check(response.ok, 'INPUT_GATE_UNAVAILABLE')
+  // Handing control back is the reverse order: restore the table, then tell the
+  // gate the operator may drive again.
+  if (!locked && publicMode) {
+    const resumed = await fetch(gate + '/resume', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + gateControl },
+      signal: AbortSignal.timeout(3000),
+    }).catch(() => null)
+    // A failed resume is not silent: the operator would be locked out, which is
+    // the closed direction but still has to be reported.
+    check(resumed?.ok === true, 'INPUT_RESUME_FAILED')
+  }
 }
 function fault(code) {
   state = 'DISCONNECTED'
