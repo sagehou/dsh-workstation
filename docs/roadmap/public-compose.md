@@ -33,10 +33,11 @@ Minimum supported edge version: **v3.7.14**. This table is not a claim that any 
 
 Every leg must verify the HTTP→HTTPS redirect, HSTS/nosniff/referrer headers, ForwardAuth returning 401 for APIs and 303 for documents, forged `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` failing to authenticate, the `/browser/` prefix requiring login, `/browser/api/tokens` staying unrouted, the internal DSH TLS chain, Selkies WebSocket video, and the same-origin frame policy after login.
 
-CONNECT differs across the matrix, so the probe records the observed status per version instead of assuming one behaviour:
+CONNECT behaves differently across the matrix, and the probe records the observed status per version:
 
-- HTTP/1 `CONNECT` has been rejected since `v3.7.9`; both pinned versions return 501.
-- From `v3.7.15` every HTTP version of `CONNECT` returns 501. On `v3.7.14` it is merely unrouted, which is not the same guarantee.
+- `v3.7.15` and later reject `CONNECT` with **501** before routing: `denyConnect` is wired at the entry point (`pkg/server/server_entrypoint_tcp.go`).
+- `v3.7.14` has **no `denyConnect`** at all. A `CONNECT` falls through to the router, so it answers **404**. That is still not a tunnel, but it is not the 501 guarantee.
+- The migration guide's `v3.7.9` note about HTTP/1 `CONNECT` does not match the `v3.7.14` source; the observed `v3.7.14` status is therefore recorded from the run instead of being assumed from the prose.
 
 ### Observed results
 

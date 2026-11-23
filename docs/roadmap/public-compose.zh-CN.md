@@ -33,10 +33,11 @@ Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 Gi
 
 矩阵中每一条腿都要验证：HTTP 跳转 HTTPS、HSTS/nosniff/referrer 头、ForwardAuth 对 API 返回 401 且对文档返回 303、伪造 `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` 不能通过、`/browser/` 前缀要求登录、`/browser/api/tokens` 未被路由、DSH 内部 TLS 链路、Selkies WebSocket 视频、登录后同源帧策略。
 
-CONNECT 在两个版本上行为不同，探测按版本记录观察值而不假设一致：
+CONNECT 在两个版本上行为不同，探测按版本记录实际观察值：
 
-- `v3.7.9` 起拒绝 HTTP/1 `CONNECT`；`v3.7.14` 是 501。
-- `v3.7.15` 起所有 HTTP 版本的 `CONNECT` 都返回 501；`v3.7.14` 只是没有匹配路由，并非同等拒绝。
+- `v3.7.15` 及以后在路由前就把 `CONNECT` 拒绝为 **501**：入口点挂了 `denyConnect`（`pkg/server/server_entrypoint_tcp.go`）。
+- `v3.7.14` 完全没有 `denyConnect`，`CONNECT` 会落到路由器，返回 **404**。它仍然不是隧道，但不是 501 那种保证。
+- 迁移文档中 `v3.7.9` 关于 HTTP/1 `CONNECT` 的说明与 `v3.7.14` 源码不符，因此 `v3.7.14` 的实际状态以运行结果记录，不按文字推断。
 
 ### 实际结果
 

@@ -24,13 +24,15 @@ const ca = readFileSync(caPath)
 const [hostname, portText] = authority.split(':')
 const port = Number(portText)
 
-// Version-sensitive upstream behaviour. Source: Traefik "Steps needed between
-// the versions" (migrate/v3). HTTP/1 CONNECT was rejected from v3.7.9 and every
-// CONNECT, whatever the HTTP version, from v3.7.15.
+// Version-sensitive upstream behaviour. Verified against the tagged source, not
+// only the migration prose: `denyConnect`, which answers 501 before routing, is
+// present and wired at the entry point from v3.7.15
+// (pkg/server/server_entrypoint_tcp.go). Earlier tags have no such guard, so a
+// CONNECT falls through the router and gets an ordinary 404. Both are "no
+// tunnel", but only v3.7.15+ guarantees 501.
 const [major, minor, patch] = version.slice(1).split('.').map(Number)
 const atLeast = (wantMinor, wantPatch) => major > 3 || (major === 3 && (minor > wantMinor || (minor === wantMinor && patch >= wantPatch)))
-const rejectsHttp1Connect = atLeast(7, 9)
-const rejectsHttp2Connect = atLeast(7, 15)
+const rejectsConnectWith501 = atLeast(7, 15)
 
 function get(path, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -112,20 +114,21 @@ function pass(name, detail) {
   pass('browser-route', '/browser/ requires login; /browser/api/tokens is not routed')
 }
 
-// 4. HTTP/1 CONNECT is never a tunnel. Upstream rejects it from v3.7.9.
+// 4. No CONNECT tunnel on either version. v3.7.15+ rejects it with 501 from the
+//    entry point; earlier tags have no guard and the router answers 404. Assert
+//    the documented 501 only where upstream implements it.
 {
   const { status, statusLine } = await rawHttp1('CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n')
-  if (rejectsHttp1Connect) {
-    assert.equal(status, 501, `HTTP/1 CONNECT must be 501, got ${statusLine}`)
+  if (rejectsConnectWith501) {
+    assert.equal(status, 501, `HTTP/1 CONNECT must be 501 from v3.7.15, got ${statusLine}`)
   } else {
     assert.ok(!/^HTTP\/1\.[01] 2\d\d/.test(statusLine), `HTTP/1 CONNECT must not tunnel: ${statusLine}`)
   }
-  pass('http1-connect', `no CONNECT tunnel (${statusLine})`)
+  pass('http1-connect', `no CONNECT tunnel (${statusLine})${rejectsConnectWith501 ? '' : '; 501 only from v3.7.15'}`)
 }
 
-// 5. HTTP/2 CONNECT differs across the matrix: rejected with 501 from v3.7.15,
-//    merely unrouted before it. Only an HTTP status response counts as evidence;
-//    a transport error proves nothing, so it fails instead of passing silently.
+// 5. The same split applies to HTTP/2. Only an HTTP status response counts as
+//    evidence; a transport error proves nothing, so it fails rather than passing.
 {
   const observed = await new Promise((resolve, reject) => {
     const session = http2.connect(`https://127.0.0.1:${port}`, { ca, servername: hostname })
@@ -147,15 +150,12 @@ function pass(name, detail) {
       stream.end()
     })
   })
-  if (rejectsHttp2Connect) {
+  if (rejectsConnectWith501) {
     assert.equal(observed, 501, `HTTP/2 CONNECT must be 501 from v3.7.15, observed ${observed}`)
   } else {
-    // Before v3.7.15 there is no dedicated CONNECT handling, so the exact status
-    // is a routing outcome rather than a documented guarantee. Only the absence
-    // of a tunnel is asserted, and the observed value is recorded.
     assert.ok(observed >= 400, `HTTP/2 CONNECT must not establish a tunnel, observed ${observed}`)
   }
-  pass('http2-connect', `no CONNECT tunnel (observed ${observed})${rejectsHttp2Connect ? '' : '; 501 is only guaranteed from v3.7.15'}`)
+  pass('http2-connect', `no CONNECT tunnel (observed ${observed})${rejectsConnectWith501 ? '' : '; 501 only from v3.7.15'}`)
 }
 
 console.log(`EDGE ${version} OK: ${checked} checks`)
