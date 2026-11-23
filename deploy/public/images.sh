@@ -21,7 +21,22 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
 
-registry=ghcr.io/sagehou
+# The registry is not freely configurable. A deployment that resolved
+# `ghcr.io/someone-else/...` because an environment variable said so would be a
+# supply-chain hole. A loopback registry is unambiguous: it can only ever be a
+# test, so it is the one override accepted, and it is named as such.
+registry=${WORKSTATION_IMAGE_REGISTRY:-ghcr.io/sagehou}
+case $registry in
+  ghcr.io/sagehou) ;;
+  # Tests run a local registry to prove the digest references pull and run on a
+  # real daemon without publishing to GHCR.
+  127.0.0.1:[0-9]*|localhost:[0-9]*) ;;
+  *)
+    echo "Refusing WORKSTATION_IMAGE_REGISTRY=$registry" >&2
+    echo 'Only ghcr.io/sagehou, or a loopback registry for tests, is accepted.' >&2
+    exit 1
+    ;;
+esac
 matrix=deploy/public/images.env
 [[ -f $matrix ]] || { echo "Missing the published image list: $matrix" >&2; exit 1; }
 

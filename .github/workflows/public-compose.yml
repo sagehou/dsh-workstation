@@ -82,6 +82,12 @@ jobs:
         # Pure shell, no registry access: it checks that an unpublished or
         # malformed entry is refused rather than resolved to a floating tag.
         run: bash deploy/test/images.test.sh
+      - name: Prove digest pull, upgrade and rollback on a real daemon
+        # The resolver's contract is only half of #10; the other half is that a
+        # `name:version@sha256:...` reference really pulls and runs, and that
+        # switching digests upgrades and rolls back. A loopback registry makes
+        # that testable without publishing to GHCR.
+        run: bash deploy/test/images-registry.test.sh
       - name: Test repeatable initialization and PKI consistency
         # The initializer refuses to run as root, and the runner user is not
         # required to be non-root for the other jobs.
