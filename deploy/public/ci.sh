@@ -17,6 +17,9 @@ state="$PWD/.workstation"
 traefik_version="${WORKSTATION_CI_TRAEFIK_VERSION:-$(bash deploy/public/traefik-image.sh --default)}"
 traefik_image="$(bash deploy/public/traefik-image.sh "$traefik_version")"
 echo "Traefik under test: $traefik_version ($traefik_image)"
+# CI builds the images locally and then uses them by the name the resolver
+# produces, so this script cannot drift from deploy/public/images.env.
+provider_image="$(bash deploy/public/images.sh --local provider | sed 's/^[^=]*=//')"
 compose_files=(-f compose.yml -f deploy/public/compose.ci.yml)
 compose() { docker compose --env-file .env.public "${compose_files[@]}" "$@"; }
 cleanup() {
@@ -215,7 +218,7 @@ YAML
 # The archive is created only while SQLite is stopped, and stays on the runner.
 docker run --rm --network none --user 0:0 --entrypoint sh \
   -v dsh-workstation_auth-data:/source:ro -v "$restore_volume":/target \
-  dsh-workstation-provider:0.2.0 -ec '
+  "$provider_image" -ec '
     tar -C /source -cf /tmp/auth.tar .
     tar -C /target -xpf /tmp/auth.tar
   '

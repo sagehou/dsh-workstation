@@ -3,10 +3,15 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
 umask 077
 reissue=false
+# A released deployment pulls digest-pinned images from GHCR. The default builds
+# them locally, which is what CI and development do; neither mode ever writes a
+# floating tag into .env.public.
+release=false
 args=()
 for arg in "$@"; do
   case $arg in
     --reissue) reissue=true ;;
+    --release) release=true ;;
     *) args+=("$arg") ;;
   esac
 done
@@ -120,6 +125,33 @@ elif [[ ${reissue_runtime_pki:-false} == true ]]; then
   issue_runtime_pki
 fi
 
+# Resolve the four self-built images once, before anything is written. In
+# release mode a missing digest is fatal: silently falling back to a local tag
+# is exactly the mutable reference #10 exists to remove.
+# Capture, then split: a failing process substitution inside `while` does not
+# fail the loop, so the resolver's status has to be checked directly.
+if $release; then
+  images_text="$(bash deploy/public/images.sh)" || exit 1
+else
+  images_text="$(bash deploy/public/images.sh --local)" || exit 1
+fi
+images=()
+while IFS= read -r line; do images+=("$line"); done <<< "$images_text"
+(( ${#images[@]} == 4 )) || {
+  echo "Expected four images from the resolver, got ${#images[@]}." >&2
+  exit 1
+}
+image_keys=()
+for line in "${images[@]}"; do
+  case ${line%%=*} in
+    runtime) image_keys+=("WORKSTATION_RUNTIME_IMAGE=${line#*=}") ;;
+    auth) image_keys+=("WORKSTATION_AUTH_IMAGE=${line#*=}") ;;
+    provider) image_keys+=("WORKSTATION_PROVIDER_IMAGE=${line#*=}") ;;
+    browser-gate) image_keys+=("WORKSTATION_GATE_IMAGE=${line#*=}") ;;
+    *) echo "Unexpected image in the resolver: ${line%%=*}" >&2; exit 1 ;;
+  esac
+done
+
 if $fresh; then
   {
     printf 'WORKSTATION_STATE=%s\nWORKSTATION_DOMAIN=%s\nBROWSER_TOOL_ORIGINS=\n' "$state" "$domain"
@@ -129,10 +161,12 @@ else
   # Rewrite the derived keys from the current configuration instead of carrying
   # the old ones forward: a stale subnet in .env.public would disagree with the
   # certificate the initializer just issued.
-  sed -E '/^(WORKSTATION_(EDGE_UID|EDGE_GID|PROXY_NETWORK|TRAEFIK_IP|SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)|BROWSER_(SUBNET|IP_RANGE|PROVIDER_IP)|ACME_EMAIL)=/d' \
+  sed -E '/^(WORKSTATION_(EDGE_UID|EDGE_GID|PROXY_NETWORK|TRAEFIK_IP|SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP|RUNTIME_IMAGE|AUTH_IMAGE|PROVIDER_IMAGE|GATE_IMAGE)|BROWSER_(SUBNET|IP_RANGE|PROVIDER_IP)|ACME_EMAIL)=/d' \
     .env.public > "$staging/env"
   printf '%s\n' "$derived" >> "$staging/env"
 fi
+# Written last so a mode switch cannot leave a stale reference in place.
+printf '%s\n' "${image_keys[@]}" >> "$staging/env"
 printf 'WORKSTATION_PROXY_NETWORK=%s\nWORKSTATION_TRAEFIK_IP=%s\n' "$proxy" "$traefik_ip" >> "$staging/env"
 
 tls='{}'
@@ -154,3 +188,5 @@ sed -e "s|@ENTRYPOINT@|${entrypoint}|g" \
 mv -- "$staging/routes.yml" "$state/edge/routes.yml"
 mv -- "$staging/env" .env.public
 printf 'Prepared .env.public and %s/edge/routes.yml\n' "$state"
+if $release; then printf 'Images (published digests):\n'; else printf 'Images (local build):\n'; fi
+printf '  %s\n' "${image_keys[@]}"

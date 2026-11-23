@@ -6,7 +6,8 @@
 
 ## 部署前准备
 
-- **主机**需要 Linux amd64、以 root 运行的 Docker Engine 28+ 和 Compose v2。用有 Docker 权限的非 root 用户执行，并先登录 GitHub CLI。
+- **主机**需要 Linux amd64、以 root 运行的 Docker Engine 28+ 和 Compose v2。用有 Docker 权限的非 root 用户执行。不需要镜像仓库凭据：工作台镜像为公开包。
+- 发布仅提供 `linux/amd64`。不要在其他架构上运行。
 - **DNS** 将工作台域名指向 Traefik 所在主机。Traefik 提供公网端口 80 和 443，并管理证书。
 - **Traefik** 须已在同一台 Docker 主机运行。确认它所在的可信 Docker 网络、HTTPS 入口、证书 resolver，以及 file provider 监视的宿主机目录。**不需要升级 Traefik**：CI 按摘要固定 `v3.7.14` 与 `v3.7.19`，并用同一套全栈测试覆盖两者；哪些版本已有通过记录见[兼容性矩阵](../../docs/roadmap/public-compose.zh-CN.md#traefik-兼容性矩阵)。
 - **Docker 网络**用 `bash deploy/network.sh check` 核对两个 Compose 子网与宿主机路由；冲突时会拒绝继续。见[网络地址](#网络地址)。
@@ -47,25 +48,31 @@ Runtime 证书按推导出的地址签发，因此在已有状态目录上用不
 
 在部署主机的同一个终端按顺序执行。
 
-### 1. 加载已验证的镜像
+### 1. 检出发布版本并确认固定镜像
+
+本仓库自建的四镜像以**公开**包发布在 GHCR，因此部署主机不需要 `docker login`，也不需要在主机上保存任何凭据。
+
+`deploy/public/images.env` 记录每个镜像的 manifest list 摘要，`deploy/public/images.sh` 把摘要解析成 `name:version@sha256:...`，摘要缺失时直接失败——这条路径无法产生浮动标签。
 
 ```bash
 gh repo clone sagehou/dsh-workstation && cd dsh-workstation
+release_tag='v0.2.0'
+git switch --detach "$release_tag"
 
-images_dir="$(mktemp -d)"
-release_commit='333e6f332ad054723ca32c8b9436c8109bb62ad4'
-gh run download 44688814854 --repo sagehou/dsh-workstation \
-  --name public-compose-linux-amd64 --dir "$images_dir" &&
-  test "$(cat "$images_dir/source-commit")" = "$release_commit" &&
-  git switch --detach "$release_commit" &&
-  (
-    cd "$images_dir" &&
-    sha256sum -c workstation-images-linux-amd64.sha256 &&
-    docker load -i workstation-images-linux-amd64.tar.gz
-  )
+# 打印本次发布部署的引用，每行都必须以 @sha256: 结尾。
+bash deploy/public/images.sh
 ```
 
-[镜像包](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/artifacts/14607841816)
+如需核实摘要仍指向同一镜像，把它与仓库报告的摘要比对，必须完全一致：
+
+```bash
+docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.0 \
+  --format '{{json .Manifest.Digest}}'
+```
+
+拉取发生在 Compose 启动时：第 2 步之后 `.env.public` 中每个镜像都已按摘要引用。构建来源与 SBOM 附着在这些摘要上，因此随镜像一起保留，而不依赖某次工作流运行是否还在。
+
+> 只有标签没有摘要属于可变引用，初始化脚本永远不会写入。若确实要从源码临时构建，第 2 步去掉 `--release`，由 Compose 在本地构建——两种模式都是显式选择。
 
 ### 2. 配置域名和 Traefik
 
@@ -78,8 +85,10 @@ traefik='traefik'
 traefik_dynamic='/srv/traefik/dynamic'
 
 WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
+
+`--release` 让初始化脚本解析已发布摘要，并写入 `.env.public` 的 `WORKSTATION_RUNTIME_IMAGE`、`WORKSTATION_AUTH_IMAGE`、`WORKSTATION_PROVIDER_IMAGE`、`WORKSTATION_GATE_IMAGE`。不加时，同样的键会写成本地构建标签。两种情况都明确了实际运行的是什么，且重跑初始化会替换这些键，而不是追加第二份。
 
 #### 已有部署
 
@@ -87,11 +96,11 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
 
 ```bash
 WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$域名" "$代理网络" "$Traefik 容器"
+  bash deploy/public/init.sh "$域名" "$代理网络" "$Traefik 容器" --release
 docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 ```
 
-不会重签任何证书，也不会用不同地址重建容器。若确实要换地址，那是一次迁移：先备份，用 `--reissue` 重跑，重建所有服务，并把 Traefik 重新连接到（重建后的）`dsh-workstation_workstation` 与 `dsh-workstation_browser` 网络。
+不会重签任何证书，也不会用不同地址重建容器。镜像会变化：原先用本地归档加载的部署，会在下一次 `up` 时切换到按摘要固定的 GHCR 引用。若确实要换地址，那是一次迁移：先备份，用 `--reissue` 重跑，重建所有服务，并把 Traefik 重新连接到（重建后的）`dsh-workstation_workstation` 与 `dsh-workstation_browser` 网络。
 
 ### 3. 创建管理员
 
@@ -195,14 +204,27 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把
 ### 从原有独立部署迁移
 
 1. 在旧提交中执行 `down`。保留命名卷、`.env.public` 与 `.workstation/`。
-2. 加载新镜像，并以相同域名重跑初始化。
+2. 以相同域名重跑初始化（`--release` 会把镜像切换到按摘要固定的 GHCR 引用）。
 3. 跳过管理员初始化，启动新 Compose。
 
 旧容器的 hostname 如果留下浏览器配置锁，应先确认旧 Chromium 已停止，再清理配置卷 `/config/chromium` 下的 `SingletonLock`、`SingletonSocket` 和 `SingletonCookie` 符号链接。[Chromium 配置锁实现](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
 
-### 镜像包过期
+### 升级与回滚
 
-在 GitHub Actions 针对目标提交运行 **Public Compose**。把第 1 步的运行号和 `source-commit` 换成成功运行的值。矩阵中每条腿各自上传 artifact：默认版本保留不带后缀的 `public-compose-linux-amd64`，其余腿加 `-<版本>` 后缀。任选一条腿即可，工作台镜像在各腿之间相同，差异只在入口代理版本。[工作流](../../.github/workflows/public-compose.yml)
+升级就是更换摘要。先备份，再切换引用并重建受影响的服务；Compose 会在 `up` 时拉取新摘要：
+
+```bash
+git switch --detach v0.3.0
+WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
+```
+
+回滚是同样的操作换成旧标签：检出 `v0.2.0`、重跑初始化恢复旧摘要、再次 `up`。由于引用是摘要，旧镜像仍恰好是该标签当时发布的内容——上游标签不可能在你脚下移动。
+
+Runtime 版本回滚是另一件事，不改这些镜像，见 [Runtime 维护](../README.zh-CN.md#升级与回滚)。镜像回滚与数据回滚不同，涉及 DSH_HOME 迁移时必须配一份对应的备份。
+
+Public Compose 工作流上传的 Actions artifact 仍保留 90 天，作为 CI 实际运行内容的审计证据；它不再是分发渠道。[工作流](../../.github/workflows/public-compose.yml)
 
 ## 备份与恢复
 
@@ -216,8 +238,10 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把
 ```bash
 docker compose --env-file .env.public stop && (
   umask 077
+  # 使用部署自身固定的镜像引用。
+  set -a; . ./.env.public; set +a
   docker run --rm --network none --user 0:0 --entrypoint tar \
-    -v dsh-workstation_auth-data:/data:ro dsh-workstation-provider:0.2.0 \
+    -v dsh-workstation_auth-data:/data:ro "$WORKSTATION_PROVIDER_IMAGE" \
     --numeric-owner -C /data -cf - . > auth-data.tar
 )
 ```

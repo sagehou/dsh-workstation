@@ -15,7 +15,7 @@ x-runtime: &runtime
     - runtime-launch:/run/dsh-runtime
 
 x-provider: &provider
-  image: dsh-workstation-provider:0.2.0
+  image: ${WORKSTATION_PROVIDER_IMAGE:-dsh-workstation-provider:0.2.0}
   build:
     context: .
     dockerfile: provider/Dockerfile
@@ -26,7 +26,7 @@ x-provider: &provider
 
 services:
   auth:
-    image: dsh-workstation-auth:0.1.1
+    image: ${WORKSTATION_AUTH_IMAGE:-dsh-workstation-auth:0.1.1}
     build: ./auth
     init: true
     restart: unless-stopped
@@ -65,7 +65,7 @@ services:
 
   auth-admin:
     profiles: [maintenance]
-    image: dsh-workstation-auth:0.1.1
+    image: ${WORKSTATION_AUTH_IMAGE:-dsh-workstation-auth:0.1.1}
     network_mode: none
     read_only: true
     cap_drop: [ALL]
@@ -118,7 +118,7 @@ services:
   # The gate releases held input *before* the Provider flips the table, and is
   # the only path from the operator's page to the Selkies data socket.
   browser-gate:
-    image: dsh-workstation-browser-gate:0.1.0
+    image: ${WORKSTATION_GATE_IMAGE:-dsh-workstation-browser-gate:0.1.0}
     build:
       context: .
       dockerfile: browser-gate/Dockerfile

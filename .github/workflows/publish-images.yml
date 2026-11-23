@@ -1,0 +1,296 @@
+name: Publish images
+
+# Publishing is deliberately narrow: a release tag, or a manual run by a person
+# with write access. There is no `pull_request` trigger and no untrusted input
+# reaches a step that holds a credential, so a fork PR cannot publish anything.
+#
+# A branch push -- including a `public/**` branch -- does not publish, because
+# those run the test workflow and their images are not what a deployment pulls.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Image to publish, or "all"
+        required: true
+        default: all
+        type: choice
+        options: [all, runtime, auth, provider, browser-gate]
+
+permissions:
+  contents: read
+
+# One publish at a time. Two runs recording different digests for the same tag
+# would leave images.env describing whichever finished last.
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+
+jobs:
+  # Resolve what to publish, and refuse anything that is not a real release.
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      # A JSON array of {image, version} pairs, so a run that publishes one
+      # image and a run that publishes all four use the same matrix.
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Resolve the images to publish
+        id: plan
+        env:
+          REQUESTED: ${{ inputs.image || 'all' }}
+        run: |
+          set -euo pipefail
+          if [[ $REQUESTED == all ]]; then
+            images="$(bash deploy/public/images.sh --names)"
+          else
+            # Refuse a name the repository does not build rather than silently
+            # publishing nothing.
+            [[ " $(bash deploy/public/images.sh --names | tr '\n' ' ') " == *" $REQUESTED "*
+            ]] || { echo "Unknown image: $REQUESTED" >&2; exit 1; }
+            images="$REQUESTED"
+          fi
+          # Each image carries its own version in deploy/public/images.env. They
+          # are versioned independently on purpose: the Runtime image changes
+          # when Node or the launch script changes, while the gate changes on its
+          # own schedule. A single shared version would force churn on both.
+          matrix='['
+          separator=
+          for image in $images; do
+            version="$(bash deploy/public/images.sh --field version "$image")"
+            matrix+="$separator{\"image\":\"$image\",\"version\":\"$version\"}"
+            separator=,
+          done
+          matrix+=']'
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+          echo "Publishing: $(echo $images)"
+
+  publish:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      # Required for keyless signing of the build provenance attestation.
+      id-token: write
+      attestations: write
+    # A repository administrator can attach required reviewers to this
+    # environment. That is the "approved release workflow" in #10: a tag push or
+    # a manual dispatch still waits for approval before anything is pushed.
+    environment: ghcr-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: publish (${{ matrix.image }} ${{ matrix.version }})
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve the image name and build context
+        id: image
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          # The name comes from the resolver, so a published image is named the
+          # same way the deployment looks it up.
+          reference="$(bash deploy/public/images.sh --local "$IMAGE")"
+          printf 'name=%s\n' "${reference%%:*}" >> "$GITHUB_OUTPUT"
+          case "$IMAGE" in
+            runtime) printf 'context=runtime\n' >> "$GITHUB_OUTPUT"; printf 'file=runtime/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
+            auth) printf 'context=auth\n' >> "$GITHUB_OUTPUT"; printf 'file=auth/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
+            # The provider and gate build from the repository root because each
+            # copies files from outside its own directory.
+            provider) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=provider/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
+            browser-gate) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=browser-gate/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
+            *) echo "No build context for $IMAGE" >&2; exit 1 ;;
+          esac
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ steps.image.outputs.context }}
+          file: ${{ steps.image.outputs.file }}
+          platforms: linux/amd64
+          # Never tag a manifest as latest: the deployment resolves a digest, and
+          # a mutable pointer is what images.env exists to remove.
+          push: true
+          tags: ghcr.io/sagehou/${{ steps.image.outputs.name }}:${{ matrix.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ matrix.version }}
+          # Provenance and SBOM travel with the digest a deployment pins, rather
+          # than living only in the Actions run that produced them.
+          provenance: mode=max
+          sbom: true
+      - name: Record the digest
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ matrix.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # A manifest list digest, not a config digest: the deployment pulls
+          # `name:version@sha256:...`, and that must be the index it resolves.
+          if [[ ! $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The build did not report a usable digest: [$DIGEST]" >&2
+            exit 1
+          fi
+          printf '%s %s %s\n' "$IMAGE" "$VERSION" "$DIGEST" > "digest-$IMAGE.txt"
+          printf '`ghcr.io/sagehou/dsh-workstation-%s:%s@%s`\n' \
+            "$IMAGE" "$VERSION" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          # A version already recorded in the file is a promise about what that
+          # tag resolves to. Publishing a different digest under it would break
+          # every deployment pinned to the old one, so refuse instead.
+          recorded="$(bash deploy/public/images.sh --field digest "$IMAGE" 2>/dev/null || true)"
+          if [[ -n $recorded && $recorded != "$DIGEST" ]]; then
+            echo "$IMAGE:$VERSION is already published as $recorded." >&2
+            echo "This run built $DIGEST. Bump the version in deploy/public/images.env" >&2
+            echo "instead of republishing over a digest a deployment may already use." >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digest-${{ matrix.image }}
+          path: digest-${{ matrix.image }}.txt
+          retention-days: 90
+
+  # Fold the per-image digests into one reviewable change. Kept separate from
+  # the build jobs so a failure to write the file cannot be mistaken for a
+  # failed publish.
+  record:
+    needs: [plan, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - name: Update deploy/public/images.env with the published digests
+        run: |
+          set -euo pipefail
+          # An unmatched glob stays literal, which would fail here as a missing
+          # file rather than as the real problem: nothing was published.
+          compgen -G 'digests/digest-*.txt' >/dev/null || {
+            echo 'No digest artifacts were downloaded; publish produced nothing.' >&2
+            exit 1
+          }
+          for file in digests/digest-*.txt; do
+            image="$(awk '{print $1}' "$file")"
+            version="$(awk '{print $2}' "$file")"
+            digest="$(awk '{print $3}' "$file")"
+            # Replace the line for this image, keeping file order and comments.
+            awk -v image="$image" -v version="$version" -v digest="$digest" '
+              $1 == image { printf "%s %s %s\n", image, version, digest; found = 1; next }
+              { print }
+              END { if (!found) exit 3 }
+            ' deploy/public/images.env > deploy/public/images.env.new || {
+              echo "deploy/public/images.env has no line for $image" >&2
+              exit 1
+            }
+            mv deploy/public/images.env.new deploy/public/images.env
+          done
+          # Validate only the images this run published. A partial publish is
+          # legitimate -- a dispatch may target one image -- and the other lines
+          # are still unpublished on purpose, so resolving all four would fail
+          # here for the wrong reason.
+          published=()
+          for file in digests/digest-*.txt; do published+=("$(awk '{print $1}' "$file")"); done
+          for name in "${published[@]}"; do
+            reference="$(bash deploy/public/images.sh "$name")" || {
+              echo "$name was published but does not resolve; images.env is inconsistent." >&2
+              exit 1
+            }
+            [[ $reference == *"@sha256:"* ]] || {
+              echo "$name resolved to a mutable reference: $reference" >&2
+              exit 1
+            }
+          done
+          bash deploy/test/images.test.sh >/dev/null
+          cat deploy/public/images.env
+      - name: Publish the pinned references as a run summary
+        run: |
+          set -euo pipefail
+          {
+            printf '## Workstation images\n\n'
+            printf 'Source commit: `%s`\n\n' "$GITHUB_SHA"
+            printf '| Image | Pinned reference |\n| --- | --- |\n'
+            while IFS= read -r line; do
+              printf '| %s | `%s` |\n' "${line%%=*}" "${line#*=}"
+            done < <(bash deploy/public/images.sh)
+            printf '\nCommit the updated `deploy/public/images.env` to record these tags.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: published-images
+          path: deploy/public/images.env
+          retention-days: 90
+      - name: Verify the published images pull anonymously
+        run: |
+          set -euo pipefail
+          # The images are public, so a deployment needs no credential. Assert
+          # that here rather than discovering it in the install guide: pull back
+          # exactly the digests just recorded, with no login in this job.
+          for file in digests/digest-*.txt; do
+            name="$(awk '{print $1}' "$file")"
+            reference="$(bash deploy/public/images.sh "$name")"
+            digest="$(bash deploy/public/images.sh --field digest "$name")"
+            observed="$(docker buildx imagetools inspect "$reference" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            [[ $observed == "$digest" ]] || {
+              echo "$name resolves to $observed but images.env records $digest" >&2
+              exit 1
+            }
+            # An anonymous pull is the real test: an authenticated one would
+            # hide a package that was accidentally left private.
+            docker image rm "$reference" >/dev/null 2>&1 || true
+            docker pull "$reference" >/dev/null
+            echo "$name: anonymous pull of $digest succeeded"
+          done
+      - name: Attach the pinned references to the release
+        if: github.ref_type == 'tag'
+        # The release page is documentation, not the distribution channel: the
+        # digests are already recorded in images.env and the artifact. A tagging
+        # run should not fail because creating a release was not permitted, so
+        # this reports and continues.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The tag names the release; the digests are what a deployment uses.
+          # Keeping both in one place means the "what was released" question is
+          # answered by the release page, not by a shell history.
+          {
+            printf '| Image | Pinned reference |\n| --- | --- |\n'
+            while IFS= read -r line; do
+              printf '| %s | `%s` |\n' "${line%%=*}" "${line#*=}"
+            done < <(bash deploy/public/images.sh)
+          } > notes.md
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --notes-file notes.md
+          fi
