@@ -241,6 +241,8 @@ try {
     const heldGeneration = await send(first, 'lease-held', 'lease_status')
     assert.match(heldGeneration, /^[a-f0-9-]{36}:\d+$/,
       'the grant was refused over a socket holding a button, so no release was proven')
+    await desk.evaluate(() => window.ciDesk.ws.send('m,320,240,0,0'))
+    await wait(600)
     const held = await send(first, 'hold-witness', 'read', { generation: heldGeneration })
     const counts = /HOLD:(\d+):(\d+)/.exec(held ?? '')
     assert.ok(counts, 'the held-input witness was not readable: ' + held)
