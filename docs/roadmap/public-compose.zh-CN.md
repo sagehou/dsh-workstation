@@ -20,9 +20,27 @@ CDP 中继与 Chromium 共用网络命名空间，通过专用 Unix socket 卷�
 
 Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 GitHub 托管运行器执行 `bash deploy/public/ci.sh`。集成测试使用单独启动的 Traefik、临时证书及结果确定的模型服务。[Public Compose](../../.github/workflows/public-compose.yml)
 
+作业矩阵的版本只来自 [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env)。每条腿拉取 `tag@digest`，跑同一套 Compose、同一个边缘探测和同一套登录后浏览器检查，唯一差异是 Traefik 镜像。[#3](https://github.com/sagehou/dsh-workstation/issues/3)
+
+### Traefik 兼容性矩阵
+
+| Traefik | 固定摘要 | 状态 |
+| --- | --- | --- |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | 待矩阵运行 |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | 待矩阵运行 |
+
+最低支持的入口版本为 **v3.7.14**。本表不代表任意 3.7 补丁版本都可用：只有表中列出的版本有运行记录。未列出的版本视为未验证，`deploy/public/traefik-image.sh` 会直接拒绝解析，而不是悄悄测一个浮动 tag。
+
+矩阵中每一条腿都要验证：HTTP 跳转 HTTPS、HSTS/nosniff/referrer 头、ForwardAuth 对 API 返回 401 且对文档返回 303、伪造 `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` 不能通过、`/browser/` 前缀要求登录、`/browser/api/tokens` 未被路由、DSH 内部 TLS 链路、Selkies WebSocket 视频、登录后同源帧策略。
+
+CONNECT 在两个版本上行为不同，探测按版本记录观察值而不假设一致：
+
+- `v3.7.9` 起拒绝 HTTP/1 `CONNECT`；`v3.7.14` 是 501。
+- `v3.7.15` 起所有 HTTP 版本的 `CONNECT` 都返回 501；`v3.7.14` 只是没有匹配路由，并非同等拒绝。
+
 ### 实际结果
 
-提交 `333e6f3` 的作业通过。使用 Traefik `3.7.19`、Chromium `156.0.8078.79`、Selkies `2.2.1`、DSH `0.2.2-rc.1` 和 Playwright `1.61.1`。[提交 `333e6f3` 的 GitHub Actions 作业](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
+提交 `333e6f3` 的作业通过（当时只有 Traefik 3.7.19 一条腿）。使用 Traefik `3.7.19`、Chromium `156.0.8078.79`、Selkies `2.2.1`、DSH `0.2.2-rc.1` 和 Playwright `1.61.1`。[提交 `333e6f3` 的 GitHub Actions 作业](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 
 | 检查项 | 实际结果 |
 | --- | --- |

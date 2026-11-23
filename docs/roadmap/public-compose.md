@@ -20,9 +20,27 @@ The CDP relay shares Chromium's network namespace. It forwards loopback CDP over
 
 Public Compose runs `go test -race -v ./...` in the pinned Go image and `bash deploy/public/ci.sh` on the GitHub-hosted runner. The integration uses a separate Traefik, a temporary certificate, and a deterministic model fixture. [Public Compose](../../.github/workflows/public-compose.yml)
 
+The job matrix reads its versions only from [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env). Each leg pulls `tag@digest`, runs the same Compose stack, the same edge probe and the same post-login browser checks; only the Traefik image differs. [#3](https://github.com/sagehou/dsh-workstation/issues/3)
+
+### Traefik compatibility matrix
+
+| Traefik | Pinned digest | Status |
+| --- | --- | --- |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Awaiting a matrix run |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Awaiting a matrix run |
+
+Minimum supported edge version: **v3.7.14**. This table is not a claim that any Traefik 3.7 patch works — only versions listed here have a recorded run. A version absent from the table is untested, and `deploy/public/traefik-image.sh` refuses to resolve it rather than silently testing a floating tag.
+
+Every leg must verify the HTTP→HTTPS redirect, HSTS/nosniff/referrer headers, ForwardAuth returning 401 for APIs and 303 for documents, forged `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` failing to authenticate, the `/browser/` prefix requiring login, `/browser/api/tokens` staying unrouted, the internal DSH TLS chain, Selkies WebSocket video, and the same-origin frame policy after login.
+
+CONNECT differs across the matrix, so the probe records the observed status per version instead of assuming one behaviour:
+
+- HTTP/1 `CONNECT` has been rejected since `v3.7.9`; both pinned versions return 501.
+- From `v3.7.15` every HTTP version of `CONNECT` returns 501. On `v3.7.14` it is merely unrouted, which is not the same guarantee.
+
 ### Observed results
 
-The entire job passed at `333e6f3`. It used Traefik `3.7.19`, Chromium `156.0.8078.79`, Selkies `2.2.1`, DSH `0.2.2-rc.1`, and Playwright `1.61.1`. [GitHub Actions job at `333e6f3`](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
+The job passed at `333e6f3` with a single Traefik 3.7.19 leg. It used Traefik `3.7.19`, Chromium `156.0.8078.79`, Selkies `2.2.1`, DSH `0.2.2-rc.1`, and Playwright `1.61.1`. [GitHub Actions job at `333e6f3`](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 
 | Check | Observed result |
 | --- | --- |

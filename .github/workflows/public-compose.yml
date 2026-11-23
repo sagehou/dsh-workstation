@@ -26,13 +26,67 @@ permissions:
   contents: read
 
 jobs:
-  public-compose:
+  matrix:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 5
+    outputs:
+      versions: ${{ steps.pinned.outputs.versions }}
+      default: ${{ steps.pinned.outputs.default }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
+      - name: Read the pinned Traefik matrix
+        id: pinned
+        run: |
+          versions="$(bash deploy/public/traefik-image.sh --json)"
+          printf 'versions=%s\n' "$versions" >> "$GITHUB_OUTPUT"
+          printf 'default=%s\n' "$(bash deploy/public/traefik-image.sh --default)" >> "$GITHUB_OUTPUT"
+          printf 'Traefik matrix: %s (default %s)\n' "$versions" "$(bash deploy/public/traefik-image.sh --default)"
+
+  public-compose:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        traefik: ${{ fromJSON(needs.matrix.outputs.versions) }}
+    name: public-compose (${{ matrix.traefik }})
+    env:
+      WORKSTATION_CI_TRAEFIK_VERSION: ${{ matrix.traefik }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Resolve evidence paths for this version
+        run: |
+          if [[ "$WORKSTATION_CI_TRAEFIK_VERSION" == "$(bash deploy/public/traefik-image.sh --default)" ]]; then
+            # The default leg keeps the unsuffixed artifact names used by the
+            # deployment guide.
+            printf 'EVIDENCE_SUFFIX=\n' >> "$GITHUB_ENV"
+          else
+            printf 'EVIDENCE_SUFFIX=-%s\n' "$WORKSTATION_CI_TRAEFIK_VERSION" >> "$GITHUB_ENV"
+          fi
+          printf 'Traefik under test: %s\n' "$(bash deploy/public/traefik-image.sh "$WORKSTATION_CI_TRAEFIK_VERSION")"
+      - name: Confirm the edge image is pinned by digest
+        run: |
+          version="$WORKSTATION_CI_TRAEFIK_VERSION"
+          image="$(bash deploy/public/traefik-image.sh "$version")"
+          pinned="$(bash deploy/public/traefik-image.sh --field digest "$version")"
+          [[ $image == "traefik:${version}@sha256:"* ]] || {
+            echo "$version is not pinned by digest in deploy/public/traefik-matrix.env" >&2
+            exit 1
+          }
+          # Deployment uses tag@digest, so a moved upstream tag cannot change
+          # what runs here. Record the tag's current digest for the audit trail
+          # and warn when it has moved, without failing the compatibility run.
+          observed="$(docker buildx imagetools inspect "traefik:$version" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"')" || observed=''
+          printf 'tag digest: %s\npinned digest: %s\n' "${observed:-unavailable}" "$pinned" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n $observed && $observed != "$pinned" ]]; then
+            printf '::warning::traefik:%s now resolves to %s; the run still uses the pinned %s\n' "$version" "$observed" "$pinned"
+          fi
+          echo "Pinned edge image for $version: $image"
       - name: Resolve pinned dependencies and race-test the Go gateway
         run: |
           mkdir -p evidence/source/auth evidence/source/provider
@@ -49,24 +103,59 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: public-compose-source-locks
+          name: public-compose-source-locks${{ env.EVIDENCE_SUFFIX }}
           path: evidence/source/
       - name: Verify the Compose stack with HTTPS through Traefik
         run: |
           set -o pipefail
-          bash deploy/public/ci.sh 2>&1 | tee evidence/public-compose.log
+          bash deploy/public/ci.sh 2>&1 | tee "evidence/public-compose${EVIDENCE_SUFFIX}.log"
       - name: Package the three workstation images
         run: |
           docker save dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 \
-            | gzip -1 > evidence/workstation-images-linux-amd64.tar.gz
-          (cd evidence && sha256sum workstation-images-linux-amd64.tar.gz > workstation-images-linux-amd64.sha256)
+            | gzip -1 > "evidence/workstation-images-linux-amd64${EVIDENCE_SUFFIX}.tar.gz"
+          (cd evidence && sha256sum "workstation-images-linux-amd64${EVIDENCE_SUFFIX}.tar.gz" \
+            > "workstation-images-linux-amd64${EVIDENCE_SUFFIX}.sha256")
           git rev-parse HEAD > evidence/source-commit
+          bash deploy/public/traefik-image.sh "$WORKSTATION_CI_TRAEFIK_VERSION" > "evidence/traefik-image${EVIDENCE_SUFFIX}"
           docker image inspect --format '{{index .RepoTags 0}} {{.Id}}' \
             dsh-workstation-runtime:0.2.0 dsh-workstation-auth:0.1.1 dsh-workstation-provider:0.2.0 > evidence/image-ids
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: public-compose-linux-amd64
+          name: public-compose-linux-amd64${{ env.EVIDENCE_SUFFIX }}
           path: |
             evidence/*
             !evidence/source/
+
+  matrix-summary:
+    needs: [matrix, public-compose]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Record the compatibility matrix outcome
+        env:
+          VERSIONS: ${{ needs.matrix.outputs.versions }}
+          RESULT: ${{ needs.public-compose.result }}
+        run: |
+          {
+            printf '## Traefik compatibility matrix\n\n'
+            printf 'Full stack jobs reported `%s`.\n\n' "$RESULT"
+            printf '| Traefik | Pinned digest | Scope |\n| --- | --- | --- |\n'
+            node --input-type=module -e '
+              import { execFileSync } from "node:child_process"
+              for (const version of JSON.parse(process.env.VERSIONS)) {
+                const digest = execFileSync("bash", ["deploy/public/traefik-image.sh", "--field", "digest", version], { encoding: "utf8" }).trim()
+                console.log(`| \`${version}\` | \`${digest}\` | \`deploy/public/ci.sh\` + \`deploy/public/edge-probe.mjs\` |`)
+              }
+            '
+            printf '\nBoth legs run the same Compose stack, the same edge probe and the same authenticated browser checks; only the pinned Traefik image differs.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail when any pinned version failed
+        if: needs.public-compose.result != 'success'
+        run: |
+          echo "At least one pinned Traefik version failed the full stack; see the per-version jobs." >&2
+          exit 1
