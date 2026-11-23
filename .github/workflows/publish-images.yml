@@ -191,6 +191,12 @@ jobs:
       - name: Update deploy/public/images.env with the published digests
         run: |
           set -euo pipefail
+          # An unmatched glob stays literal, which would fail here as a missing
+          # file rather than as the real problem: nothing was published.
+          compgen -G 'digests/digest-*.txt' >/dev/null || {
+            echo 'No digest artifacts were downloaded; publish produced nothing.' >&2
+            exit 1
+          }
           for file in digests/digest-*.txt; do
             image="$(awk '{print $1}' "$file")"
             version="$(awk '{print $2}' "$file")"
@@ -264,6 +270,11 @@ jobs:
           done
       - name: Attach the pinned references to the release
         if: github.ref_type == 'tag'
+        # The release page is documentation, not the distribution channel: the
+        # digests are already recorded in images.env and the artifact. A tagging
+        # run should not fail because creating a release was not permitted, so
+        # this reports and continues.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
