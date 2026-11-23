@@ -26,12 +26,14 @@ Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 Gi
 
 | Traefik | 固定摘要 | 状态 |
 | --- | --- | --- |
-| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | 待矩阵运行 |
-| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | 待矩阵运行 |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | 在 `540ddd5` 通过全栈测试 |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | 在 `540ddd5` 通过全栈测试 |
 
-最低支持的入口版本为 **v3.7.14**。本表不代表任意 3.7 补丁版本都可用：只有表中列出的版本有运行记录。未列出的版本视为未验证，`deploy/public/traefik-image.sh` 会直接拒绝解析，而不是悄悄测一个浮动 tag。
+最低支持的入口版本为 **v3.7.14**。两条腿都在[运行 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598)通过，检查项完全一致：`v3.7.14`（[作业 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)）与 `v3.7.19`（[作业 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)）。
 
-矩阵中每一条腿都要验证：HTTP 跳转 HTTPS、HSTS/nosniff/referrer 头、ForwardAuth 对 API 返回 401 且对文档返回 303、伪造 `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` 不能通过、`/browser/` 前缀要求登录、`/browser/api/tokens` 未被路由、DSH 内部 TLS 链路、Selkies WebSocket 视频、登录后同源帧策略。
+本表不代表任意 3.7 补丁版本都可用：只有表中列出的版本有运行记录。未列出的版本视为未验证，`deploy/public/traefik-image.sh` 会直接拒绝解析，而不是悄悄测一个浮动 tag。
+
+矩阵中每一条腿都验证了：HTTP 跳转 HTTPS、HSTS/nosniff/referrer 头、ForwardAuth 对 API 返回 401 且对文档返回 303、伪造 `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` 不能通过、`/browser/` 前缀要求登录、`/browser/api/tokens` 未被路由、DSH 内部 TLS 链路、Selkies WebSocket 视频、登录后同源帧策略。
 
 CONNECT 在两个版本上行为不同，探测按版本记录实际观察值：
 
