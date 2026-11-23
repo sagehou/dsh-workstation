@@ -2,24 +2,30 @@
 
 [English](ARCHITECTURE.md) · 简体中文
 
+## 产品边界
+
+DSH Workstation 是围绕官方 DSH 应用的自托管部署、安全、浏览器控制和运维增强层。DSH 继续负责 Agent Runtime、聊天/会话界面、终端、Profile 和 Plugin Manager。本项目不另造 Agent Runtime、编辑器、包管理器或公共插件市场。
+
+首版严格单用户：一个本地管理员、一份 DSH_HOME、一个工作区、一份 Chromium 配置。该管理员可以注册多个 Passkey。不得让第二个账户共享这些资源。多用户必须另行设计租户隔离，不属于首版范围。
+
 ## 组件边界
 
 | 组件 | 职责 |
 | --- | --- |
-| Runtime 镜像 | 提供 Node.js、固定版本 pnpm、Git/SSH、CA 证书和常用原生构建工具。DSH npm 安装保存在持久化存储，由专用 CLI 或 API 管理。 |
-| Runtime 管理器 | 写操作持锁。每个确切版本独立安装，验证后原子切换指针，检查启动，失败则回滚。活动安装保持完整。 |
+| Runtime 镜像 | 提供 Node.js、固定版本 pnpm、Git/SSH、CA 证书和常用原生构建工具。DSH npm 安装保存在持久化存储，由专用 CLI/API 管理。 |
+| Runtime 管理器 | 写操作持锁。每个确切版本独立安装，验证后原子切换指针，检查启动，失败则回滚。数据迁移必须有匹配的备份/恢复路径。 |
 | DSH Profile | 由官方 CLI 和 Plugin Manager 管理。沿用固定版本目录结构，将 DSH_HOME 放在同一文件系统，让 pnpm 链接可访问 Store。 |
-| Go Auth | 处理密码、TOTP、WebAuthn、恢复码、会话、CSRF、审计、限流、ForwardAuth 和浏览器租约协调。状态存入 SQLite WAL。Agent 由 Runtime 执行。 |
-| Workstation 插件 | 原生右侧栏是产品目标。使用公开客户端 API 嵌入同源 `/browser/`，并调用认证或浏览器控制接口。依赖未公开内部实现须有 ADR 依据，保留官方 DSH 核心。 |
-| 浏览器 Provider | 接收官方 MCP 调用，验证租约，通过 CDP 连接 Chromium。 |
+| Go Auth | 管理唯一管理员的密码、TOTP、WebAuthn、恢复码、会话、CSRF、限流、审计和 ForwardAuth。状态存入 SQLite WAL。Agent 由 Runtime 执行。 |
+| 浏览器 Provider | 接收官方 MCP 调用，每次操作验证与会话绑定的租约和代次，通过 CDP 连接 Chromium。只开放明确批准的工具。 |
 | Chromium 和 Selkies | 使用一个 Chromium 进程和一份持久化配置。人工通过 Selkies 操作，Provider 自动化控制同一个浏览器。 |
 | Traefik | 路由公网 HTTPS 请求，由 Go Auth 验证 DSH 和 Selkies 的访问。 |
+| 原生 Sidebar | 延后增强。首版正式入口是已认证的独立浏览器/控制页面。 |
 
 ## 公网 Compose 网络
 
 ```mermaid
 flowchart LR
-    Person["使用者"] -->|"HTTPS"| Edge["已有 Traefik"]
+    Person["单一使用者"] -->|"HTTPS"| Edge["已有 Traefik"]
     Edge -->|"认证和 WebSocket"| Auth["Go Auth"]
     Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
     Edge -->|"桌面 HTTP"| Browser["Chromium 和 Selkies"]
@@ -31,11 +37,13 @@ flowchart LR
 
 | 网络 | 端点 |
 | --- | --- |
-| 已有代理网 | Traefik 与 Auth。Auth 的公开和校验监听器绑定在这张网。 |
+| 已有代理网 | Traefik 与 Auth。Auth 的公开和校验监听器绑定在这张网，并验证可信 Traefik 对端。 |
 | `workstation` | Runtime、MCP 监听器，以及 Traefik 和 Auth 连接 DSH 的路径。 |
 | `browser` | Chromium、Provider 管理监听器，以及 Traefik 和 Auth 连接 Selkies 的路径。 |
 
 中继与 Chromium 共用网络命名空间。仅中继和 Provider 挂载 CDP socket 卷。Auth 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[已验证拓扑](roadmap/public-compose.zh-CN.md)
+
+当前 Compose 使用固定子网和地址。生产部署前，应允许配置 workstation/browser 子网，并从同一份经过校验的配置生成固定地址、健康检查目标和证书 SAN。创建资源前检测与宿主机路由及现有 Docker 网络的重叠。
 
 ## 路由
 
@@ -44,7 +52,8 @@ flowchart LR
 | `/` | DSH，由 ForwardAuth 保护。 |
 | `/browser/` | Selkies，使用同一 ForwardAuth，由 Traefik 保留前缀。 |
 | `/_auth/` | 登录和账户界面及 API。这些路由不经过自己的 ForwardAuth。 |
-| 内部校验端点 | Go Auth，信任 Traefik 对端。 |
+| 内部校验端点 | Go Auth，只信任配置的 Traefik 对端。 |
+| Provider 管理 | 仅限浏览器私网，绝不作为未认证公网路由。 |
 
 按确切上游版本验证子路径、响应头、CSP、WebSocket 和登录行为。
 
@@ -55,32 +64,47 @@ flowchart LR
 | DSH_HOME | Runtime 版本、Profile 清单和锁文件、node_modules、pnpm Store、会话、设置、凭据和插件配置。使用同一个持久化卷。 |
 | 工作区 | 项目文件，使用独立卷或绑定挂载。 |
 | Chromium `/config` | 持久化浏览器配置、Cookie、扩展和下载。 |
-| Auth 数据 | SQLite 数据库存放在独立卷。 |
+| Auth 数据 | 唯一管理员和会话状态存入独立 SQLite 卷。 |
+| Provider 状态 | Provider 重启时用于失败关闭的租约/恢复状态。 |
 | Auth 密钥 | Docker secrets 或只读文件。与数据库分开存储和备份。 |
 | 部署配置 | 保存在 Git，密钥留在仓库外。 |
 
-## 认证流程
+## 认证和账户模型
 
-1. **密码登录**时，Auth 验证用户名和密码，发放短期、一次性挑战。用户在独立界面输入 TOTP，每个时间步只验证一次，成功后换发不透明会话 Cookie。
-2. **Passkey 登录**时，Auth 发放一次性 WebAuthn 挑战，要求用户验证，严格检查 RP ID 和 HTTPS 源。断言正确后建立会话。账号仍需绑定 TOTP。
+1. 初始化只创建一个本地管理员。成功后永久关闭账户创建。
+2. 密码登录使用独立 TOTP 挑战。Passkey 是独立登录方式；同一管理员可以注册多个 Passkey。
+3. 不包含用户创建、邀请、角色体系、租户选择或共享账户模式。
+4. 会话 Cookie 为 `__Host-dsh_session`，使用 `Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`，省略 `Domain`。
 
-会话 Cookie 为 `__Host-dsh_session`，使用 `Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`，省略 `Domain`。
+## 浏览器控制和安全
 
-## 浏览器控制
+- 控制状态包括 HUMAN、AGENT、HANDOVER、PAUSED 和 DISCONNECTED。
+- 租约记录租约 ID、持有者类型和 ID、DSH 会话 ID、代次、发放及过期时间。采用事务式比较并交换。
+- 每次工具调用都经过统一的服务端准入点，检查已认证 MCP peer、在线 DSH 会话绑定、租约持有者、代次、过期时间、来源策略和执行中操作状态。
+- Agent 控制时，在 Selkies 输入边界拦截人工键盘和鼠标。接管必须排空或安全取消当前操作、释放已按住输入并确认，然后才能切换所有者。
+- 过期、无法确认渲染器是否结束、Provider 重启或浏览器进程退出时必须失败关闭。实际输入路径通过测试后才能宣称独占。
+- 通过 CDP 连接 Chromium 默认上下文，共享标签页和 Cookie。禁止工具关闭浏览器或上下文。
+- `BROWSER_TOOL_ORIGINS` 是 Provider 应用层来源白名单，不是网络出口防火墙或完整 SSRF 防护。Chromium 仍会执行页面脚本和跟随重定向。
+- 在开放 Agent 广泛访问不可信网站前，增加独立浏览器出口控制，在 DNS 解析后及重定向时阻止回环、链路本地、私有网段、云元数据和其他禁止目标。CDP 与 Provider 管理端保持私有。
 
-- **控制状态**包括 HUMAN、AGENT、HANDOVER、PAUSED 和 DISCONNECTED。
-- **租约**记录租约 ID、持有者类型和 ID、DSH 会话 ID、代次、发放及过期时间。采用事务式比较并交换。
-- **每次工具调用都要校验租约。**Agent 控制时，在 Selkies 输入边界拦截人工键盘和鼠标。过期或进程退出时回到 HUMAN 或 DISCONNECTED。
-- **通过 CDP 连接** Chromium 的默认上下文，共享标签页和 Cookie。核对 Playwright 的 CDP 限制，避免工具关闭浏览器或上下文。
-- 如果上游不能可靠拦截输入，评估可维护的认证输入网关、代理或集成镜像。实际输入路径通过测试后才能宣称独占。[待补场景](https://github.com/sagehou/dsh-workstation/issues/1)
+## Runtime 升级与恢复
 
-## 版本管理
+- 候选 DSH 版本并行安装，绝不就地修改活动安装。
+- 修改 Profile 或插件依赖前，备份 DSH_HOME 并记录确切 Runtime、DSH、Profile 和插件版本。
+- 验证候选版本启动、Node 兼容性、Profile/Bundle 兼容性、锁文件一致性和明确批准的生命周期脚本。
+- 指针回滚只恢复所选可执行版本。如果发生数据迁移，还必须恢复匹配的 DSH_HOME 备份及相关工作区状态。
+- 备份覆盖 DSH_HOME、工作区、Chromium 配置、Auth 数据库、Provider 状态和加密密钥。恢复测试必须证明管理员仍可使用 TOTP 和现有 Passkey。
 
-Runtime 镜像、DSH npm 包、Auth 镜像、Workstation 插件和 Chromium 镜像分别版本化。更新 Runtime 镜像保留所选 DSH 版本。更新 DSH 保留 Runtime 镜像。Profile 和插件数据可能迁移，升级前须备份并检查迁移。
+## 发布和部署
 
-## 安全边界
+- Runtime、DSH npm、Auth、Provider、Workstation 插件（正式发布时）和 Chromium 分别版本化。
+- CI 必须覆盖实际部署 Traefik 版本范围，包括目标补丁版本；较新 CI 版本通过不能证明较旧部署版本兼容。
+- 将自有 Runtime、Auth 和 Provider 镜像发布到 GHCR，使用不可变版本标签和 digest。保留可复现构建证据和校验和。
+- 首版只支持 Linux amd64。镜像和全栈测试覆盖前不得宣称支持 ARM64。
+- DSH 和 Auth 不挂载 Docker socket。采用最小权限、可行时只读文件系统、非 root 用户、健康检查和明确的密钥管理。
 
-- CDP 和浏览器管理接口保留在私网。工作台不挂载 Docker socket。
-- 入口删除或替换客户端身份请求头。ForwardAuth 信任配置的代理对端。
-- 登录和校验端点不经过自己的 ForwardAuth。拒绝未认证 API 和 WebSocket 时不返回登录页面。
-- 初期只允许可信用户访问。浏览器终端拥有其容器的操作权限，账号认证本身不提供租户隔离。
+## 延后工作
+
+原生 DSH Sidebar 不是首版上线门槛，必须完整支持已认证的独立浏览器/控制页面。后续只能通过 DSH 公开 API 实现 Sidebar，不得 Fork DSH 核心或依赖私有 DOM。
+
+多用户租户、Kubernetes、Windows Companion、自研 Agent Runtime/编辑器、公共插件市场和多个并行浏览器实例均不在首版范围。
