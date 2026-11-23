@@ -47,6 +47,13 @@ No repository secret is required: the workflow uses the automatic
 2. Merge that change.
 3. Run **Publish images** from `main` (`image: all`), or create a tag
    `v<version>` — for example `v0.2.0` — to mark the release point.
+
+   A `v*` tag names the **repository's** release point, not a shared image
+   version. The four images are versioned independently, so a tag `v0.2.0` may
+   publish `runtime:0.2.0`, `auth:0.1.1`, `provider:0.2.0` and
+   `browser-gate:0.1.0`. That is intentional: forcing one number would couple
+   unrelated changes. The tag is useful because it marks which source commit a
+   set of digests came from, and the generated release notes list all four.
 4. Approve the `ghcr-release` environment when prompted.
 5. Download the `published-images` artifact, verify the digests against
    `docker buildx imagetools inspect`, and commit the updated
