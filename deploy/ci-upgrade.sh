@@ -205,4 +205,11 @@ done
 printf '%s\n' "$phases" | grep -qiE 'password|totp|secret|api[_-]?key' && fail audit 'credential-like fields in the audit log'
 pass audit 'start, switch, verify, pointer rollback, restore and approval are recorded without credentials'
 
+# Collect the evidence before the EXIT trap tears the stack down, because the
+# archive and audit trail only exist inside the volumes.
+mkdir -p evidence
+in_image 'cat /dsh-home/runtime/audit.jsonl 2>/dev/null || true' > evidence/upgrade-audit.jsonl || true
+in_image 'cat /backup/dsh-home.*.json 2>/dev/null || true' > evidence/upgrade-manifests.json || true
+in_image 'dsh-runtime status; dsh-runtime backups' > evidence/upgrade-final-status.txt || true
+
 printf 'upgrade-drill OK: compatibility gate, backup manifest, migration detection, pointer vs data rollback, restore, recreation and image rollback\n'

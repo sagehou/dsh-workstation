@@ -43,16 +43,6 @@ jobs:
           set -o pipefail
           mkdir -p evidence
           bash deploy/ci-preview.sh 2>&1 | tee evidence/m1-preview.log
-      - name: Drill the transactional upgrade and matched data restore
-        run: |
-          set -o pipefail
-          bash deploy/ci-upgrade.sh 2>&1 | tee evidence/upgrade-drill.log
-      - name: Retain the backup manifest for the run
-        if: always()
-        run: |
-          mkdir -p evidence
-          docker compose -f compose.preview.yml run --rm --no-deps -T --entrypoint sh maintenance -c \
-            'cat /dsh-home/runtime/audit.jsonl 2>/dev/null || true' > evidence/upgrade-audit.jsonl || true
       - name: Pack the Runtime image for deploy without a build
         run: |
           set -o pipefail
@@ -62,4 +52,27 @@ jobs:
         if: always()
         with:
           name: m1-private-preview
+          path: evidence/
+
+  # A separate job on a fresh runner. The preview job's teardown releases the
+  # Compose project, volumes and networks, and reusing them in the same job
+  # raced with the daemon and failed with "Address already in use".
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Drill the transactional upgrade and matched data restore
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          bash deploy/ci-upgrade.sh 2>&1 | tee evidence/upgrade-drill.log
+      # The drill captures its own evidence into evidence/ before its EXIT
+      # trap removes the volumes, so this only uploads what it produced.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: m1-upgrade-drill
           path: evidence/
