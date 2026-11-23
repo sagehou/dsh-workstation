@@ -135,6 +135,28 @@ for key in $(grep -o 'WORKSTATION_[A-Z_]*_IMAGE' "$compose" | sort -u); do
 done
 pass 'compose.yml has no image override without a published image'
 
+# --- every workflow use of the resolver strips the name= prefix ---
+#
+# The resolver prints `name=reference`. Consuming that line directly produced
+# `runtime=dsh-workstation-runtime:0.2.0` as a Docker tag, which failed the first
+# real publish with "invalid reference format". Assert that each workflow call
+# site strips the prefix rather than trusting review to catch it.
+for workflow in .github/workflows/publish-images.yml; do
+  [[ -f $workflow ]] || continue
+  # A resolver call assigned to a variable must be followed by the strip, or the
+  # variable is a `name=reference` pair rather than a reference.
+  while IFS= read -r line_no; do
+    # Look at the next few lines for the strip.
+    # Six lines: the call can be a multi-line `|| { ... }` guard before the
+    # strip, as it is in the record job.
+    window="$(sed -n "${line_no},$(( line_no + 6 ))p" "$workflow")"
+    if ! grep -q 'reference="\${reference#\*=}"' <<<"$window"; then
+      fail "$workflow:$line_no assigns a resolver line without stripping the name= prefix"
+    fi
+  done < <(grep -n 'reference="\$(bash deploy/public/images.sh' "$workflow" | cut -d: -f1)
+  pass 'every resolver call in the publish workflow strips the name= prefix'
+done
+
 if (( failures )); then
   printf '\n%d check(s) failed\n' "$failures" >&2
   exit 1

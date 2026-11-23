@@ -107,8 +107,17 @@ jobs:
           set -euo pipefail
           # The name comes from the resolver, so a published image is named the
           # same way the deployment looks it up.
+          # The resolver prints `name=reference`, so strip the prefix first.
+          # Taking `${reference%%:*}` from the whole line yields
+          # `runtime=dsh-workstation-runtime`, which is not a valid image name.
           reference="$(bash deploy/public/images.sh --local "$IMAGE")"
-          printf 'name=%s\n' "${reference%%:*}" >> "$GITHUB_OUTPUT"
+          reference="${reference#*=}"
+          name="${reference%%:*}"
+          [[ $name == "dsh-workstation-$IMAGE" ]] || {
+            echo "The resolver produced an unexpected image name: [$reference]" >&2
+            exit 1
+          }
+          printf 'name=%s\n' "$name" >> "$GITHUB_OUTPUT"
           case "$IMAGE" in
             runtime) printf 'context=runtime\n' >> "$GITHUB_OUTPUT"; printf 'file=runtime/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
             auth) printf 'context=auth\n' >> "$GITHUB_OUTPUT"; printf 'file=auth/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
@@ -219,10 +228,12 @@ jobs:
           published=()
           for file in digests/digest-*.txt; do published+=("$(awk '{print $1}' "$file")"); done
           for name in "${published[@]}"; do
+            # The resolver prints `name=reference`; strip the prefix.
             reference="$(bash deploy/public/images.sh "$name")" || {
               echo "$name was published but does not resolve; images.env is inconsistent." >&2
               exit 1
             }
+            reference="${reference#*=}"
             [[ $reference == *"@sha256:"* ]] || {
               echo "$name resolved to a mutable reference: $reference" >&2
               exit 1
@@ -255,7 +266,9 @@ jobs:
           # exactly the digests just recorded, with no login in this job.
           for file in digests/digest-*.txt; do
             name="$(awk '{print $1}' "$file")"
+            # The resolver prints `name=reference`; strip the prefix.
             reference="$(bash deploy/public/images.sh "$name")"
+            reference="${reference#*=}"
             digest="$(bash deploy/public/images.sh --field digest "$name")"
             observed="$(docker buildx imagetools inspect "$reference" --format '{{json .Manifest.Digest}}' | tr -d '"')"
             [[ $observed == "$digest" ]] || {
