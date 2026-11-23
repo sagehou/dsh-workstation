@@ -43,7 +43,9 @@ flowchart LR
 
 中继与 Chromium 共用网络命名空间。仅中继和 Provider 挂载 CDP socket 卷。Auth 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[已验证拓扑](roadmap/public-compose.zh-CN.md)
 
-当前 Compose 使用固定子网和地址。生产部署前，应允许配置 workstation/browser 子网，并从同一份经过校验的配置生成固定地址、健康检查目标和证书 SAN。创建资源前检测与宿主机路由及现有 Docker 网络的重叠。
+两个子网都是配置项而非常量。`deploy/network.sh` 从 `WORKSTATION_SUBNET` 与 `BROWSER_SUBNET` 推导子网定义、动态 `ip_range`、所有固定地址、Provider 健康检查目标以及 Runtime 证书 SAN。固定地址位于 `.2`/`.3`，动态分配限制在子网的上半段，因此先启动的容器不会占用固定地址——这一顺序避免的正是 Runtime 申请自身地址时 Docker 报「Address already in use」。
+
+`deploy/network.sh check` 在初始化脚本创建任何资源之前运行，遇到与宿主机路由或现有 Docker 网络重叠时拒绝执行，且不创建、不修改任何东西。默认路由被有意排除：它覆盖所有地址，而 Docker 更具体的子网路由优先。若状态目录记录的子网与请求的不一致，会拒绝而不是静默重签内部 CA，因为 Runtime 证书按推导地址签发；`--reissue` 才是有意的路径。
 
 ## 路由
 

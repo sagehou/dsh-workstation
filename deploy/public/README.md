@@ -2,14 +2,56 @@
 
 English · [简体中文](README.zh-CN.md)
 
-[Install](#install) · [Use the browser](#use-the-browser) · [Maintain](#maintain) · [Back up and restore](#back-up-and-restore)
+[Network addresses](#network-addresses) · [Install](#install) · [Use the browser](#use-the-browser) · [Maintain](#maintain) · [Back up and restore](#back-up-and-restore)
 
 ## Before you start
 
 - Use a **Linux amd64** host with rootful Docker Engine 28+ and Compose v2. Use a non-root user with Docker access and an authenticated GitHub CLI.
 - Point **DNS** at the Traefik host. Traefik serves public ports 80 and 443 and manages the certificates.
 - Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. You do **not** have to upgrade Traefik: CI pins and exercises `v3.7.14` and `v3.7.19` through the same full stack. [Compatibility matrix](../../docs/roadmap/public-compose.md#traefik-compatibility-matrix) records which versions have a passing run.
-- Check that neither **Docker subnet** overlaps your host routes. [Compose](../../compose.yml)
+- Check that neither **Docker subnet** overlaps your host routes. `bash deploy/network.sh check` does this and refuses to continue on a conflict. See [Network addresses](#network-addresses).
+
+## Network addresses
+
+The two Compose networks and every address inside them come from one place:
+`deploy/network.sh`. Nothing has to be edited by hand, and the initializer
+refuses to run when the plan conflicts with the host.
+
+| Setting | Default | Used for |
+| --- | --- | --- |
+| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime, Provider and Auth on the internal network. |
+| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium and the Provider's control listener. |
+
+Static addresses are derived from each subnet: `.2` is the Runtime on the
+workstation network and the Provider on the browser network, and `.3` is the
+Provider on the workstation network. Dynamic allocation is confined to the
+upper half, so a container that starts first can never take a static address.
+
+Check the plan against the host before starting anything:
+
+```bash
+bash deploy/network.sh check
+```
+
+It reports three things, and creates or changes nothing:
+
+- a subnet that overlaps a **host route** (a VPN route is the common case);
+- a subnet that overlaps an **existing Docker network**;
+- an invalid CIDR, a prefix outside `/16`..`/28`, or a CIDR with host bits set.
+
+If it fails, pick two unused RFC1918 ranges and pass them to the initializer:
+
+```bash
+WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+  bash deploy/public/init.sh <domain> <proxy> <traefik>
+```
+
+The Runtime certificate is issued for the derived address, so re-running the
+initializer with different subnets is refused rather than silently reissuing
+the internal CA that every service trusts. `--reissue` performs that change
+deliberately; it replaces the CA and the Runtime certificate, keeps the other
+secrets, and requires recreating the containers so they take their new
+addresses.
 
 ## Install
 
@@ -48,6 +90,24 @@ traefik_dynamic='/srv/traefik/dynamic'
 WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
 ```
+
+#### Existing deployment
+
+Before this change the subnets were fixed in `compose.yml`, so an existing
+`.env.public` has no `WORKSTATION_SUBNET` or `BROWSER_SUBNET`. The defaults are
+the same addresses, so re-running the initializer with no overrides keeps the
+existing certificate valid and only records the derived keys:
+
+```bash
+WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
+```
+
+Nothing is reissued and no container is recreated with a different address. If
+you *do* want different addresses, that is a migration: back up, re-run with
+`--reissue`, recreate every service, and reconnect Traefik to the (recreated)
+`dsh-workstation_workstation` and `dsh-workstation_browser` networks.
 
 ### 3. Create the administrator
 

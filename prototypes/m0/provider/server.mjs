@@ -396,8 +396,15 @@ function listen(handler, host, port) {
     })
   }).listen(port, host)
 }
-listen(mcp, publicMode ? '172.30.241.3' : '172.30.232.2', 8080)
-listen(control, '172.30.233.2', 8081)
+// The public provider binds the addresses Compose assigns it. They come from
+// deploy/network.sh, so a custom subnet moves them together with the Compose
+// static addresses and the health-check target that probes this listener.
+// A literal here fails with EADDRNOTAVAIL: the container has no such address.
+const providerHost = process.env.PROVIDER_IP ??
+  (publicMode ? '172.30.241.3' : '172.30.232.2')
+const controlHost = process.env.PROVIDER_CONTROL_IP ?? '172.30.233.2'
+listen(mcp, providerHost, 8080)
+listen(control, controlHost, 8081)
 
 if (publicMode) {
   let lastProblem

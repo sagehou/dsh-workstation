@@ -31,6 +31,29 @@ jobs:
       - name: Exercise the upgrade transaction without Docker
         run: bash runtime/test/e2e-upgrade.sh
 
+  # Network derivation and the initializer are pure shell. They run in their own
+  # job because the initializer refuses to run as root, while the Runtime tests
+  # must run as root to exercise file ownership.
+  network:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Test subnet derivation and the overlap preflight
+        run: bash deploy/test/network.test.sh
+      - name: Test repeatable initialization and PKI consistency
+        # The initializer refuses to run as root, and GitHub-hosted runners
+        # already run as an unprivileged user, so no staging is needed. Fail
+        # loudly instead of silently skipping if that ever stops being true.
+        run: |
+          if [[ $(id -u) == 0 ]]; then
+            echo 'this job must run as a non-root user to exercise init.sh' >&2
+            exit 1
+          fi
+          bash deploy/test/init.test.sh
+
   preview:
     runs-on: ubuntu-24.04
     timeout-minutes: 25

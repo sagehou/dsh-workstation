@@ -171,7 +171,14 @@ var providerHTTP = &http.Client{
 }
 
 func (g *gateway) provider(r *http.Request, method, route string, body io.Reader, result any) error {
-	request, err := http.NewRequestWithContext(r.Context(), method, "http://172.30.233.2:8081"+route, body)
+	// The provider's control listener address comes from configuration, so this
+	// code carries no copy of the default subnet.
+	controlAddr := g.providerControlAddr
+	if controlAddr == "" {
+		controlAddr = "172.30.233.2:8081"
+	}
+	request, err := http.NewRequestWithContext(r.Context(), method,
+		"http://"+controlAddr+route, body)
 	if err != nil {
 		return err
 	}

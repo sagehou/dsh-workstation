@@ -2,14 +2,46 @@
 
 [English](README.md) · 简体中文
 
-[部署](#部署) · [使用浏览器](#使用浏览器) · [维护](#维护) · [备份与恢复](#备份与恢复)
+[网络地址](#网络地址) · [部署](#部署) · [使用浏览器](#使用浏览器) · [维护](#维护) · [备份与恢复](#备份与恢复)
 
 ## 部署前准备
 
 - **主机**需要 Linux amd64、以 root 运行的 Docker Engine 28+ 和 Compose v2。用有 Docker 权限的非 root 用户执行，并先登录 GitHub CLI。
 - **DNS** 将工作台域名指向 Traefik 所在主机。Traefik 提供公网端口 80 和 443，并管理证书。
 - **Traefik** 须已在同一台 Docker 主机运行。确认它所在的可信 Docker 网络、HTTPS 入口、证书 resolver，以及 file provider 监视的宿主机目录。**不需要升级 Traefik**：CI 按摘要固定 `v3.7.14` 与 `v3.7.19`，并用同一套全栈测试覆盖两者；哪些版本已有通过记录见[兼容性矩阵](../../docs/roadmap/public-compose.zh-CN.md#traefik-兼容性矩阵)。
-- **Docker 网络**确认两个 Compose 子网与宿主机路由没有重叠。[Compose](../../compose.yml)
+- **Docker 网络**用 `bash deploy/network.sh check` 核对两个 Compose 子网与宿主机路由；冲突时会拒绝继续。见[网络地址](#网络地址)。
+
+## 网络地址
+
+两个 Compose 网络及其中的所有地址只来自一处：`deploy/network.sh`。无需手工修改任何文件，且初始化脚本在方案与宿主机冲突时会拒绝执行。
+
+| 配置项 | 默认值 | 用途 |
+| --- | --- | --- |
+| `WORKSTATION_SUBNET` | `172.30.241.0/24` | 内部网络上的 Runtime、Provider 和 Auth。 |
+| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium 与 Provider 的控制监听地址。 |
+
+固定地址由子网推导：工作站网络上的 `.2` 给 Runtime、浏览器网络上的 `.2` 给 Provider，`.3` 是工作站网络上的 Provider。动态分配限制在每个子网的上半段，因此先启动的容器不可能占用固定地址。
+
+启动前先核对方案：
+
+```bash
+bash deploy/network.sh check
+```
+
+它只报告，不创建也不改动任何东西：
+
+- 与**宿主机路由**重叠的子网（VPN 路由是最常见的情况）；
+- 与**现有 Docker 网络**重叠的子网；
+- 非法 CIDR、超出 `/16`..`/28` 的前缀，或带主机位的 CIDR。
+
+若失败，选择两段未使用的 RFC1918 地址传给初始化脚本：
+
+```bash
+WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+  bash deploy/public/init.sh <域名> <代理网络> <Traefik 容器>
+```
+
+Runtime 证书按推导出的地址签发，因此在已有状态目录上用不同子网重跑初始化会被拒绝，而不是静默重签所有服务都信任的内部 CA。`--reissue` 才是有意为之的路径：它替换 CA 与 Runtime 证书，保留其他密钥，并要求重建容器以取得新地址。
 
 ## 部署
 
@@ -48,6 +80,18 @@ traefik_dynamic='/srv/traefik/dynamic'
 WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
 ```
+
+#### 已有部署
+
+在此变更之前子网写死在 `compose.yml` 中，因此已有的 `.env.public` 没有 `WORKSTATION_SUBNET` 与 `BROWSER_SUBNET`。默认值就是原来的地址，所以不带覆盖地重跑初始化不会动到现有证书，只会补写推导出的键：
+
+```bash
+WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+  bash deploy/public/init.sh "$域名" "$代理网络" "$Traefik 容器"
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
+```
+
+不会重签任何证书，也不会用不同地址重建容器。若确实要换地址，那是一次迁移：先备份，用 `--reissue` 重跑，重建所有服务，并把 Traefik 重新连接到（重建后的）`dsh-workstation_workstation` 与 `dsh-workstation_browser` 网络。
 
 ### 3. 创建管理员
 

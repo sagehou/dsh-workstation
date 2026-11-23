@@ -43,6 +43,7 @@ type gateway struct {
 	maxSessions                 int
 	wa                          *webauthn.WebAuthn
 	browserToken, providerAdmin string
+	providerControlAddr          string
 	dshClient                   *http.Client
 	dshWS, browserWS *httputil.ReverseProxy
 	hashSlots                   chan struct{}

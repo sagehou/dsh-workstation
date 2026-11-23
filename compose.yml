@@ -38,6 +38,9 @@ services:
       AUTH_EDGE_IP: ${WORKSTATION_TRAEFIK_IP:?run deploy/public/init.sh}
       AUTH_ADDR: dsh-workstation-auth-edge:8080
       AUTH_VERIFY_ADDR: dsh-workstation-auth-edge:8081
+      # Auth calls the provider's control listener. The address comes from the
+      # derivation so a custom subnet moves it too.
+      AUTH_PROVIDER_CONTROL_ADDR: ${BROWSER_PROVIDER_IP:-172.30.233.2}:8081
       AUTH_IDLE: ${AUTH_IDLE:-30m}
       AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-12h}
       AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-8}
@@ -76,7 +79,9 @@ services:
     restart: "on-failure:5"
     environment:
       DSH_INITIAL_VERSION: 0.2.2-rc.1
-      DSH_BIND_IP: 172.30.241.2
+      # Derived by deploy/network.sh from WORKSTATION_SUBNET. The default keeps
+      # an existing deployment working without an override.
+      DSH_BIND_IP: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
       WORKSTATION_BROWSER_MCP: "1"
@@ -91,7 +96,7 @@ services:
       start_period: 4m
     networks:
       workstation:
-        ipv4_address: 172.30.241.2
+        ipv4_address: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
         aliases: [dsh-workstation-runtime]
 
   maintenance:
@@ -152,6 +157,10 @@ services:
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"]
     environment:
       WORKSTATION_PROVIDER: "1"
+      # The provider binds these; they must equal the addresses Compose assigns
+      # this container, or it fails with EADDRNOTAVAIL on a custom subnet.
+      PROVIDER_IP: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+      PROVIDER_CONTROL_IP: ${BROWSER_PROVIDER_IP:-172.30.233.2}
       BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
     volumes:
       - provider-state:/state
@@ -164,7 +173,7 @@ services:
         - node
         - -e
         - >-
-          fetch('http://172.30.233.2:8081/status', {
+          fetch('http://${BROWSER_PROVIDER_IP:-172.30.233.2}:8081/status', {
             headers: {Authorization: 'Bearer '+require('node:fs').readFileSync('/run/secrets/m0_admin','utf8')},
             signal: AbortSignal.timeout(2000)
           }).then(r => r.ok ? r.json() : {}).then(({state}) => {
@@ -175,8 +184,12 @@ services:
       retries: 18
       start_period: 30s
     networks:
-      workstation: {ipv4_address: 172.30.241.3}
-      browser: {ipv4_address: 172.30.233.2}
+      # Block style, not {key: value}: `${...}` opens a nested YAML flow mapping
+      # and the parser fails on the inner brace.
+      workstation:
+        ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+      browser:
+        ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}
 
 networks:
   proxy:
@@ -184,10 +197,14 @@ networks:
     external: true
   workstation:
     ipam:
-      config: [{subnet: 172.30.241.0/24, ip_range: 172.30.241.128/25}]
+      config:
+        - subnet: ${WORKSTATION_SUBNET:-172.30.241.0/24}
+          ip_range: ${WORKSTATION_IP_RANGE:-172.30.241.128/25}
   browser:
     ipam:
-      config: [{subnet: 172.30.233.0/24, ip_range: 172.30.233.128/25}]
+      config:
+        - subnet: ${BROWSER_SUBNET:-172.30.233.0/24}
+          ip_range: ${BROWSER_IP_RANGE:-172.30.233.128/25}
 
 secrets:
   auth_key:
