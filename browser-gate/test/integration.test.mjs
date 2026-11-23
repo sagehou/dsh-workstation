@@ -543,3 +543,27 @@ test('an unproven release is not forgotten by a connection that has not been gra
   assert.equal(proven.body.released, true)
   reconnected.close()
 }, { concurrency: false })
+
+test('the status shape does not depend on whether a page is attached', async () => {
+  // A probe should read `.authority` unconditionally. Returning a different
+  // shape when idle made "authority: undefined" appear in the live CI evidence,
+  // which is exactly the kind of silent hole a readiness check reads as false.
+  const idle = await call('/status')
+  assert.equal(idle.status, 200)
+  assert.equal(idle.body.connected, false)
+  assert.equal(idle.body.authority, false)
+  assert.equal(typeof idle.body.permitted, 'boolean')
+  assert.deepEqual(idle.body.keys, [])
+  assert.equal(idle.body.buttons, 0)
+
+  const operator = await connectOperator()
+  await waitFor(async () => (await call('/status')).body.connected === true, 'the gate did not see the operator')
+  const attached = await call('/status')
+  for (const key of ['state', 'authority', 'permitted', 'everGranted', 'released', 'keys', 'buttons', 'seq']) {
+    assert.equal(key in attached.body, true, 'the attached status dropped ' + key)
+  }
+  for (const key of ['state', 'authority', 'permitted', 'everGranted', 'released', 'keys', 'buttons', 'seq']) {
+    assert.equal(key in idle.body, true, 'the idle status dropped ' + key)
+  }
+  operator.close()
+}, { concurrency: false })

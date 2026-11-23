@@ -313,7 +313,11 @@ const server = createServer((request, response) => {
     return
   }
   if (url.pathname === '/status') {
-    reply(response, 200, link ? { connected: true, ...link.gate.status() } : { connected: false, state: 'CLOSED' })
+    // The same shape whether or not an operator is attached, so a probe can
+    // read `.authority` unconditionally instead of silently getting undefined.
+    reply(response, 200, link
+      ? { connected: true, ...link.gate.status() }
+      : { connected: false, state: 'CLOSED', authority: false, permitted: true, everGranted: false, released: false, keys: [], buttons: 0, seq: 0 })
     return
   }
   if (url.pathname === '/resume' && request.method === 'POST') {

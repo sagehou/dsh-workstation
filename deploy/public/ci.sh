@@ -272,7 +272,11 @@ gate_release() {
       assert.equal(response.status, 200, "the gate status endpoint is unreachable")
       const body = await response.json()
       assert.ok(["CLOSED", "OPEN", "RELEASING"].includes(body.state), "unexpected gate state " + body.state)
-      console.log("gate state:", body.state, "authority:", body.authority, "permitted:", body.permitted)
+      // The shape must not depend on whether a page is attached: a probe that
+    // reads .authority should get false, not undefined.
+    assert.equal(typeof body.authority, "boolean", "gate status omitted authority")
+    assert.equal(typeof body.permitted, "boolean", "gate status omitted permitted")
+    console.log("gate state:", body.state, "authority:", body.authority, "permitted:", body.permitted)
       process.exit(0)
     }
     // No operator connection is live in CI, so the handover has nothing held to
