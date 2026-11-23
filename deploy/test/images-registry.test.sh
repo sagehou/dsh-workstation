@@ -96,9 +96,11 @@ awk -v name="$image" -v version="$version" -v digest="$served" '
 mv "$matrix.new" "$matrix"
 
 export WORKSTATION_IMAGE_REGISTRY="$registry"
-reference="$(bash deploy/public/images.sh "$image")" || fail 'the resolver refused its own digest'
+# The resolver prints `name=reference` for the default mode.
+reference_output="$(bash deploy/public/images.sh "$image")" || fail 'the resolver refused its own digest'
+reference="${reference_output#*=}"
 [[ $reference == "$registry/$name:$version@$served" ]] ||
-  fail "the resolver produced an unexpected reference: $reference"
+  fail "the resolver produced an unexpected reference: $reference_output"
 pass "the resolver builds a pinned reference: $reference"
 
 # Pull it back with the local tag and digest removed, so this is a real pull
@@ -127,7 +129,7 @@ awk -v name="$image" -v version="$version2" -v digest="$served2" '
   $1 == name { printf "%s %s %s\n", name, version, digest; next }
   { print }
 ' "$matrix" > "$matrix.new" && mv "$matrix.new" "$matrix"
-upgraded="$(bash deploy/public/images.sh "$image")"
+upgraded="$(bash deploy/public/images.sh "$image")"; upgraded="${upgraded#*=}"
 [[ $upgraded == "$registry/$name:$version2@$served2" ]] ||
   fail "the upgraded reference is wrong: $upgraded"
 pass 'the upgraded reference follows the new digest'
@@ -138,7 +140,7 @@ awk -v name="$image" -v version="$version" -v digest="$served" '
   $1 == name { printf "%s %s %s\n", name, version, digest; next }
   { print }
 ' "$matrix" > "$matrix.new" && mv "$matrix.new" "$matrix"
-rolled="$(bash deploy/public/images.sh "$image")"
+rolled="$(bash deploy/public/images.sh "$image")"; rolled="${rolled#*=}"
 [[ $rolled == "$reference" ]] || fail "rollback produced $rolled, not $reference"
 docker image rm -f "$registry/$name@$served" >/dev/null 2>&1 || true
 docker pull -q "$rolled" >/dev/null || fail 'the rolled-back digest did not pull'
@@ -151,10 +153,10 @@ pass 'rolling back by digest restores exactly the original image'
 awk -v name="$image" 'BEGIN{OFS=" "} $1 == name { $3 = ""; print; next } { print }' "$matrix" \
   | sed -E 's/ +$//' > "$matrix.new" && mv "$matrix.new" "$matrix"
 set +e
-bash deploy/public/images.sh "$image" >/dev/null 2>&1
-status=$?
+cleared_output="$(bash deploy/public/images.sh "$image" 2>/dev/null)"; status=$?
 set -e
 (( status != 0 )) || fail 'a cleared digest still resolved'
+[[ -z $cleared_output ]] || fail "a cleared digest printed a reference: $cleared_output"
 pass 'a cleared digest fails closed instead of falling back to the tag'
 
 printf 'registry OK: digest pull, upgrade and rollback on a real daemon\n'
