@@ -18,7 +18,8 @@ services:
     restart: "on-failure:5"
     environment:
       DSH_INITIAL_VERSION: ${DSH_INITIAL_VERSION:-0.2.2-rc.1}
-      DSH_BIND_IP: 172.30.241.2
+      # Derived by deploy/network.sh; defaults preserve the documented values.
+      DSH_BIND_IP: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
       DSH_PUBLIC_ORIGIN: http://127.0.0.1:3080
       WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
     healthcheck:
@@ -29,7 +30,7 @@ services:
       start_period: 4m
     networks:
       runtime-route:
-        ipv4_address: 172.30.241.2
+        ipv4_address: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
       runtime-egress: {}
 
   maintenance:
@@ -69,7 +70,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command:
-      - --entrypoints.preview.address=172.30.244.2:8080
+      - --entrypoints.preview.address=${WORKSTATION_ENTRY_EDGE_IP:-172.30.244.2}:8080
       - --providers.file.filename=/etc/traefik/private-preview.yml
     ports:
       - "127.0.0.1:3080:8080"
@@ -77,7 +78,7 @@ services:
       - ./deploy/private-preview.yml:/etc/traefik/private-preview.yml:ro
     networks:
       private-entry:
-        ipv4_address: 172.30.244.2
+        ipv4_address: ${WORKSTATION_ENTRY_EDGE_IP:-172.30.244.2}
       runtime-route: {}
       browser-route: {}
 
@@ -86,20 +87,19 @@ networks:
     internal: true
     ipam:
       config:
-        # Dynamic allocation must stay out of the static band. Without ip_range
-        # Docker hands 172.30.241.2 to whichever container starts first, and
-        # the runtime then fails to claim its own address with "Address already
-        # in use". compose.yml already partitions the range this way.
-        - subnet: 172.30.241.0/24
-          ip_range: 172.30.241.128/25
+        # Dynamic allocation must stay out of the static band, or Docker hands
+        # the runtime's address to whichever container starts first and the
+        # runtime fails to claim it with "Address already in use".
+        - subnet: ${WORKSTATION_SUBNET:-172.30.241.0/24}
+          ip_range: ${WORKSTATION_IP_RANGE:-172.30.241.128/25}
   browser-route:
     internal: true
   private-entry:
     ipam:
       config:
-        # Same reason as runtime-route: edge holds 172.30.244.2 statically.
-        - subnet: 172.30.244.0/24
-          ip_range: 172.30.244.128/25
+        # Same reason as runtime-route: the edge holds a static address.
+        - subnet: ${WORKSTATION_ENTRY_SUBNET:-172.30.244.0/24}
+          ip_range: ${WORKSTATION_ENTRY_IP_RANGE:-172.30.244.128/25}
   runtime-egress: {}
   browser-egress: {}
 

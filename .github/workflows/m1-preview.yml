@@ -31,6 +31,26 @@ jobs:
       - name: Exercise the upgrade transaction without Docker
         run: bash runtime/test/e2e-upgrade.sh
 
+  # Network derivation and the initializer are pure shell. They run in their own
+  # job because the initializer refuses to run as root, while the Runtime tests
+  # must run as root to exercise file ownership.
+  network:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Test subnet derivation and the overlap preflight
+        run: bash deploy/test/network.test.sh
+      - name: Test repeatable initialization and PKI consistency
+        run: |
+          useradd --create-home --uid 2000 runner-init
+          install -d -o runner-init -g runner-init /tmp/init-work
+          cp -a . /tmp/init-work/src
+          chown -R runner-init:runner-init /tmp/init-work/src
+          su runner-init -c 'cd /tmp/init-work/src && bash deploy/test/init.test.sh'
+
   preview:
     runs-on: ubuntu-24.04
     timeout-minutes: 25

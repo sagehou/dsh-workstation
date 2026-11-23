@@ -76,7 +76,9 @@ services:
     restart: "on-failure:5"
     environment:
       DSH_INITIAL_VERSION: 0.2.2-rc.1
-      DSH_BIND_IP: 172.30.241.2
+      # Derived by deploy/network.sh from WORKSTATION_SUBNET. The default keeps
+      # an existing deployment working without an override.
+      DSH_BIND_IP: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
       WORKSTATION_BROWSER_MCP: "1"
@@ -91,7 +93,7 @@ services:
       start_period: 4m
     networks:
       workstation:
-        ipv4_address: 172.30.241.2
+        ipv4_address: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
         aliases: [dsh-workstation-runtime]
 
   maintenance:
@@ -164,7 +166,7 @@ services:
         - node
         - -e
         - >-
-          fetch('http://172.30.233.2:8081/status', {
+          fetch('http://${BROWSER_PROVIDER_IP:-172.30.233.2}:8081/status', {
             headers: {Authorization: 'Bearer '+require('node:fs').readFileSync('/run/secrets/m0_admin','utf8')},
             signal: AbortSignal.timeout(2000)
           }).then(r => r.ok ? r.json() : {}).then(({state}) => {
@@ -175,8 +177,8 @@ services:
       retries: 18
       start_period: 30s
     networks:
-      workstation: {ipv4_address: 172.30.241.3}
-      browser: {ipv4_address: 172.30.233.2}
+      workstation: {ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}}
+      browser: {ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}}
 
 networks:
   proxy:
@@ -184,10 +186,14 @@ networks:
     external: true
   workstation:
     ipam:
-      config: [{subnet: 172.30.241.0/24, ip_range: 172.30.241.128/25}]
+      config:
+        - subnet: ${WORKSTATION_SUBNET:-172.30.241.0/24}
+          ip_range: ${WORKSTATION_IP_RANGE:-172.30.241.128/25}
   browser:
     ipam:
-      config: [{subnet: 172.30.233.0/24, ip_range: 172.30.233.128/25}]
+      config:
+        - subnet: ${BROWSER_SUBNET:-172.30.233.0/24}
+          ip_range: ${BROWSER_IP_RANGE:-172.30.233.128/25}
 
 secrets:
   auth_key:

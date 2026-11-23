@@ -43,7 +43,9 @@ flowchart LR
 
 The relay shares Chromium's network namespace. Only the relay and Provider mount the CDP socket volume. Auth forwards DSH and Selkies WebSockets and checks the live session. [Tested topology](roadmap/public-compose.md)
 
-The current Compose uses fixed subnets and addresses. Before production rollout, make the workstation/browser subnets configurable and derive fixed addresses, health-check destinations, and certificate SANs from a single validated configuration. Detect overlap with host routes and existing Docker networks before creating resources.
+Both subnets are configuration, not constants. `deploy/network.sh` derives the subnet definitions, dynamic `ip_range`, every static address, the Provider health-check destination, and the Runtime certificate SAN from `WORKSTATION_SUBNET` and `BROWSER_SUBNET`. Static addresses sit at `.2`/`.3` while dynamic allocation is confined to the upper half of each subnet, so a container that starts first cannot take a static address — the failure this ordering prevents is Docker answering "Address already in use" when the Runtime claims its own address.
+
+`deploy/network.sh check` runs before the initializer creates anything and refuses on an overlap with a host route or an existing Docker network. It creates and modifies nothing. The default route is excluded by design: it covers every address and Docker's more specific subnet route wins. A state directory whose recorded subnets differ from the requested ones is refused rather than silently reissuing the internal CA, because the Runtime certificate is issued for the derived address; `--reissue` is the deliberate path.
 
 ## Routes
 

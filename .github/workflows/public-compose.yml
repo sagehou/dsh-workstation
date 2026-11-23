@@ -44,6 +44,32 @@ jobs:
           printf 'default=%s\n' "$(bash deploy/public/traefik-image.sh --default)" >> "$GITHUB_OUTPUT"
           printf 'Traefik matrix: %s (default %s)\n' "$versions" "$(bash deploy/public/traefik-image.sh --default)"
 
+  # Derivation and preflight are pure shell, so they run without Docker. This
+  # covers the conflict, invalid-address and repeat-initialization cases that a
+  # full stack cannot exercise without breaking the runner's own networking.
+  network:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Test derivation and the overlap preflight
+        run: bash deploy/test/network.test.sh
+      - name: Test repeatable initialization and PKI consistency
+        # The initializer refuses to run as root, and the runner user is not
+        # required to be non-root for the other jobs.
+        run: |
+          if [[ $(id -u) == 0 ]]; then
+            useradd --create-home --uid 1000 runner-init
+            install -d -o runner-init -g runner-init /tmp/init-work
+            cp -a . /tmp/init-work/src
+            chown -R runner-init:runner-init /tmp/init-work/src
+            su runner-init -c 'cd /tmp/init-work/src && bash deploy/test/init.test.sh'
+          else
+            bash deploy/test/init.test.sh
+          fi
+
   public-compose:
     needs: matrix
     runs-on: ubuntu-24.04
@@ -52,23 +78,44 @@ jobs:
       fail-fast: false
       matrix:
         traefik: ${{ fromJSON(needs.matrix.outputs.versions) }}
-    name: public-compose (${{ matrix.traefik }})
+        # Every Traefik version also runs once on a custom address plan. The
+        # default leg proves the documented values; this leg proves nothing
+        # silently depends on 172.30.x, which is the point of making the
+        # subnets configurable.
+        subnet:
+          - default
+          - custom
+    name: public-compose (${{ matrix.traefik }}, ${{ matrix.subnet }} subnets)
     env:
       WORKSTATION_CI_TRAEFIK_VERSION: ${{ matrix.traefik }}
+      WORKSTATION_CI_SUBNETS: ${{ matrix.subnet }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - name: Resolve evidence paths for this version
+      - name: Resolve evidence paths and the address plan
         run: |
-          if [[ "$WORKSTATION_CI_TRAEFIK_VERSION" == "$(bash deploy/public/traefik-image.sh --default)" ]]; then
-            # The default leg keeps the unsuffixed artifact names used by the
-            # deployment guide.
-            printf 'EVIDENCE_SUFFIX=\n' >> "$GITHUB_ENV"
-          else
-            printf 'EVIDENCE_SUFFIX=-%s\n' "$WORKSTATION_CI_TRAEFIK_VERSION" >> "$GITHUB_ENV"
+          suffix=""
+          if [[ "$WORKSTATION_CI_TRAEFIK_VERSION" != "$(bash deploy/public/traefik-image.sh --default)" ]]; then
+            suffix="-${WORKSTATION_CI_TRAEFIK_VERSION}"
           fi
+          # Only the default Traefik on the default subnets keeps the unsuffixed
+          # artifact names the deployment guide points at.
+          if [[ "$WORKSTATION_CI_SUBNETS" != default ]]; then
+            suffix="${suffix}-custom-subnets"
+          fi
+          printf 'EVIDENCE_SUFFIX=%s\n' "$suffix" >> "$GITHUB_ENV"
           printf 'Traefik under test: %s\n' "$(bash deploy/public/traefik-image.sh "$WORKSTATION_CI_TRAEFIK_VERSION")"
+          if [[ "$WORKSTATION_CI_SUBNETS" == custom ]]; then
+            # Deliberately outside 172.30.0.0/16. The derivation moves the
+            # static addresses and the certificate SAN with the subnet.
+            printf 'WORKSTATION_SUBNET=10.71.241.0/24\n' >> "$GITHUB_ENV"
+            printf 'BROWSER_SUBNET=10.71.233.0/24\n' >> "$GITHUB_ENV"
+            printf 'Address plan: custom (10.71.241.0/24, 10.71.233.0/24)\n'
+            bash deploy/network.sh derive
+          else
+            printf 'Address plan: default\n'
+          fi
       - name: Confirm the edge image is pinned by digest
         run: |
           version="$WORKSTATION_CI_TRAEFIK_VERSION"
@@ -144,15 +191,18 @@ jobs:
           {
             printf '## Traefik compatibility matrix\n\n'
             printf 'Full stack jobs reported `%s`.\n\n' "$RESULT"
-            printf '| Traefik | Pinned digest | Scope |\n| --- | --- | --- |\n'
+            printf '| Traefik | Pinned digest | Address plan | Scope |\n| --- | --- | --- | --- |\n'
             node --input-type=module -e '
               import { execFileSync } from "node:child_process"
               for (const version of JSON.parse(process.env.VERSIONS)) {
                 const digest = execFileSync("bash", ["deploy/public/traefik-image.sh", "--field", "digest", version], { encoding: "utf8" }).trim()
-                console.log(`| \`${version}\` | \`${digest}\` | \`deploy/public/ci.sh\` + \`deploy/public/edge-probe.mjs\` |`)
+                for (const plan of ["default", "custom"]) {
+                  const note = plan === "custom" ? "10.71.241.0/24 + 10.71.233.0/24" : "172.30.241.0/24 + 172.30.233.0/24"
+                  console.log(`| \`${version}\` | \`${digest}\` | ${plan} (${note}) | \`deploy/public/ci.sh\` + \`deploy/public/edge-probe.mjs\` |`)
+                }
               }
             '
-            printf '\nBoth legs run the same Compose stack, the same edge probe and the same authenticated browser checks; only the pinned Traefik image differs.\n'
+            printf '\nEvery leg runs the same Compose stack, edge probe and authenticated browser checks. Two things vary: the pinned Traefik image, and whether the subnets are the defaults or a custom plan.\n'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail when any pinned version failed
         if: needs.public-compose.result != 'success'

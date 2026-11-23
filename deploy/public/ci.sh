@@ -5,6 +5,10 @@ cd -- "$(dirname -- "$0")/../.."
 
 proxy=dsh-workstation-ci-proxy
 edge=dsh-workstation-ci-traefik
+# Derive every address from the same configuration the initializer uses, so CI
+# exercises the real derivation instead of asserting copies of the defaults.
+derived="$(bash deploy/network.sh derive)"
+eval "$derived"
 edge_dir="$(mktemp -d)"
 state="$PWD/.workstation"
 # The version matrix lives in deploy/public/traefik-matrix.env. This script
@@ -32,7 +36,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker network create --subnet 172.30.242.0/24 "$proxy" >/dev/null
+# The CI proxy network must leave room for the edge's static address, or Docker
+# can hand it out first and the edge fails with "Address already in use". Both
+# values come from the derivation so this fixture cannot collide with a custom
+# workstation plan.
+docker network create --subnet "$WORKSTATION_CI_PROXY_SUBNET" \
+  --ip-range "$WORKSTATION_CI_PROXY_IP_RANGE" "$proxy" >/dev/null
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 -subj '/CN=workstation.test' \
   -addext 'subjectAltName=DNS:workstation.test' -keyout "$edge_dir/key.pem" -out "$edge_dir/cert.pem" 2>/dev/null
 chmod 0444 "$edge_dir/cert.pem"
@@ -42,7 +51,7 @@ tls:
     - certFile: /dynamic/cert.pem
       keyFile: /dynamic/key.pem
 TLS
-docker run -d --name "$edge" --network "$proxy" --ip 172.30.242.2 \
+docker run -d --name "$edge" --network "$proxy" --ip "$WORKSTATION_CI_PROXY_EDGE_IP" \
   --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   -p 127.0.0.1:80:8080 -p 127.0.0.1:443:8443 \
   --mount "type=bind,src=$edge_dir,dst=/dynamic,readonly" \
@@ -102,9 +111,9 @@ docker inspect "$edge" "$(compose ps -q auth)" "$(compose ps -q runtime)" \
 network_ip() { docker inspect --format "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1"; }
 browser_ip="$(network_ip "$(compose ps -q chromium)" dsh-workstation_browser)"
 auth_ip="$(network_ip "$(compose ps -q auth)" "$proxy")"
-compose exec -T runtime node - "$browser_ip" "$auth_ip" <<'NET'
+compose exec -T runtime node - "$browser_ip" "$auth_ip" "$BROWSER_PROVIDER_IP" <<'NET'
 const assert = require('node:assert/strict')
-const [browser, auth] = process.argv.slice(2)
+const [browser, auth, provider] = process.argv.slice(2)
 ;(async () => {
   for (const url of [
     `http://${browser}:3000/browser/`,
@@ -112,7 +121,7 @@ const [browser, auth] = process.argv.slice(2)
     `http://${browser}:9223/json/version`,
     'http://provider:9223/json/version',
     'http://provider:8081/status',
-    'http://172.30.233.2:8081/status',
+    `http://${provider}:8081/status`,
     'http://auth:8081/verify',
     `http://${auth}:8081/verify`,
   ]) {
@@ -127,7 +136,7 @@ const [browser, auth] = process.argv.slice(2)
   console.log('DSH cannot reach Selkies, CDP, Provider control or ForwardAuth; MCP requires a credential')
 })().catch(error => { console.error('Network isolation check failed:', error.message); process.exitCode = 1 })
 NET
-for address in "$browser_ip" 172.30.241.3 172.30.233.2; do
+for address in "$browser_ip" "$WORKSTATION_PROVIDER_IP" "$BROWSER_PROVIDER_IP"; do
   for port in 9222 9223; do
     if curl -s --noproxy '*' --connect-timeout 1 --max-time 2 -o /dev/null "http://$address:$port/json/version"; then
       echo 'Host reached a CDP listener' >&2
