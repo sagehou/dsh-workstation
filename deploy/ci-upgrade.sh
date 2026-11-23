@@ -23,7 +23,18 @@ FROM=0.2.2-rc.1
 TO=0.2.2-rc.5
 INTERNAL=/dsh-home/profiles/web
 
-compose up -d --build --wait --wait-timeout 360
+# A hosted runner can still hold a previous run's project, and Docker then
+# fails the static-IP attach with "Address already in use". That is host state,
+# not the drill's subject, so clean first and retry the initial bring-up.
+compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+attempt=1
+until compose up -d --build --wait --wait-timeout 360; do
+  attempt=$(( attempt + 1 ))
+  (( attempt <= 3 )) || fail initial 'the preview did not come up after 3 attempts'
+  printf 'upgrade-drill initial: retrying the stack bring-up (%s/3)\n' "$attempt" >&2
+  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  sleep 5
+done
 node deploy/check-preview.mjs || fail initial 'the preview did not become ready'
 first_image="$(docker inspect --format '{{.Image}}' "$(compose ps -q runtime)")"
 first_container="$(compose ps -q runtime)"
@@ -168,8 +179,11 @@ in_image 'test -d /dsh-home/pnpm/store && test -s /dsh-home/runtime/audit.jsonl 
 pass restore 'the restore kept the pnpm store, installed versions and audit log'
 
 # 9. A tampered archive and an unknown id are refused without touching state.
+# Backups are written read-only, so tampering means granting write access
+# first. That is also why a real archive cannot be edited by accident.
 in_image '
   cp /backup/dsh-home.'"$backup_id"'.tgz /backup/dsh-home.tampered.tgz
+  chmod u+w /backup/dsh-home.tampered.tgz
   printf x >> /backup/dsh-home.tampered.tgz
   cp /backup/dsh-home.'"$backup_id"'.json /backup/dsh-home.tampered.json
 '

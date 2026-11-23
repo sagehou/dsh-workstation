@@ -191,7 +191,10 @@ pass check 'check verified the archive and reported its DSH version without rest
 pass caches 'the restore left installed versions and the pnpm store intact'
 
 # --- 9. tampered archive and unknown id are refused -----------------------
+# Backups are written read-only, so the simulated tamper must be granted write
+# access first. That is also why a real archive cannot be edited by accident.
 cp "$backup/dsh-home.$backup_id.tgz" "$backup/dsh-home.tampered.tgz"
+chmod u+w "$backup/dsh-home.tampered.tgz"
 printf 'x' >> "$backup/dsh-home.tampered.tgz"
 cp "$backup/dsh-home.$backup_id.json" "$backup/dsh-home.tampered.json"
 if runtime_cmd restore tampered >"$work/tampered.log" 2>&1; then
