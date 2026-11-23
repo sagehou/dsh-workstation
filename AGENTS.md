@@ -65,3 +65,15 @@ Build a Docker Compose workstation around the **official DeepSeek Harness (DSH) 
 - At the start of each task, comment on the Issue with the intended scope. During work, update checkboxes and post material progress/blockers. On completion, report exact versions, commands, CI run links, observed results, remaining risks, and commit/PR links.
 - Keep status truthful: planned, in progress, blocked, verified, or done. CI on a different dependency version is not target-environment verification. Record compatibility matrices and deployment-host evidence separately.
 - Before handing work to a coding agent, provide the Issue number, dependencies, acceptance criteria, test commands, and required progress-report cadence. The agent must not silently skip Issue creation or progress updates.
+
+
+## Approved product baseline (2026-11-23)
+
+- Follow [ADR-0004](docs/adr/0004-single-user-release-and-deferred-sidebar.md), [SPEC](docs/SPEC.md), [ARCHITECTURE](docs/ARCHITECTURE.md), and the [ordered development roadmap](docs/roadmap/development-roadmap.md).
+- First release has exactly one local administrator. Multiple Passkeys for that administrator are allowed. Do not add multi-account, invitations, roles, or shared-user mode.
+- Official DSH remains the product core. Do not implement a replacement Agent runtime, chat/editor, package manager, or public plugin marketplace.
+- The authenticated standalone browser/control page is the first-release browser UI. Native DSH Sidebar is deferred and must not block deployment.
+- Keep Agent browser control disabled until exclusive input handoff passes its acceptance criteria. Keep broad browsing of untrusted sites disabled until browser egress controls are independently enforced and tested. `BROWSER_TOOL_ORIGINS` is not an egress firewall or complete SSRF defense.
+- Initial deployment support is Linux amd64. Do not claim ARM64 or multi-user isolation.
+- Before target-host deployment, complete the target Traefik compatibility matrix and Docker subnet overlap/configuration checks.
+- Runtime pointer rollback is not data rollback. Back up before persistent Profile/plugin migrations and prove matched data restore.
