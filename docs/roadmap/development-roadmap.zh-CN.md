@@ -74,6 +74,8 @@
 
 ## 当前移交入口
 
-[#4 — 浏览器人工输入独占与安全交接](https://github.com/sagehou/dsh-workstation/issues/4) 正按 [ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) 推进。已固定的 Selkies 会在每个输入帧上按实时令牌表判定权限，并且**先**安装新表**再**通告变更，因此权限收回之后发出的释放帧会被丢弃——这正是 M0 的失败现象从服务端视角的表述。不 fork Selkies，而是在输入边界上增加一个小的 `browser-gate`，用上游自带的 `reset_keyboard()` 与 `release_mouse_buttons()` 原语释放已按住输入，并排在 Provider 切换令牌表之前，用 PING/PONG 屏障证明已被派发。在门禁于真实主机上通过完整状态转移矩阵之前，Agent 浏览器控制保持关闭。
+[#4 — 浏览器人工输入独占与安全交接](https://github.com/sagehou/dsh-workstation/issues/4) 已按 [ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) 交付。已固定的 Selkies 会在每个输入帧上按实时令牌表判定权限，并且**先**安装新表**再**通告变更，因此权限收回之后发出的释放帧会被丢弃——这正是 M0 的失败现象从服务端视角的表述。不 fork Selkies，而是在输入边界上增加一个小的 `browser-gate`，用上游自带的 `reset_keyboard()` 与 `release_mouse_buttons()` 原语释放已按住输入，排在 Provider 切换令牌表之前，并用 PING/PONG 屏障证明已被派发。
+
+已按住输入的释放是**在真实栈上实测**的，而非推论：在操作者自己的 Selkies 连接上按住鼠标键再交接，由 Agent 的标签页读回「一次按下、一次释放」；按住时直接断开的客户端不会留下按下状态；而移除门禁调用后，同一探针会报告「有按下、无释放」。按住的按键与修饰键、按住时租约过期、按住时 Chromium 重启、Provider 异常退出，仅由「复现真实顺序的假上游」测试覆盖，**尚未**在真实主机实测。在这些实测完成之前，独占性可视为「指针按键与断线场景已证明」，其余尚未证明。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。
