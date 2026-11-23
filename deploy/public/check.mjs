@@ -252,6 +252,54 @@ try {
     assert.ok(ups >= downs, 'the desktop was left mid-press by the handover: ' + held)
     console.log('Held pointer: a button pressed and held on the real desktop was released at the Selkies boundary before the Agent took the tab')
     await desk.close()
+
+    // The other direction: a client that disappears while still holding the
+    // button, with no handover at all. Nothing tells Selkies to release except
+    // its own departure path, so this is what proves the disconnect case is
+    // closed rather than merely argued from the source.
+    await action('接管浏览器')
+    // The witness is cumulative, so the disconnect case is read as a delta from
+    // the counts the handover case just recorded.
+    const baseDowns = downs
+    const baseUps = ups
+    const abrupt = await context.newPage()
+    await abrupt.goto(root + '/_auth/account')
+    await abrupt.evaluate(protocol => {
+      const ws = new WebSocket('wss://' + location.host + '/browser/api/websockets', ['selkies', protocol])
+      window.ciDesk = { ws, mk: null }
+      ws.addEventListener('open', () => ws.send('SETTINGS,' + JSON.stringify({
+        displayId: 'primary', tabId: 'ci-abrupt', encoder: 'jpeg',
+        initialClientWidth: 1024, initialClientHeight: 768,
+      })))
+      ws.addEventListener('message', ({ data }) => {
+        if (data === 'MK_ACCESS,1' || data === 'MK_ACCESS,0') window.ciDesk.mk = data.at(-1)
+      })
+    }, heldProtocol)
+    await until('the disconnecting desk to be granted input authority', async () =>
+      abrupt.evaluate(() => window.ciDesk.mk === '1'), 30_000)
+    await abrupt.evaluate(() => window.ciDesk.ws.send('m,320,240,0,0'))
+    await wait(300)
+    await abrupt.evaluate(() => window.ciDesk.ws.send('m,320,240,1,0'))
+    await wait(300)
+    // Vanish mid-press: no handover, no release frame of its own. The release
+    // then comes from Selkies' own departure path, which runs before the
+    // deferred display teardown, so this is short but not instant.
+    await abrupt.evaluate(() => window.ciDesk.ws.close())
+    await abrupt.close()
+    await wait(2000)
+    // Read the same tab back through a fresh grant; the witness is cumulative,
+    // so the deltas are what this case contributed.
+    await action('将标签页交给 Agent', first + ' · 已绑定')
+    const disconnectGeneration = await send(first, 'lease-disconnect', 'lease_status')
+    const after = await send(first, 'hold-disconnect', 'read', { generation: disconnectGeneration })
+    const counts1 = /HOLD:(\d+):(\d+)/.exec(after ?? '')
+    assert.ok(counts1, 'the witness was not readable after the disconnect: ' + after)
+    const pressDelta = Number(counts1[1]) - baseDowns
+    const releaseDelta = Number(counts1[2]) - baseUps
+    assert.ok(pressDelta >= 1, 'the press never reached the desktop, so this proves nothing: ' + after)
+    assert.ok(releaseDelta >= pressDelta,
+      'a client disconnecting mid-press left the desktop holding the button: ' + after)
+    console.log('Held pointer: a client that vanished while holding a button left no press behind')
     await action('接管浏览器')
     await action('将标签页交给 Agent', second)
     const other = await send(second, 'lease2', 'lease_status')
