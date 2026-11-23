@@ -1,7 +1,9 @@
 name: dsh-workstation
 
 x-runtime: &runtime
-  image: dsh-workstation-runtime:0.2.0
+  # Override with an immutable reference (tag@sha256:...) in the deployed
+  # environment file. The value is recorded in every backup manifest.
+  image: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.0}
   build: ./runtime
   init: true
   cap_drop: [ALL]
@@ -78,6 +80,7 @@ services:
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
       WORKSTATION_BROWSER_MCP: "1"
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.0}
       NODE_EXTRA_CA_CERTS: /run/secrets/runtime_ca
     secrets: [runtime_ca, runtime_cert, runtime_key, browser_enroll]
     healthcheck:
@@ -95,6 +98,9 @@ services:
     <<: *runtime
     profiles: [maintenance]
     command: ["status"]
+    environment:
+      # Backups are taken here, so this must be present on maintenance too.
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.0}
     networks: [workstation]
 
   chromium:

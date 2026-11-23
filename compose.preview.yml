@@ -2,7 +2,7 @@
 name: dsh-workstation-preview
 
 x-runtime: &runtime
-  image: dsh-workstation-runtime:preview
+  image: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
   build: ./runtime
   init: true
   cap_drop: [ALL]
@@ -20,6 +20,7 @@ services:
       DSH_INITIAL_VERSION: ${DSH_INITIAL_VERSION:-0.2.2-rc.1}
       DSH_BIND_IP: 172.30.241.2
       DSH_PUBLIC_ORIGIN: http://127.0.0.1:3080
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
     healthcheck:
       test: ["CMD", "dsh-runtime", "health"]
       interval: 15s
@@ -35,6 +36,9 @@ services:
     <<: *runtime
     profiles: [maintenance]
     command: ["status"]
+    environment:
+      # Backups are taken here, so this must be present on maintenance too.
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
     networks: [runtime-egress]
 
   chromium:

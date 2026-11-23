@@ -12,6 +12,18 @@ permissions:
   contents: read
 
 jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Unit-test the compatibility gate and backup manifests
+        run: node --test "runtime/test/*.test.mjs"
+      - name: Exercise the upgrade transaction without Docker
+        run: bash runtime/test/e2e-upgrade.sh
+
   preview:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -24,6 +36,16 @@ jobs:
           set -o pipefail
           mkdir -p evidence
           bash deploy/ci-preview.sh 2>&1 | tee evidence/m1-preview.log
+      - name: Drill the transactional upgrade and matched data restore
+        run: |
+          set -o pipefail
+          bash deploy/ci-upgrade.sh 2>&1 | tee evidence/upgrade-drill.log
+      - name: Retain the backup manifest for the run
+        if: always()
+        run: |
+          mkdir -p evidence
+          docker compose -f compose.preview.yml run --rm --no-deps -T --entrypoint sh maintenance -c \
+            'cat /dsh-home/runtime/audit.jsonl 2>/dev/null || true' > evidence/upgrade-audit.jsonl || true
       - name: Pack the Runtime image for deploy without a build
         run: |
           set -o pipefail
