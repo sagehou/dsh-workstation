@@ -244,28 +244,44 @@ jobs:
             exit 1
           fi
           bash deploy/public/images.sh
-      - name: Confirm no registry credential is present
+      - name: Prove the pull is anonymous by construction
         run: |
           set -euo pipefail
-          # The packages are public, so the pull must work anonymously. Assert
-          # the precondition rather than assuming it: a credential left in the
-          # runner would make the anonymous-pull claim untestable.
-          if [[ -n ${DOCKER_CONFIG:-} && -f ${DOCKER_CONFIG}/config.json ]] &&
-             grep -q 'auths' "${DOCKER_CONFIG}/config.json"; then
-            echo 'the runner has registry credentials; the anonymous pull would prove nothing' >&2
-            cat "${DOCKER_CONFIG}/config.json" >&2
+          # The packages are public, so the pull must work with no credential.
+          # Do not *inspect* the runner's Docker config and hope it is empty --
+          # GitHub's runner writes `{"auths": {}}`, and a check that greps for
+          # the key fails on a config that authenticates nothing. Build a config
+          # that cannot hold a credential instead: a fresh empty directory.
+          anon="$(mktemp -d)"
+          chmod 0700 "$anon"
+          printf '{}\n' > "$anon/config.json"
+          echo "DOCKER_CONFIG=$anon" >> "$GITHUB_ENV"
+          DOCKER_CONFIG="$anon" docker info --format '{{.ServerVersion}}' >/dev/null
+          if DOCKER_CONFIG="$anon" sh -c 'test -s "$DOCKER_CONFIG/config.json" && grep -q auths "$DOCKER_CONFIG/config.json"'; then
+            echo 'a credential leaked into the isolated Docker config' >&2
             exit 1
           fi
-          if [[ -f "$HOME/.docker/config.json" ]] && grep -q 'auths' "$HOME/.docker/config.json"; then
-            echo 'the runner has registry credentials; the anonymous pull would prove nothing' >&2
-            exit 1
-          fi
-          echo 'No registry credential configured, so the pull below is anonymous.'
+          # `docker pull` stores credentials it used; asserting the file stays a
+          # bare `{}` after the run is the check that nothing was authorised.
+          echo 'Using an isolated, credential-free Docker config for every pull.'
       - name: Run the whole stack from the published digests
         run: |
           set -o pipefail
           WORKSTATION_CI_IMAGE_MODE=release bash deploy/public/ci.sh 2>&1 |
             tee evidence-release.log
+      - name: Assert the pull used no credential
+        run: |
+          set -euo pipefail
+          # If a credential had been used, Docker would have written it back to
+          # the isolated config. A bare `{}` after a full pull and stack start is
+          # what makes "anonymous" a measured fact rather than a claim.
+          content="$(cat "$DOCKER_CONFIG/config.json")"
+          if [[ $content != '{}' && $content != *'"auths": {}'* ]]; then
+            echo "the Docker config gained content during the pull: $content" >&2
+            exit 1
+          fi
+          echo "The pull left the Docker config empty: $content"
+          echo 'Anonymous pull confirmed.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record the deployed references
         if: always()
         run: |
