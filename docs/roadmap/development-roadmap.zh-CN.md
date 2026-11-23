@@ -74,6 +74,6 @@
 
 ## 当前移交入口
 
-[#3 — Traefik 兼容性](https://github.com/sagehou/dsh-workstation/issues/3) 已完成：两个固定版本都通过全栈测试，且入口镜像未固定时无法解析。下一项是 [#8 — DSH/Profile 升级事务与数据恢复](https://github.com/sagehou/dsh-workstation/issues/8)。
+[#8 — DSH/Profile 升级事务与数据恢复](https://github.com/sagehou/dsh-workstation/issues/8) 已完成：`dsh-runtime upgrade` 是一个事务，含兼容门禁、匹配备份，以及互相独立的指针回滚与数据恢复路径，已在[运行 45124380864](https://github.com/sagehou/dsh-workstation/actions/runs/45124380864) 中验证。两项限制继续保留：尚无可确知会迁移 Profile 数据的 DSH 版本，检测仅由合成改动证明；随镜像发布的浏览器 Bundle 固定 `engines.dsh 0.2.2-rc.1`，因此 DSH 与 Bundle 必须同步升级。下一项是 [#9 — 可配置 Docker 子网与重叠预检](https://github.com/sagehou/dsh-workstation/issues/9)。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。

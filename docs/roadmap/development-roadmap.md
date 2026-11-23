@@ -74,6 +74,6 @@ For every assigned Issue, the agent must:
 
 ## Current handoff
 
-[#3 — Traefik compatibility](https://github.com/sagehou/dsh-workstation/issues/3) is complete: both pinned versions pass the full stack, and the edge image cannot be resolved unless it is pinned. Next is [#8 — transactional DSH/Profile upgrade and data recovery](https://github.com/sagehou/dsh-workstation/issues/8).
+[#8 — transactional DSH/Profile upgrade and data recovery](https://github.com/sagehou/dsh-workstation/issues/8) is complete: `dsh-runtime upgrade` is one transaction with a compatibility gate, a matched backup, and separate pointer-rollback and data-restore paths, proven in [run 45124380864](https://github.com/sagehou/dsh-workstation/actions/runs/45124380864). Two limits carry forward: no DSH release is known to migrate Profile data, so detection is proven synthetically, and the shipped browser Bundle pins `engines.dsh 0.2.2-rc.1`, so DSH and Bundle must move together. Next is [#9 — configurable Docker subnets and overlap preflight](https://github.com/sagehou/dsh-workstation/issues/9).
 
 The standalone browser page remains the first-release interface. Sidebar work (#5) is explicitly deferred.
