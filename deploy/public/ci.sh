@@ -7,6 +7,12 @@ proxy=dsh-workstation-ci-proxy
 edge=dsh-workstation-ci-traefik
 edge_dir="$(mktemp -d)"
 state="$PWD/.workstation"
+# The version matrix lives in deploy/public/traefik-matrix.env. This script
+# refuses versions that are not pinned there, so a CI job cannot test a
+# floating tag by accident.
+traefik_version="${WORKSTATION_CI_TRAEFIK_VERSION:-$(bash deploy/public/traefik-image.sh --default)}"
+traefik_image="$(bash deploy/public/traefik-image.sh "$traefik_version")"
+echo "Traefik under test: $traefik_version ($traefik_image)"
 compose_files=(-f compose.yml -f deploy/public/compose.ci.yml)
 compose() { docker compose --env-file .env.public "${compose_files[@]}" "$@"; }
 cleanup() {
@@ -40,7 +46,7 @@ docker run -d --name "$edge" --network "$proxy" --ip 172.30.242.2 \
   --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   -p 127.0.0.1:80:8080 -p 127.0.0.1:443:8443 \
   --mount "type=bind,src=$edge_dir,dst=/dynamic,readonly" \
-  traefik:v3.7.19@sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4 \
+  "$traefik_image" \
   --entrypoints.http.address=:8080 \
   --entrypoints.http.http.redirections.entrypoint.to=:443 \
   --entrypoints.http.http.redirections.entrypoint.scheme=https \
@@ -148,6 +154,38 @@ expect_status 401 --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://workstation.test/browser/api/websockets
 expect_status 404 -X POST https://workstation.test/browser/api/tokens
 echo 'TLS and ForwardAuth: HTTP redirects to HTTPS, documents to login, unauthenticated API/WebSocket denied, Selkies token API unrouted'
+# The edge reaches DSH over verified internal TLS. DSH binds the concrete
+# container IPv4 (DSH_BIND_IP), not loopback, so probe that address. Plain HTTP
+# on the same port must fail, and the HTTPS chain must verify against the pinned
+# Runtime CA.
+compose exec -T runtime node --input-type=module -e '
+  import assert from "node:assert/strict"
+  import { readFileSync } from "node:fs"
+  import { request } from "node:https"
+  const bind = process.env.DSH_BIND_IP
+  const port = Number(process.env.DSH_BIND_PORT ?? 3080)
+  assert.match(bind ?? "", /^\d+\.\d+\.\d+\.\d+$/, "DSH_BIND_IP must be a concrete IPv4 address")
+  const ca = readFileSync("/run/secrets/runtime_ca")
+
+  // A plaintext request must not be served. A refused connection or a TLS
+  // handshake error both count as refusal; what must not happen is a plain HTTP
+  // response, so record any answer and assert on it below.
+  let plaintext = null
+  try {
+    const response = await fetch(`http://${bind}:${port}/`, { redirect: "manual", signal: AbortSignal.timeout(4000) })
+    await response.body?.cancel()
+    plaintext = `HTTP ${response.status}`
+  } catch {}
+  assert.equal(plaintext, null, `plaintext HTTP was answered with ${plaintext} on the DSH listener`)
+
+  const status = await new Promise((resolve, reject) => {
+    request({ host: bind, port, path: "/", ca }, response => { response.resume(); resolve(response.statusCode) })
+      .on("error", reject).end()
+  })
+  assert.equal(status, 401, "DSH must challenge unauthenticated requests over internal TLS")
+  console.log(`DSH serves HTTPS with the pinned Runtime CA on ${bind}:${port} and does not answer plaintext`)
+'
+node deploy/public/edge-probe.mjs "$traefik_version" "$edge_dir/cert.pem" workstation.test:443
 check() {
   docker run --rm --ipc=host --network host --add-host workstation.test:127.0.0.1 \
     -e CI_EDGE_SPKI -e NODE_EXTRA_CA_CERTS=/ci-edge.pem -v "$edge_dir/cert.pem:/ci-edge.pem:ro" \

@@ -131,8 +131,11 @@ try {
     assert.ok(response?.ok(), 'Selkies page failed')
     assert.equal(new URL(desktop.url()).pathname, '/browser/')
     assert.ok(new URL(desktop.url()).hash.startsWith('#token='))
+    const frame = response.headers()
+    assert.match(frame['content-security-policy'] ?? '', /frame-ancestors 'self'/, 'browser CSP from the edge')
+    assert.equal(frame['x-frame-options'], 'SAMEORIGIN', 'browser X-Frame-Options from the edge')
     await until('Selkies video on the authenticated WebSocket', () => video, 40_000)
-    console.log('Same origin: authenticated /browser/ receives Selkies WebSocket video')
+    console.log('Same origin: authenticated /browser/ receives Selkies WebSocket video with a same-origin frame policy')
     await desktop.close()
 
     async function rpc(endpoint, request) {

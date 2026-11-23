@@ -20,9 +20,30 @@ The CDP relay shares Chromium's network namespace. It forwards loopback CDP over
 
 Public Compose runs `go test -race -v ./...` in the pinned Go image and `bash deploy/public/ci.sh` on the GitHub-hosted runner. The integration uses a separate Traefik, a temporary certificate, and a deterministic model fixture. [Public Compose](../../.github/workflows/public-compose.yml)
 
+The job matrix reads its versions only from [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env). Each leg pulls `tag@digest`, runs the same Compose stack, the same edge probe and the same post-login browser checks; only the Traefik image differs. [#3](https://github.com/sagehou/dsh-workstation/issues/3)
+
+### Traefik compatibility matrix
+
+| Traefik | Pinned digest | Status |
+| --- | --- | --- |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Passed the full stack at `540ddd5` |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Passed the full stack at `540ddd5` |
+
+Lowest version with a recorded pass: **v3.7.14**. Both legs passed [run 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598) with identical checks: `v3.7.14` ([job 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)) and `v3.7.19` ([job 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)); both passed again at `43065af` in [run 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367).
+
+Only the versions listed here have a recorded run, and this table does not claim that versions between them work. A version absent from the table is untested, and `deploy/public/traefik-image.sh` refuses to resolve it rather than silently testing a floating tag.
+
+Every leg verifies the HTTP→HTTPS redirect, HSTS/nosniff/referrer headers, ForwardAuth returning 401 for APIs and 303 for documents, forged `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` failing to authenticate, the `/browser/` prefix requiring login, `/browser/api/tokens` staying unrouted, the internal DSH TLS chain, Selkies WebSocket video, and the same-origin frame policy after login.
+
+CONNECT behaves differently across the matrix, and the probe records the observed status per version:
+
+- `v3.7.15` and later reject `CONNECT` with **501** before routing: `denyConnect` is wired at the entry point (`pkg/server/server_entrypoint_tcp.go`).
+- `v3.7.14` has **no `denyConnect`** at all. A `CONNECT` falls through to the router, so it answers **404**. That is still not a tunnel, but it is not the 501 guarantee.
+- The migration guide's `v3.7.9` note about HTTP/1 `CONNECT` does not match the `v3.7.14` source; the observed `v3.7.14` status is therefore recorded from the run instead of being assumed from the prose.
+
 ### Observed results
 
-The entire job passed at `333e6f3`. It used Traefik `3.7.19`, Chromium `156.0.8078.79`, Selkies `2.2.1`, DSH `0.2.2-rc.1`, and Playwright `1.61.1`. [GitHub Actions job at `333e6f3`](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
+The job passed at `333e6f3` with a single Traefik 3.7.19 leg. It used Traefik `3.7.19`, Chromium `156.0.8078.79`, Selkies `2.2.1`, DSH `0.2.2-rc.1`, and Playwright `1.61.1`. [GitHub Actions job at `333e6f3`](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 
 | Check | Observed result |
 | --- | --- |

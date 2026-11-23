@@ -8,7 +8,7 @@
 
 - **主机**需要 Linux amd64、以 root 运行的 Docker Engine 28+ 和 Compose v2。用有 Docker 权限的非 root 用户执行，并先登录 GitHub CLI。
 - **DNS** 将工作台域名指向 Traefik 所在主机。Traefik 提供公网端口 80 和 443，并管理证书。
-- **Traefik** 须已在同一台 Docker 主机运行。确认它所在的可信 Docker 网络、HTTPS 入口、证书 resolver，以及 file provider 监视的宿主机目录。CI 使用 Traefik `3.7.19`。[验证记录](../../docs/roadmap/public-compose.zh-CN.md)
+- **Traefik** 须已在同一台 Docker 主机运行。确认它所在的可信 Docker 网络、HTTPS 入口、证书 resolver，以及 file provider 监视的宿主机目录。**不需要升级 Traefik**：CI 按摘要固定 `v3.7.14` 与 `v3.7.19`，并用同一套全栈测试覆盖两者；哪些版本已有通过记录见[兼容性矩阵](../../docs/roadmap/public-compose.zh-CN.md#traefik-兼容性矩阵)。
 - **Docker 网络**确认两个 Compose 子网与宿主机路由没有重叠。[Compose](../../compose.yml)
 
 ## 部署
@@ -140,7 +140,7 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把
 
 ### 镜像包过期
 
-在 GitHub Actions 针对目标提交运行 **Public Compose**。把第 1 步的运行号和 `source-commit` 换成成功运行的值。[工作流](../../.github/workflows/public-compose.yml)
+在 GitHub Actions 针对目标提交运行 **Public Compose**。把第 1 步的运行号和 `source-commit` 换成成功运行的值。矩阵中每条腿各自上传 artifact：默认版本保留不带后缀的 `public-compose-linux-amd64`，其余腿加 `-<版本>` 后缀。任选一条腿即可，工作台镜像在各腿之间相同，差异只在入口代理版本。[工作流](../../.github/workflows/public-compose.yml)
 
 ## 备份与恢复
 

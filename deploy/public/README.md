@@ -8,7 +8,7 @@ English · [简体中文](README.zh-CN.md)
 
 - Use a **Linux amd64** host with rootful Docker Engine 28+ and Compose v2. Use a non-root user with Docker access and an authenticated GitHub CLI.
 - Point **DNS** at the Traefik host. Traefik serves public ports 80 and 443 and manages the certificates.
-- Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. CI uses Traefik `3.7.19`. [Verification](../../docs/roadmap/public-compose.md)
+- Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. You do **not** have to upgrade Traefik: CI pins and exercises `v3.7.14` and `v3.7.19` through the same full stack. [Compatibility matrix](../../docs/roadmap/public-compose.md#traefik-compatibility-matrix) records which versions have a passing run.
 - Check that neither **Docker subnet** overlaps your host routes. [Compose](../../compose.yml)
 
 ## Install
@@ -140,7 +140,7 @@ If the old hostname left a browser profile lock, confirm that the old Chromium h
 
 ### Refresh an expired image archive
 
-Run **Public Compose** for the intended revision on GitHub Actions. Use the successful run ID and its `source-commit` in step 1. [Workflow](../../.github/workflows/public-compose.yml)
+Run **Public Compose** for the intended revision on GitHub Actions. Use the successful run ID and its `source-commit` in step 1. Each Traefik version in the matrix uploads its own artifact: the default version keeps the unsuffixed `public-compose-linux-amd64` name, and the other legs add `-<version>`. Pick one leg; the workstation images are identical across legs because only the edge proxy differs. [Workflow](../../.github/workflows/public-compose.yml)
 
 ## Back up and restore
 

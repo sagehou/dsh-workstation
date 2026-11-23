@@ -18,7 +18,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | Order | Issue | Work | Dependency / exit condition |
 | --- | --- | --- | --- |
 | 00 | [#7](https://github.com/sagehou/dsh-workstation/issues/7) | Issue-first development and agent progress discipline | Required for all work; AGENTS rules already committed, verify subsequent tasks follow them. |
-| 01 | [#3](https://github.com/sagehou/dsh-workstation/issues/3) | Traefik 3.7.14 and 3.7.19 compatibility matrix | Before target-host deployment. |
+| 01 | [#3](https://github.com/sagehou/dsh-workstation/issues/3) | Traefik 3.7.14 and 3.7.19 compatibility matrix | Passed both legs; the edge version cannot be resolved unless it is pinned. |
 | 02 | [#8](https://github.com/sagehou/dsh-workstation/issues/8) | Transactional DSH/Profile upgrade and data recovery | Before relying on in-place upgrades or migrations on user data. |
 | 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Configurable Docker subnets and overlap preflight | Before target-host deployment. Derive fixed IPs, health checks, and certificate SANs from one configuration. |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | Browser exclusive input and safe handoff | Before enabling Agent control of the shared browser. |
@@ -74,6 +74,6 @@ For every assigned Issue, the agent must:
 
 ## Current handoff
 
-Start with [#3 — Traefik compatibility](https://github.com/sagehou/dsh-workstation/issues/3). The first task is a narrowly scoped CI matrix for Traefik 3.7.14 and 3.7.19. Do not change production configuration or upgrade the user's Traefik as part of that task.
+[#3 — Traefik compatibility](https://github.com/sagehou/dsh-workstation/issues/3) is complete: both pinned versions pass the full stack, and the edge image cannot be resolved unless it is pinned. Next is [#8 — transactional DSH/Profile upgrade and data recovery](https://github.com/sagehou/dsh-workstation/issues/8).
 
 The standalone browser page remains the first-release interface. Sidebar work (#5) is explicitly deferred.

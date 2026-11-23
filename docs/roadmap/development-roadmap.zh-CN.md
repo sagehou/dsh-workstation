@@ -18,7 +18,7 @@
 | 顺序 | Issue | 工作 | 依赖/退出条件 |
 | --- | --- | --- | --- |
 | 00 | [#7](https://github.com/sagehou/dsh-workstation/issues/7) | Issue-first 开发和 Agent 进度纪律 | 所有任务都必须遵守；AGENTS 规范已提交，后续任务需验证实际执行。 |
-| 01 | [#3](https://github.com/sagehou/dsh-workstation/issues/3) | Traefik 3.7.14 与 3.7.19 兼容性矩阵 | 目标主机部署前完成。 |
+| 01 | [#3](https://github.com/sagehou/dsh-workstation/issues/3) | Traefik 3.7.14 与 3.7.19 兼容性矩阵 | 两条腿均已通过；入口版本未固定时无法解析。 |
 | 02 | [#8](https://github.com/sagehou/dsh-workstation/issues/8) | DSH/Profile 升级事务与数据恢复 | 在用户数据上执行原地升级或迁移前完成。 |
 | 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Docker 子网可配置和冲突预检 | 目标主机部署前完成。固定 IP、健康检查和证书 SAN 从同一配置生成。 |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | 浏览器输入独占和安全交接 | 开放 Agent 控制共享浏览器前完成。 |
@@ -74,6 +74,6 @@
 
 ## 当前移交入口
 
-从 [#3 — Traefik 兼容性](https://github.com/sagehou/dsh-workstation/issues/3) 开始。第一项任务严格限定为 Traefik 3.7.14 和 3.7.19 的 CI 矩阵。不得借此修改生产配置或要求用户升级 Traefik。
+[#3 — Traefik 兼容性](https://github.com/sagehou/dsh-workstation/issues/3) 已完成：两个固定版本都通过全栈测试，且入口镜像未固定时无法解析。下一项是 [#8 — DSH/Profile 升级事务与数据恢复](https://github.com/sagehou/dsh-workstation/issues/8)。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。

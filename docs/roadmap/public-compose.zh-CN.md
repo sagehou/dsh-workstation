@@ -20,9 +20,30 @@ CDP 中继与 Chromium 共用网络命名空间，通过专用 Unix socket 卷�
 
 Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 GitHub 托管运行器执行 `bash deploy/public/ci.sh`。集成测试使用单独启动的 Traefik、临时证书及结果确定的模型服务。[Public Compose](../../.github/workflows/public-compose.yml)
 
+作业矩阵的版本只来自 [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env)。每条腿拉取 `tag@digest`，跑同一套 Compose、同一个边缘探测和同一套登录后浏览器检查，唯一差异是 Traefik 镜像。[#3](https://github.com/sagehou/dsh-workstation/issues/3)
+
+### Traefik 兼容性矩阵
+
+| Traefik | 固定摘要 | 状态 |
+| --- | --- | --- |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | 在 `540ddd5` 通过全栈测试 |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | 在 `540ddd5` 通过全栈测试 |
+
+已记录通过的最低版本为 **v3.7.14**。两条腿都在[运行 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598)通过，检查项完全一致：`v3.7.14`（[作业 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)）与 `v3.7.19`（[作业 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)）；在 `43065af` 的[运行 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367) 再次通过。
+
+只有表中列出的版本有运行记录，本表也不代表两者之间的版本可用。未列出的版本视为未验证，`deploy/public/traefik-image.sh` 会直接拒绝解析，而不是悄悄测一个浮动 tag。
+
+矩阵中每一条腿都验证了：HTTP 跳转 HTTPS、HSTS/nosniff/referrer 头、ForwardAuth 对 API 返回 401 且对文档返回 303、伪造 `X-Workstation-User`/`X-Forwarded-User`/`Remote-User` 不能通过、`/browser/` 前缀要求登录、`/browser/api/tokens` 未被路由、DSH 内部 TLS 链路、Selkies WebSocket 视频、登录后同源帧策略。
+
+CONNECT 在两个版本上行为不同，探测按版本记录实际观察值：
+
+- `v3.7.15` 及以后在路由前就把 `CONNECT` 拒绝为 **501**：入口点挂了 `denyConnect`（`pkg/server/server_entrypoint_tcp.go`）。
+- `v3.7.14` 完全没有 `denyConnect`，`CONNECT` 会落到路由器，返回 **404**。它仍然不是隧道，但不是 501 那种保证。
+- 迁移文档中 `v3.7.9` 关于 HTTP/1 `CONNECT` 的说明与 `v3.7.14` 源码不符，因此 `v3.7.14` 的实际状态以运行结果记录，不按文字推断。
+
 ### 实际结果
 
-提交 `333e6f3` 的作业通过。使用 Traefik `3.7.19`、Chromium `156.0.8078.79`、Selkies `2.2.1`、DSH `0.2.2-rc.1` 和 Playwright `1.61.1`。[提交 `333e6f3` 的 GitHub Actions 作业](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
+提交 `333e6f3` 的作业通过（当时只有 Traefik 3.7.19 一条腿）。使用 Traefik `3.7.19`、Chromium `156.0.8078.79`、Selkies `2.2.1`、DSH `0.2.2-rc.1` 和 Playwright `1.61.1`。[提交 `333e6f3` 的 GitHub Actions 作业](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 
 | 检查项 | 实际结果 |
 | --- | --- |
