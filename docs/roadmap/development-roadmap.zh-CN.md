@@ -74,6 +74,6 @@
 
 ## 当前移交入口
 
-[#8 — DSH/Profile 升级事务与数据恢复](https://github.com/sagehou/dsh-workstation/issues/8) 已完成：`dsh-runtime upgrade` 是一个事务，含兼容门禁、匹配备份，以及互相独立的指针回滚与数据恢复路径，已在[运行 45124380864](https://github.com/sagehou/dsh-workstation/actions/runs/45124380864) 中验证。两项限制继续保留：尚无可确知会迁移 Profile 数据的 DSH 版本，检测仅由合成改动证明；随镜像发布的浏览器 Bundle 固定 `engines.dsh 0.2.2-rc.1`，因此 DSH 与 Bundle 必须同步升级。下一项是 [#9 — 可配置 Docker 子网与重叠预检](https://github.com/sagehou/dsh-workstation/issues/9)。
+[#9 — 可配置 Docker 子网与重叠预检](https://github.com/sagehou/dsh-workstation/issues/9) 已完成：`deploy/network.sh` 从同一份配置推导两个子网、动态地址池、所有固定地址、Provider 的绑定地址、健康检查目标与 Runtime 证书 SAN，并在与宿主机路由或现有 Docker 网络重叠时拒绝执行。已在[运行 45130309765](https://github.com/sagehou/dsh-workstation/actions/runs/45130309765) 中于两种地址方案验证：每个 Traefik 版本在默认值与 `10.71.241.0/24` + `10.71.233.0/24` 下均通过。在已有部署上更换子网仍是有损迁移（重建容器、重连 Traefik），尚未在真实主机上演练；预检也尚未遇到真实 VPN 路由表。下一项是 [#4 — 浏览器独占输入与安全交接](https://github.com/sagehou/dsh-workstation/issues/4)。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。
