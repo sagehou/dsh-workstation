@@ -233,7 +233,11 @@ try {
     // Hand the tab over while the button is still down. The Provider refuses
     // the lease when its handover fails, so reaching AGENT here already means
     // the gate proved a release on this socket.
-    await action('将标签页交给 Agent', first)
+    //
+    // `first` already has a bound tab from the earlier lease, and the control
+    // page marks that in the option label -- picking the bare session id would
+    // time out rather than hand anything over.
+    await action('将标签页交给 Agent', first + ' · 已绑定')
     const heldGeneration = await send(first, 'lease-held', 'lease_status')
     assert.match(heldGeneration, /^[a-f0-9-]{36}:\d+$/,
       'the grant was refused over a socket holding a button, so no release was proven')
