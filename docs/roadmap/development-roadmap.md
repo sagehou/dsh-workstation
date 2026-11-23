@@ -19,8 +19,8 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | --- | --- | --- | --- |
 | 00 | [#7](https://github.com/sagehou/dsh-workstation/issues/7) | Issue-first development and agent progress discipline | Required for all work; AGENTS rules already committed, verify subsequent tasks follow them. |
 | 01 | [#3](https://github.com/sagehou/dsh-workstation/issues/3) | Traefik 3.7.14 and 3.7.19 compatibility matrix | Before target-host deployment. |
-| 02 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Transactional DSH/Profile upgrade and data recovery | Before relying on in-place upgrades or migrations on user data. |
-| 03 | [#8](https://github.com/sagehou/dsh-workstation/issues/8) | Configurable Docker subnets and overlap preflight | Before target-host deployment. Derive fixed IPs, health checks, and certificate SANs from one configuration. |
+| 02 | [#8](https://github.com/sagehou/dsh-workstation/issues/8) | Transactional DSH/Profile upgrade and data recovery | Before relying on in-place upgrades or migrations on user data. |
+| 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Configurable Docker subnets and overlap preflight | Before target-host deployment. Derive fixed IPs, health checks, and certificate SANs from one configuration. |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | Browser exclusive input and safe handoff | Before enabling Agent control of the shared browser. |
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR image publishing and immutable deployment references | Before declaring repeatable release distribution. |
 | 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3 and #8. Agent browser control stays disabled until #4; untrusted-site browsing stays disabled until #11. |
