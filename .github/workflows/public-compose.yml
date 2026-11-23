@@ -12,6 +12,11 @@ on:
       - browser-gate/**
       - compose.yml
       - deploy/public/**
+      - deploy/test/**
+      # The publish workflow consumes the resolver too. Without this its test
+      # guard would never run on the change that breaks it -- which is how the
+      # first real publish shipped an invalid tag.
+      - .github/workflows/publish-images.yml
       - .github/workflows/public-compose.yml
   pull_request:
     paths:
@@ -22,6 +27,8 @@ on:
       - browser-gate/**
       - compose.yml
       - deploy/public/**
+      - deploy/test/**
+      - .github/workflows/publish-images.yml
       - .github/workflows/public-compose.yml
 
 permissions:
