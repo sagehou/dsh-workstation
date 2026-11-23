@@ -20,7 +20,7 @@ A self-hosted deployment, security, browser-control, and operations layer around
 | Plugins and data | Uses the official DSH Profile, Bundle, and Plugin Manager. Container recreation preserves state, pnpm store and lockfiles, credentials, sessions, and separate workspace. |
 | Public access | One operator signs in over HTTPS using password and TOTP or Passkey. Go Auth provides recovery codes, session controls, and Traefik ForwardAuth. |
 | Browser | Operator and Agent share Chromium. Selkies runs at `/browser/`; the authenticated standalone browser/control page is the first-release UI. |
-| Deferred | Native DSH Sidebar is post-launch and does not block deployment. Full exclusive handoff remains gated on release of held input. [#1](https://github.com/sagehou/dsh-workstation/issues/1) |
+| Deferred | Native DSH Sidebar is post-launch and does not block deployment. [#5](https://github.com/sagehou/dsh-workstation/issues/5) Full exclusive handoff remains gated on release of held input. [#4](https://github.com/sagehou/dsh-workstation/issues/4) |
 | Images | GitHub Actions builds Compose images. Publishing immutable Runtime/Auth/Provider images to GHCR is tracked. [Deployment evidence](docs/roadmap/public-compose.md) |
 
 ## Project documents
