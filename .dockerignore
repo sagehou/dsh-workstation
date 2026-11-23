@@ -7,3 +7,12 @@
 !prototypes/m0/provider/server.mjs
 !prototypes/m0/browser/
 !prototypes/m0/browser/relay.mjs
+# The input gate builds from the repository root, and this file is an allowlist:
+# without these entries the context arrives empty and every COPY fails. Listed
+# individually rather than as !browser-gate/ so node_modules and the tests stay
+# out of the image context.
+!browser-gate/
+!browser-gate/package.json
+!browser-gate/package-lock.json
+!browser-gate/gate.mjs
+!browser-gate/server.mjs
