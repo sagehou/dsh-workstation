@@ -23,7 +23,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Configurable Docker subnets and overlap preflight | Before target-host deployment. Derive fixed IPs, health checks, and certificate SANs from one configuration. |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | Browser exclusive input and safe handoff | Before enabling Agent control of the shared browser. |
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR image publishing and immutable deployment references | Before declaring repeatable release distribution. |
-| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3 and #8. Agent browser control stays disabled until #4; untrusted-site browsing stays disabled until #11. |
+| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3, #8, #9, and #10. Agent browser control stays disabled until #4; untrusted-site browsing stays disabled until #11. |
 | 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | Browser egress policy and SSRF boundary | Required before enabling broad Agent browsing of untrusted sites. |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | Native DSH Browser Sidebar | Deferred enhancement; standalone page remains supported. Does not block first release. |
 
