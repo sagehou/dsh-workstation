@@ -82,6 +82,8 @@ The held-input release is **measured on the real stack**, not inferred: a button
 
 The digest mechanism is measured on a real daemon against a loopback registry: a pinned reference pulls, an upgrade follows a new digest, rollback restores exactly the earlier image, and a cleared digest fails instead of drifting to a tag. `WORKSTATION_IMAGE_REGISTRY` accepts only GHCR or a loopback address, so that test cannot masquerade as a publish.
 
-The initial publish has **not** happened yet, so what remains unverified is GHCR-specific: public package visibility, an anonymous pull from a host with no credential, the `ghcr-release` approval gate (an administrator must add reviewers), and upgrade/rollback across two real releases.
+The first publish **has** happened: tag `v0.2.0` pushed all four images, and each recorded manifest digest was confirmed against the registry independently of the workflow, resolves with an anonymous pull token, and carries a `linux/amd64` target. The `release-compose` CI job now pulls those digests with no credential, builds nothing, and passes the same stack checks, so "the published artifacts run" is measured rather than assumed.
+
+What remains unverified: the `ghcr-release` approval gate (an administrator must add required reviewers, and `v0.2.0` published without one), an upgrade/rollback drill across two releases on a real deployment host, and any non-`amd64` artifact.
 
 The standalone browser page remains the first-release interface. Sidebar work (#5) is explicitly deferred.
