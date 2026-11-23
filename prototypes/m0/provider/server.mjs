@@ -54,7 +54,17 @@ async function input(locked) {
   // the new table before it announces the change. A release sent after the flip
   // is dropped, which is how a human's held button used to survive an Agent
   // lease. Locking therefore means: prove the release, then take authority.
-  // NEGATIVE CONTROL: no handover.
+  if (locked && publicMode) {
+    const released = await fetch(gate + '/handover', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + gateControl },
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null)
+    // No release, no lease. Failing closed here is the whole point.
+    check(released?.ok === true, 'INPUT_GATE_UNAVAILABLE')
+    const body = await released.json().catch(() => ({}))
+    check(body.released === true, 'INPUT_GATE_UNAVAILABLE')
+  }
   const response = await fetch(selkies + '/browser/api/tokens', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + master, 'Content-Type': 'application/json' },
