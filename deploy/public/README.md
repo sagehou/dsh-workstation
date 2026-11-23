@@ -81,6 +81,9 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 
 ## Use the browser
 
+> **Release gate:** The standalone browser/control page is the supported first-release UI. Do not enable Agent browser control in a production deployment until [#4](https://github.com/sagehou/dsh-workstation/issues/4) passes the held-input release and exclusive-handoff acceptance tests. Keep broad browsing of untrusted sites disabled until [#11](https://github.com/sagehou/dsh-workstation/issues/11) passes the independent egress-policy tests. `BROWSER_TOOL_ORIGINS` alone is not an egress firewall or complete SSRF protection.
+
+
 | To | Open or choose |
 | --- | --- |
 | Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
