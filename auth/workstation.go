@@ -171,7 +171,14 @@ var providerHTTP = &http.Client{
 }
 
 func (g *gateway) provider(r *http.Request, method, route string, body io.Reader, result any) error {
-	request, err := http.NewRequestWithContext(r.Context(), method, "http://172.30.233.2:8081"+route, body)
+	// The provider's control listener is reached by its Compose network alias,
+	// so this code carries no address and follows a custom subnet automatically.
+	controlAddr := g.providerControlAddr
+	if controlAddr == "" {
+		controlAddr = "dsh-workstation-provider-control"
+	}
+	request, err := http.NewRequestWithContext(r.Context(), method,
+		"http://"+controlAddr+":8081"+route, body)
 	if err != nil {
 		return err
 	}

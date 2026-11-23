@@ -154,6 +154,10 @@ services:
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"]
     environment:
       WORKSTATION_PROVIDER: "1"
+      # The provider binds these; they must equal the addresses Compose assigns
+      # this container, or it fails with EADDRNOTAVAIL on a custom subnet.
+      PROVIDER_IP: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+      PROVIDER_CONTROL_IP: ${BROWSER_PROVIDER_IP:-172.30.233.2}
       BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
     volumes:
       - provider-state:/state
@@ -181,6 +185,9 @@ services:
       # and the parser fails on the inner brace.
       workstation:
         ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+        # Auth reaches the provider's control listener by name, so it does not
+        # carry a copy of the address at all.
+        aliases: [dsh-workstation-provider-control]
       browser:
         ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}
 

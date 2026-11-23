@@ -159,7 +159,10 @@ func run() error {
 		return errors.New("invalid session limits")
 	}
 	g := &gateway{store: s, origin: origin, host: u.Host, edge: env("AUTH_EDGE_IP", "172.30.242.2"), wa: passkeys,
-		idle: idle, absolute: absolute, maxSessions: max, hashSlots: make(chan struct{}, 2)}
+		// The provider's control listener, by its Compose network alias so a
+		// custom subnet needs no change here.
+		providerControlAddr: env("AUTH_PROVIDER_CONTROL_HOST", "dsh-workstation-provider-control"),
+		idle:                idle, absolute: absolute, maxSessions: max, hashSlots: make(chan struct{}, 2)}
 	if net.ParseIP(g.edge) == nil {
 		return errors.New("invalid AUTH_EDGE_IP")
 	}

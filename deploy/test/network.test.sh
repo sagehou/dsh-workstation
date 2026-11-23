@@ -145,6 +145,57 @@ if grep -nE '\{[^{}]*\$\{' compose.yml compose.preview.yml >"$work/flowmap" 2>/d
 fi
 pass 'no variable is interpolated inside a YAML flow mapping'
 
+# Every consumer of a static address must get it from the derivation, not from
+# a copy. The provider bound 172.30.241.3 from a constant and died with
+# EADDRNOTAVAIL on the custom plan, so a presence check is not enough: each line
+# has to name the derived variable.
+check_binding() {
+  local file=$1 pattern=$2 why=$3
+  grep -qE "$pattern" "$file" || fail "$file does not $why"
+}
+check_binding compose.yml 'PROVIDER_IP: \$\{WORKSTATION_PROVIDER_IP' 'bind the provider to the derived workstation address'
+check_binding compose.yml 'PROVIDER_CONTROL_IP: \$\{BROWSER_PROVIDER_IP' 'bind the provider control listener to the derived browser address'
+check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_PROVIDER_IP' 'assign the provider its derived workstation address'
+check_binding compose.yml 'ipv4_address: \$\{BROWSER_PROVIDER_IP' 'assign the provider its derived browser address'
+check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_RUNTIME_IP' 'assign the runtime its derived address'
+check_binding compose.yml 'DSH_BIND_IP: \$\{WORKSTATION_RUNTIME_IP' 'bind the runtime to its derived address'
+check_binding compose.yml 'subnet: \$\{WORKSTATION_SUBNET' 'derive the workstation subnet'
+check_binding compose.yml 'subnet: \$\{BROWSER_SUBNET' 'derive the browser subnet'
+check_binding compose.yml 'http://\$\{BROWSER_PROVIDER_IP:-[0-9]' 'probe the derived provider address'
+# The provider reads these from its environment; the code must not carry its own.
+grep -q 'process.env.PROVIDER_IP' prototypes/m0/provider/server.mjs ||
+  fail 'the provider does not read PROVIDER_IP from its environment'
+grep -q 'process.env.PROVIDER_CONTROL_IP' prototypes/m0/provider/server.mjs ||
+  fail 'the provider does not read PROVIDER_CONTROL_IP from its environment'
+# Auth reaches the provider by network alias, so it needs no address at all.
+if grep -q '"http://172\.30\.[0-9]' auth/workstation.go; then
+  fail 'auth still calls the provider by a literal address'
+fi
+grep -q 'providerControlAddr' auth/workstation.go ||
+  fail 'auth does not resolve the provider control listener by name'
+pass 'every consumer takes its address from the derivation, and auth uses a network alias'
+
+# A literal address compiled into a shipped image cannot follow a custom subnet.
+# The provider bound 172.30.241.3 from a constant and died with EADDRNOTAVAIL on
+# the custom plan; this is the check that would have caught it.
+# A literal is acceptable only where it is a fallback for an environment
+# variable or the non-public prototype branch. A bare literal is not.
+address_re='172\.30\.[0-9]{1,3}\.[0-9]{1,3}'
+: >"$work/baked"
+while IFS= read -r line; do
+  # `file:lineno:content`
+  body=${line#*:*:}
+  case $body in
+    *'process.env'*|*'??'*|*'publicMode ?'*|*'publicMode &&'*) continue ;;
+  esac
+  printf '%s\n' "$line" >>"$work/baked"
+done < <(grep -nE "$address_re" prototypes/m0/provider/server.mjs auth/workstation.go 2>/dev/null || true)
+if [[ -s $work/baked ]]; then
+  cat "$work/baked" >&2
+  fail 'a shipped image binds a literal address instead of a configured one'
+fi
+pass 'no shipped image hard-codes a routable address'
+
 # Every ${VAR:-default} must equal the derived value, or an existing deployment
 # without an override would move to a different address when it upgrades.
 node --input-type=module -e '
