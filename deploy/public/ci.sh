@@ -17,9 +17,6 @@ state="$PWD/.workstation"
 traefik_version="${WORKSTATION_CI_TRAEFIK_VERSION:-$(bash deploy/public/traefik-image.sh --default)}"
 traefik_image="$(bash deploy/public/traefik-image.sh "$traefik_version")"
 echo "Traefik under test: $traefik_version ($traefik_image)"
-# CI builds the images locally and then uses them by the name the resolver
-# produces, so this script cannot drift from deploy/public/images.env.
-provider_image="$(bash deploy/public/images.sh --local provider | sed 's/^[^=]*=//')"
 compose_files=(-f compose.yml -f deploy/public/compose.ci.yml)
 compose() { docker compose --env-file .env.public "${compose_files[@]}" "$@"; }
 cleanup() {
@@ -64,7 +61,36 @@ docker run -d --name "$edge" --network "$proxy" --ip "$WORKSTATION_CI_PROXY_EDGE
   --entrypoints.http.http.redirections.entrypoint.scheme=https \
   --entrypoints.websecure.address=:8443 \
   --providers.file.directory=/dynamic >/dev/null
-WORKSTATION_TRAEFIK_RESOLVER='' bash deploy/public/init.sh workstation.test "$proxy" "$edge"
+# CI mode selects how the four workstation images are obtained.
+#
+#   build   (default) build them from this checkout. Proves the source builds.
+#   release pull the digests recorded in deploy/public/images.env. Proves the
+#           published references actually pull and run the full stack, which is
+#           the claim #10 makes and cannot be checked by building locally.
+ci_image_mode="${WORKSTATION_CI_IMAGE_MODE:-build}"
+case $ci_image_mode in
+  build) WORKSTATION_TRAEFIK_RESOLVER='' bash deploy/public/init.sh workstation.test "$proxy" "$edge" ;;
+  release)
+    WORKSTATION_TRAEFIK_RESOLVER='' bash deploy/public/init.sh workstation.test "$proxy" "$edge" --release ||
+      { echo 'the release initializer refused the recorded digests' >&2; exit 1; }
+    # Refuse to continue if any reference is not pinned: a tag here would mean
+    # the experiment proves nothing about immutable deployment.
+    while IFS='=' read -r name reference; do
+      [[ $reference == *'@sha256:'* ]] || { echo "$name is not pinned: $reference" >&2; exit 1; }
+    done < <(for key in RUNTIME AUTH PROVIDER GATE; do
+      printf '%s=%s\n' "$key" "$(sed -n "s/^WORKSTATION_${key}_IMAGE=//p" .env.public)"
+    done)
+    echo "Pulling published digests:"
+    compose pull --quiet auth runtime provider browser-gate
+    ;;
+  *) echo "Unknown WORKSTATION_CI_IMAGE_MODE: $ci_image_mode" >&2; exit 1 ;;
+esac
+# Read the provider reference *after* the initializer has written .env.public:
+# it is the same reference the stack runs, so a maintenance `docker run` cannot
+# drift from the image under test. In build mode this is the local tag; in
+# release mode it is the published digest.
+provider_image="$(sed -n 's/^WORKSTATION_PROVIDER_IMAGE=//p' .env.public)"
+[[ -n $provider_image ]] || { echo 'the initializer wrote no provider image' >&2; exit 1; }
 mkdir -m 0700 "$state/ci-state" "$state/fixture"
 chmod 0755 "$state/fixture"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 -subj '/CN=fixture.test' \
@@ -77,7 +103,32 @@ export BROWSER_TOOL_ORIGINS=https://fixture.test
 export WORKSTATION_CI_STATE="$state/ci-state"
 
 compose config -q
-compose build auth runtime provider browser-gate
+if [[ $ci_image_mode == build ]]; then
+  compose build auth runtime provider browser-gate
+else
+  # A local build would mask a broken published image, so assert none of the
+  # four is built here.
+  echo 'Skipping the image build: this leg runs the published digests.'
+fi
+# A COPY whose destination ends in `/` applies --chmod to the directory as well
+# as to the files. A 0644 there made /usr/local/lib/dsh-runtime unenterable, so
+# the published image could not find its own modules while a locally built one
+# sometimes appeared to work. Assert the runtime can reach them as its own user,
+# in both modes, before the stack is started.
+runtime_image="$(sed -n 's/^WORKSTATION_RUNTIME_IMAGE=//p' .env.public)"
+[[ -n $runtime_image ]] || { echo 'the initializer wrote no runtime image' >&2; exit 1; }
+docker run --rm --entrypoint sh "$runtime_image" -c '
+  for path in /usr/local/lib/dsh-runtime /usr/local/lib/dsh-runtime/compat.mjs \
+              /usr/local/lib/dsh-runtime/state.mjs /usr/local/lib/dsh-runtime/web.mjs; do
+    test -e "$path" || { echo "missing: $path" >&2; exit 1; }
+  done
+  test -x /usr/local/lib/dsh-runtime ||
+    { echo "/usr/local/lib/dsh-runtime is not enterable by $(id -un)" >&2; exit 1; }
+  test -r /usr/local/lib/dsh-runtime/compat.mjs ||
+    { echo "compat.mjs is not readable by $(id -un)" >&2; exit 1; }
+' || { echo "the runtime image $runtime_image cannot read its own modules" >&2; exit 1; }
+echo "Runtime image can read its modules as its own user: $runtime_image"
+
 docker build --target probe -t workstation-ci-viewer -f prototypes/m0/browser/Dockerfile prototypes/m0/browser
 node deploy/public/otp.mjs password > "$state/ci-state/password"
 # Keep the bootstrap code valid for the short container startup.

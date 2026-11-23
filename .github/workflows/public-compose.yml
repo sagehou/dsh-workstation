@@ -218,8 +218,87 @@ jobs:
             evidence/*
             !evidence/source/
 
+  # Every leg above builds the images from this checkout, which proves the source
+  # builds but says nothing about the artifacts a deployment actually runs. This
+  # job pulls the digests recorded in deploy/public/images.env and brings up the
+  # same stack from them, with no build and no registry login. It is what turns
+  # "the resolver produces pinned references" into "the published references
+  # run", and it fails if a package is not anonymously pullable.
+  release-compose:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Refuse to run against an unpublished image
+        run: |
+          set -euo pipefail
+          # Release mode has to pull all four, so an incomplete images.env would
+          # fail later with a confusing error. Fail here and say why.
+          if ! bash deploy/public/images.sh >/dev/null 2>&1; then
+            echo 'deploy/public/images.env has no complete set of digests.' >&2
+            echo 'Run Publish images first, then commit the recorded digests.' >&2
+            bash deploy/public/images.sh 2>&1 | head -5 || true
+            exit 1
+          fi
+          bash deploy/public/images.sh
+      - name: Prove the pull is anonymous by construction
+        run: |
+          set -euo pipefail
+          # The packages are public, so the pull must work with no credential.
+          # Do not *inspect* the runner's Docker config and hope it is empty --
+          # GitHub's runner writes `{"auths": {}}`, and a check that greps for
+          # the key fails on a config that authenticates nothing. Build a config
+          # that cannot hold a credential instead: a fresh empty directory.
+          anon="$(mktemp -d)"
+          chmod 0700 "$anon"
+          printf '{}\n' > "$anon/config.json"
+          echo "DOCKER_CONFIG=$anon" >> "$GITHUB_ENV"
+          DOCKER_CONFIG="$anon" docker info --format '{{.ServerVersion}}' >/dev/null
+          if DOCKER_CONFIG="$anon" sh -c 'test -s "$DOCKER_CONFIG/config.json" && grep -q auths "$DOCKER_CONFIG/config.json"'; then
+            echo 'a credential leaked into the isolated Docker config' >&2
+            exit 1
+          fi
+          # `docker pull` stores credentials it used; asserting the file stays a
+          # bare `{}` after the run is the check that nothing was authorised.
+          echo 'Using an isolated, credential-free Docker config for every pull.'
+      - name: Run the whole stack from the published digests
+        run: |
+          set -o pipefail
+          WORKSTATION_CI_IMAGE_MODE=release bash deploy/public/ci.sh 2>&1 |
+            tee evidence-release.log
+      - name: Assert the pull used no credential
+        run: |
+          set -euo pipefail
+          # If a credential had been used, Docker would have written it back to
+          # the isolated config. A bare `{}` after a full pull and stack start is
+          # what makes "anonymous" a measured fact rather than a claim.
+          content="$(cat "$DOCKER_CONFIG/config.json")"
+          if [[ $content != '{}' && $content != *'"auths": {}'* ]]; then
+            echo "the Docker config gained content during the pull: $content" >&2
+            exit 1
+          fi
+          echo "The pull left the Docker config empty: $content"
+          echo 'Anonymous pull confirmed.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Record the deployed references
+        if: always()
+        run: |
+          # The log is evidence; .env.public is not uploaded because it holds
+          # host configuration. The references that ran are what matters.
+          bash deploy/public/images.sh > evidence-release-references 2>&1 || true
+          cat evidence-release-references
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: public-compose-release
+          path: |
+            evidence-release.log
+            evidence-release-references
+
   matrix-summary:
-    needs: [input-gate, matrix, public-compose]
+    needs: [input-gate, matrix, public-compose, release-compose]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -232,6 +311,7 @@ jobs:
           VERSIONS: ${{ needs.matrix.outputs.versions }}
           RESULT: ${{ needs.public-compose.result }}
           GATE: ${{ needs.input-gate.result }}
+          RELEASE: ${{ needs.release-compose.result }}
         run: |
           {
             printf '## Traefik compatibility matrix\n\n'
@@ -248,9 +328,18 @@ jobs:
               }
             '
             printf '\nEvery leg runs the same Compose stack, edge probe and authenticated browser checks. Two things vary: the pinned Traefik image, and whether the subnets are the defaults or a custom plan.\n'
+            printf '\n## Published digests\n\n'
+            if [[ "$RELEASE" == success ]]; then
+              printf 'The `release-compose` leg pulled the recorded digests with no registry credential, built nothing, and passed the same checks. These are the references a deployment runs:\n\n'
+              printf '```\n'
+              bash deploy/public/images.sh || true
+              printf '```\n'
+            else
+              printf 'The `release-compose` leg reported `%s`. The published digests have **not** been shown to run; only the locally built images have.\n' "$RELEASE"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail when any pinned version failed
-        if: needs.public-compose.result != 'success' || needs.input-gate.result != 'success'
+        if: needs.public-compose.result != 'success' || needs.input-gate.result != 'success' || needs.release-compose.result != 'success'
         run: |
           echo "Either the input gate tests or a pinned Traefik version failed; see the jobs." >&2
           exit 1

@@ -127,8 +127,87 @@ jobs:
             browser-gate) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=browser-gate/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
             *) echo "No build context for $IMAGE" >&2; exit 1 ;;
           esac
-      - name: Build and push
+      - name: Build for the smoke test
         id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ steps.image.outputs.context }}
+          file: ${{ steps.image.outputs.file }}
+          platforms: linux/amd64
+          # Load rather than push: a broken image must not acquire a published
+          # tag, and a published tag cannot be withdrawn without breaking anyone
+          # who already pinned it. The push below happens only after the smoke
+          # test passes.
+          #
+          # `load` yields a plain single-platform image, so this build carries no
+          # attestations -- pushing it would silently drop them. The publish step
+          # rebuilds from the same cache and attaches provenance and the SBOM.
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          tags: ghcr.io/sagehou/${{ steps.image.outputs.name }}:${{ matrix.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ matrix.version }}
+      - name: Smoke-test the image before it is published
+        # A published tag is a promise. The runtime once shipped with its module
+        # directory at mode 0644, so the container could not enter it and exited
+        # with "cannot locate compat.mjs" -- while the build itself succeeded, and
+        # the failure only appeared in a full-stack run. Run the image here, before
+        # the push, so a broken artifact never acquires a published tag.
+        env:
+          IMAGE: ${{ matrix.image }}
+          NAME: ${{ steps.image.outputs.name }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          reference="ghcr.io/sagehou/${NAME}:${VERSION}"
+          docker image inspect "$reference" >/dev/null
+          case "$IMAGE" in
+            runtime)
+              for path in /usr/local/lib/dsh-runtime \
+                          /usr/local/lib/dsh-runtime/compat.mjs \
+                          /usr/local/lib/dsh-runtime/state.mjs \
+                          /usr/local/lib/dsh-runtime/web.mjs; do
+                docker run --rm --entrypoint sh "$reference" -c "test -e $path" ||
+                  { echo "the runtime image is missing $path" >&2; exit 1; }
+              done
+              # The container runs as an unprivileged user, so entering the
+              # directory is the property that matters, not its existence.
+              docker run --rm --entrypoint sh "$reference" -c \
+                'test -x /usr/local/lib/dsh-runtime && test -r /usr/local/lib/dsh-runtime/compat.mjs' ||
+                { echo 'the runtime image cannot read its own modules as its own user' >&2; exit 1; }
+              docker run --rm --entrypoint dsh-runtime "$reference" health >/dev/null 2>&1 || true
+              ;;
+            auth|provider|browser-gate)
+              docker run --rm --entrypoint sh "$reference" -c 'exit 0' >/dev/null ||
+                { echo "$IMAGE cannot start" >&2; exit 1; }
+              ;;
+          esac
+          echo "Smoke-tested $reference"
+      - name: Refuse to republish an existing version
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          # A version already recorded in the file is a promise about what that
+          # tag resolves to. Publishing a different digest under it would break
+          # every deployment pinned to the old one. This runs before the push,
+          # because afterwards the damage is done.
+          recorded="$(bash deploy/public/images.sh --field digest "$IMAGE" 2>/dev/null || true)"
+          if [[ -n $recorded ]]; then
+            echo "$IMAGE:$VERSION is already recorded as $recorded." >&2
+            echo 'Bump the version in deploy/public/images.env instead of' >&2
+            echo 'republishing over a digest a deployment may already pin.' >&2
+            exit 1
+          fi
+          echo "$IMAGE:$VERSION is unpublished, so it may be published."
+      - name: Publish with provenance and SBOM
+        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ steps.image.outputs.context }}
@@ -137,6 +216,10 @@ jobs:
           # Never tag a manifest as latest: the deployment resolves a digest, and
           # a mutable pointer is what images.env exists to remove.
           push: true
+          # Reuses the cache from the build that was smoke-tested, so this is a
+          # re-export rather than a second compilation.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           tags: ghcr.io/sagehou/${{ steps.image.outputs.name }}:${{ matrix.version }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -150,7 +233,7 @@ jobs:
         env:
           IMAGE: ${{ matrix.image }}
           VERSION: ${{ matrix.version }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
           # A manifest list digest, not a config digest: the deployment pulls
@@ -162,16 +245,8 @@ jobs:
           printf '%s %s %s\n' "$IMAGE" "$VERSION" "$DIGEST" > "digest-$IMAGE.txt"
           printf '`ghcr.io/sagehou/dsh-workstation-%s:%s@%s`\n' \
             "$IMAGE" "$VERSION" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          # A version already recorded in the file is a promise about what that
-          # tag resolves to. Publishing a different digest under it would break
-          # every deployment pinned to the old one, so refuse instead.
-          recorded="$(bash deploy/public/images.sh --field digest "$IMAGE" 2>/dev/null || true)"
-          if [[ -n $recorded && $recorded != "$DIGEST" ]]; then
-            echo "$IMAGE:$VERSION is already published as $recorded." >&2
-            echo "This run built $DIGEST. Bump the version in deploy/public/images.env" >&2
-            echo "instead of republishing over a digest a deployment may already use." >&2
-            exit 1
-          fi
+          # The republish guard ran before the push; asserting it again here
+          # would only re-read a file this job has not modified.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: digest-${{ matrix.image }}
