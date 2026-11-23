@@ -2,7 +2,7 @@
 name: dsh-workstation-preview
 
 x-runtime: &runtime
-  image: dsh-workstation-runtime:preview
+  image: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
   build: ./runtime
   init: true
   cap_drop: [ALL]
@@ -20,6 +20,7 @@ services:
       DSH_INITIAL_VERSION: ${DSH_INITIAL_VERSION:-0.2.2-rc.1}
       DSH_BIND_IP: 172.30.241.2
       DSH_PUBLIC_ORIGIN: http://127.0.0.1:3080
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
     healthcheck:
       test: ["CMD", "dsh-runtime", "health"]
       interval: 15s
@@ -35,6 +36,9 @@ services:
     <<: *runtime
     profiles: [maintenance]
     command: ["status"]
+    environment:
+      # Backups are taken here, so this must be present on maintenance too.
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:preview}
     networks: [runtime-egress]
 
   chromium:
@@ -82,13 +86,20 @@ networks:
     internal: true
     ipam:
       config:
+        # Dynamic allocation must stay out of the static band. Without ip_range
+        # Docker hands 172.30.241.2 to whichever container starts first, and
+        # the runtime then fails to claim its own address with "Address already
+        # in use". compose.yml already partitions the range this way.
         - subnet: 172.30.241.0/24
+          ip_range: 172.30.241.128/25
   browser-route:
     internal: true
   private-entry:
     ipam:
       config:
+        # Same reason as runtime-route: edge holds 172.30.244.2 statically.
         - subnet: 172.30.244.0/24
+          ip_range: 172.30.244.128/25
   runtime-egress: {}
   browser-egress: {}
 

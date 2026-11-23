@@ -12,7 +12,7 @@ ENV DSH_HOME=/dsh-home \
     npm_config_ignore_scripts=true
 
 COPY --chmod=0755 dsh-runtime /usr/local/bin/dsh-runtime
-COPY web.mjs /usr/local/lib/dsh-runtime/web.mjs
+COPY --chmod=0644 web.mjs compat.mjs state.mjs /usr/local/lib/dsh-runtime/
 COPY browser-bundle /opt/workstation-browser
 USER node
 WORKDIR /workspace

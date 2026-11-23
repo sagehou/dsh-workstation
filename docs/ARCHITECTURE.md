@@ -92,7 +92,10 @@ Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior 
 - Install candidate DSH releases side-by-side and never mutate the active installation in place.
 - Before Profile or plugin dependency changes, create a DSH_HOME backup and record the exact Runtime, DSH, Profile, and plugin versions.
 - Validate candidate startup, Node compatibility, Profile/Bundle compatibility, lockfile consistency, and explicitly approved lifecycle scripts.
-- A pointer rollback restores only the selected executable. If data migration occurred, restore the matching DSH_HOME backup and any coupled workspace state.
+- `dsh-runtime upgrade` is one transaction: install beside the active version, gate, probe a copy, fingerprint, archive plus manifest, then move the pointer. A blocked candidate stays installed and the pointer does not move.
+- Approvals are for exact `package@version` and persist in DSH_HOME, so they also apply to a later rollback. Lifecycle scripts in the DSH release's own tree are reported, not blocking, because that policy is fixed at `--ignore-scripts` and identical for every version.
+- A pointer rollback restores only the selected executable. If data migration occurred, restore the matching DSH_HOME backup and any coupled workspace state. `verify` compares Profile manifests, lockfiles and pnpm-store package versions against the pre-switch fingerprint and names the required action.
+- A DSH_HOME backup excludes `runtime` and `pnpm` because both are reinstallable; it records the selection and Runtime image in a manifest instead, and refuses a restore whose checksum, ownership or DSH version does not match.
 - Backups cover DSH_HOME, workspace, Chromium profile, Auth DB, Provider state, and encryption secrets. Restore tests must prove the administrator can still use TOTP and existing Passkeys.
 
 ## Releases and deployment
