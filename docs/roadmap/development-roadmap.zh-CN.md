@@ -80,6 +80,8 @@
 
 [#10 — GHCR 镜像发布与不可变部署引用](https://github.com/sagehou/dsh-workstation/issues/10) 增加了 `deploy/public/images.env`（逐镜像的 manifest 摘要）与 `deploy/public/images.sh`（解析器：摘要缺失或畸形即拒绝，绝不回退到标签）。初始化脚本新增 `--release`，把四个按摘要固定的 GHCR 引用写入 `.env.public`；默认模式写入本地构建标签，切换模式会替换这些键而不是追加。`publish-images.yml` 仅在 `v*` 标签或手动触发时运行，`packages: write` 只授予发布作业，绑定需审批的环境，拒绝以不同摘要重发已记录的版本，把 SBOM 与构建来源附着到摘要上，并在最后匿名拉取每个已记录摘要。Public Compose 的归档保留为审计证据。
 
-首次发布**尚未**发生，因此 GHCR 往返、干净主机上的匿名拉取、以及跨两个发布的升级/回滚均未验证。解析器、与 `compose.yml` 的交叉校验、以及初始化脚本的两种模式已有测试覆盖。
+摘要机制已在真实守护进程上针对回环 registry 实测：固定引用能拉取、升级跟随新摘要、回滚恢复到完全相同的旧镜像、清空摘要会失败而非漂移到标签。`WORKSTATION_IMAGE_REGISTRY` 只接受 GHCR 或回环地址，因此该测试无法冒充发布。
+
+首次发布**尚未**发生，仍未验证的是 GHCR 特有部分：包的公开可见性、无凭据主机的匿名拉取、`ghcr-release` 审批门槛（需管理员添加审批人）、以及跨两个真实发布的升级/回滚。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。

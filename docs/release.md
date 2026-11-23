@@ -82,11 +82,31 @@ independent: updating the image does not change which DSH version runs.
 what a run executed and is retained for 90 days; it is not a distribution
 channel and the install guide no longer uses it.
 
+## What is measured
+
+| Check | Evidence |
+| --- | --- |
+| A digest reference pulls and runs | CI publishes a build to a loopback registry, resolves `localhost:<port>/name:version@sha256:...` through the real resolver, removes the local tags and pulls it back, then inspects the image ID. |
+| Upgrade follows a new digest | A second build under a new version produces a distinct digest, and the resolver follows it. |
+| Rollback restores exactly the earlier image | Restoring the first digest pulls back an image whose ID equals the original pull. |
+| A missing digest fails rather than drifting to a tag | The resolver, its 18 shell checks and the initializer all fail. Verified by temporarily making the resolver fall back to a tag, which made three resolver checks and the `--release` initializer check fail. |
+| The override cannot redirect a deployment | A registry other than `ghcr.io/sagehou` or a loopback test registry is refused. |
+| `compose.yml` and the resolver agree | Both directions asserted: every published image is consumed through its override key, and no override key exists without a published image. |
+
+The loopback registry is deliberate: `WORKSTATION_IMAGE_REGISTRY` accepts only
+GHCR or a loopback address, so this test cannot masquerade as a publish.
+
 ## Not yet verified
 
-- The four images have not yet been published to GHCR from this repository. The
-  workflow, the resolver and the initializer's `--release` mode are tested
-  locally and in CI, but the first real publish is what proves the GHCR
-  round-trip, the anonymous pull, and the upgrade/rollback drill on a host.
-- Upgrade and rollback by digest across two real releases has not been executed;
+- **No image has been pushed to GHCR yet.** The registry round-trip above is
+  proved against a loopback registry on a real daemon, not GHCR. What remains
+  unproven is GHCR-specific: package visibility actually being public, the
+  anonymous pull from a host with no credential, and the `ghcr-release`
+  environment approval.
+- Approval gating requires an administrator to add required reviewers to the
+  `ghcr-release` environment. Until that is done a tag push publishes without a
+  gate. This cannot be asserted from code.
+- Upgrade and rollback across two real releases on a host has not been run;
   there is only one release to date.
+- The workflow has passed `actionlint` 1.7.7 and its `plan` and `record` scripts
+  have been executed by hand, but the workflow itself has never run on GitHub.
