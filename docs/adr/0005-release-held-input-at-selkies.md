@@ -95,7 +95,7 @@ Provider `input(true)` becomes `POST /handover` **then** the revoking token tabl
 
 ## Unverified
 
-- The gate has run only against a fake upstream that reproduces the traced ordering, not against a live Selkies instance. The fake answers PING inline and drops input frames without authority because the traced code does; that is a model of the pinned source, not the source itself.
+- The gate now runs on the live stack: a press held on the operator's real Selkies socket, handed over, reads back from the Agent's tab as one press and one release. Removing the handover call makes the same probe report a press with no release, so the check is not passing by construction. The failure-mode matrix around it is still covered by the fake upstream rather than measured.
 - The PING/PONG barrier is argued from the pinned source, not measured. The argument depends on the read loop awaiting each input dispatch before reading the next frame; if that changes, the barrier weakens and must be re-examined rather than assumed.
 - The full transition matrix on a real host (HUMAN→AGENT, AGENT→HUMAN, lease expiry, client disconnect, Chromium restart, concurrent input during handoff, Provider abnormal exit) has not been run. It is the gate's acceptance test, not a follow-up.
 - Only keyboard and mouse are in scope; file transfer, clipboard, gamepad, microphone and webcam are already disabled in Compose. The emitter and the scroller (`co`, `cmd`, `sf`, `sfe`) ride the same authority gate but are not released by `kr` or a pointer mask, so they are dropped while input is closed instead.
