@@ -109,7 +109,7 @@ Tag `v0.2.0` published four images:
 
 | Image | Version | Manifest list digest |
 | --- | --- | --- |
-| `dsh-workstation-runtime` | 0.2.0 | `sha256:61dddb88c65ac8ee9cd891317b1b6f675384266c87f6ef428ba1b13e5cc33cff` |
+| `dsh-workstation-runtime` | 0.2.0 | `sha256:61dddb88c65ac8ee9cd891317b1b6f675384266c87f6ef428ba1b13e5cc33cff` (broken; superseded by 0.2.1) |
 | `dsh-workstation-auth` | 0.1.1 | `sha256:7a25eb333de2091ec1d1a622864cfa83b1aed5b22c42522a741e6fd946e1a2f6` |
 | `dsh-workstation-provider` | 0.2.0 | `sha256:240c662037662cd3719eb50a572f972f5d8b1434df90e90448ce21658412393f` |
 | `dsh-workstation-browser-gate` | 0.1.0 | `sha256:fc265c6f36806def3401c86925588671721f6cade13070c55aaf7284d3606c5f` |
@@ -133,6 +133,31 @@ The first attempt failed, and the failures were real:
    two tests had assumed the checked-in matrix was unpublished, so filling in
    real digests broke them. Pulls and visibility were then verified by hand.
    The tests now construct the unpublished state instead of reading it.
+
+Then `runtime:0.2.0` turned out to be unusable, and the release leg added in the
+same branch is what found it:
+
+```
+runtime-1 | dsh-runtime: cannot locate compat.mjs and state.mjs
+```
+
+The published layer had `usr/local/lib/dsh-runtime/` at mode **0644**. `COPY
+--chmod` applies to the directories it creates, not only to the file named, so
+the module directory lost its execute bit; the container runs as `node`, could
+not enter it, and the helper lookup failed. A locally built image happened to be
+unaffected, so every stack test passed while the published artifact was broken.
+Naming each file's full path was not enough — the parent is still created by
+COPY. Creating the directory with `install -d -m 0755` before any COPY is what
+fixes it; the published layers now show `0000755 DIR`.
+
+`publish` now smoke-tests the image **before** pushing, so this class of defect
+cannot reach a tag at all: a version that fails the check is never published, and
+an already-published version is refused rather than overwritten. Runtime is
+therefore `0.2.1`, and `0.2.0` remains published and broken. That is deliberate:
+retracting a digest someone may have pinned is worse than leaving it visibly
+superseded.
+
+| `dsh-workstation-runtime` | 0.2.1 | `sha256:8fabc8a912436e85f17e83166ef2584f19110cd7428a1ce3ca8434a64926fc6a` |
 
 ## Not yet verified
 

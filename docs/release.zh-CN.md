@@ -92,7 +92,7 @@ docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
 
 | 镜像 | 版本 | manifest list 摘要 |
 | --- | --- | --- |
-| `dsh-workstation-runtime` | 0.2.0 | `sha256:61dddb88c65ac8ee9cd891317b1b6f675384266c87f6ef428ba1b13e5cc33cff` |
+| `dsh-workstation-runtime` | 0.2.0 | `sha256:61dddb88c65ac8ee9cd891317b1b6f675384266c87f6ef428ba1b13e5cc33cff`（已损坏，由 0.2.1 取代） |
 | `dsh-workstation-auth` | 0.1.1 | `sha256:7a25eb333de2091ec1d1a622864cfa83b1aed5b22c42522a741e6fd946e1a2f6` |
 | `dsh-workstation-provider` | 0.2.0 | `sha256:240c662037662cd3719eb50a572f972f5d8b1434df90e90448ce21658412393f` |
 | `dsh-workstation-browser-gate` | 0.1.0 | `sha256:fc265c6f36806def3401c86925588671721f6cade13070c55aaf7284d3606c5f` |
@@ -112,6 +112,26 @@ manifest list 含 `linux/amd64` 目标、且每个摘要都能用**匿名**拉�
 3. `record` 作业在四次推送**全部成功之后**，因自身测试而失败：两个测试假定已提交
    的矩阵文件是未发布状态，填入真实摘要后即失败。拉取与可见性随后经手工核对。
    测试现在自行构造未发布状态，而不是依赖文件内容。
+
+随后发现 `runtime:0.2.0` 不可用，而发现它的正是同一分支新增的发布腿：
+
+```
+runtime-1 | dsh-runtime: cannot locate compat.mjs and state.mjs
+```
+
+已发布的层中 `usr/local/lib/dsh-runtime/` 的权限是 **0644**。`COPY --chmod`
+同样作用于它创建的目录，而不只是被命名的文件，于是模块目录失去了执行位；
+容器以 `node` 运行、无法进入该目录，辅助模块查找失败。本地构建的镜像恰好不受
+影响，因此所有栈测试通过，而发布产物是坏的。仅把每个文件写成完整路径并不够——
+父目录仍由 COPY 创建。`install -d -m 0755` 在任何 COPY 之前建好目录才真正解决；
+已发布的层现在显示 `0000755 DIR`。
+
+`publish` 现在在推送**之前**对镜像做冒烟测试，这类缺陷因此无法到达标签：检查
+失败的版本不会被发布，已发布的版本会被拒绝而不是被覆盖。所以 runtime 为
+`0.2.1`，而 `0.2.0` 仍是公开但损坏的。这是刻意的：撤回别人可能已固定的摘要，
+比留下一个明确被取代的版本更糟。
+
+| `dsh-workstation-runtime` | 0.2.1 | `sha256:8fabc8a912436e85f17e83166ef2584f19110cd7428a1ce3ca8434a64926fc6a` |
 
 ## 尚未验证
 
