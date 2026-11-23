@@ -136,6 +136,15 @@ if grep -nE '(^|[^-])\b172\.30\.[0-9]+\.[0-9]+' compose.yml compose.preview.yml 
 fi
 pass 'Compose derives every workstation address; literals survive only as defaults'
 
+# A `${...}` inside a flow mapping `{key: value}` opens a nested mapping and the
+# YAML parser rejects the document. That shipped once and failed every full-stack
+# leg; this catches it without needing a YAML library.
+if grep -nE '\{[^{}]*\$\{' compose.yml compose.preview.yml >"$work/flowmap" 2>/dev/null; then
+  cat "$work/flowmap" >&2
+  fail 'a variable sits inside a YAML flow mapping; use block style instead'
+fi
+pass 'no variable is interpolated inside a YAML flow mapping'
+
 # Every ${VAR:-default} must equal the derived value, or an existing deployment
 # without an override would move to a different address when it upgrades.
 node --input-type=module -e '

@@ -177,8 +177,12 @@ services:
       retries: 18
       start_period: 30s
     networks:
-      workstation: {ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}}
-      browser: {ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}}
+      # Block style, not {key: value}: `${...}` opens a nested YAML flow mapping
+      # and the parser fails on the inner brace.
+      workstation:
+        ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+      browser:
+        ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}
 
 networks:
   proxy:

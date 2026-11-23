@@ -45,11 +45,12 @@ jobs:
         run: bash deploy/test/network.test.sh
       - name: Test repeatable initialization and PKI consistency
         run: |
-          useradd --create-home --uid 2000 runner-init
-          install -d -o runner-init -g runner-init /tmp/init-work
+          # useradd and chown need root; the runner user is not.
+          sudo useradd --create-home --uid 2000 runner-init
+          sudo install -d -o runner-init -g runner-init /tmp/init-work
           cp -a . /tmp/init-work/src
-          chown -R runner-init:runner-init /tmp/init-work/src
-          su runner-init -c 'cd /tmp/init-work/src && bash deploy/test/init.test.sh'
+          sudo chown -R runner-init:runner-init /tmp/init-work/src
+          sudo su runner-init -c 'cd /tmp/init-work/src && bash deploy/test/init.test.sh'
 
   preview:
     runs-on: ubuntu-24.04
