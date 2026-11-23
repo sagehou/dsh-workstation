@@ -131,13 +131,31 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 | 要做什么 | 在哪里操作 |
 | --- | --- |
 | 打开共享 Chromium | 从 `/_auth/browser` 打开同源的 `/browser/`，沿用工作台登录。 |
-| 让 Agent 使用标签页 | 在 `/_auth/control` 选择在线 DSH 会话，授予最长 120 秒的租约。授权前松开鼠标和键盘。第一次授权会创建标签页，此在线会话后续复用。 |
+| 让 Agent 使用标签页 | 在 `/_auth/control` 选择在线 DSH 会话，授予最长 120 秒的租约。第一次授权会创建标签页，此在线会话后续复用。`browser-gate` 服务会在控制权移交前释放你仍按住的鼠标键和键盘键；若无法证明释放完成，授权会被拒绝，浏览器仍归你控制。 |
 | 接管浏览器 | 选择 **接管浏览器**。Provider 停止接收新调用，等待当前操作结束后交还控制。 |
 | 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Provider。留空时只允许人工浏览。 |
 
 Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。白名单约束这些工具和返回的页面文本。Chromium 仍会处理页面脚本和重定向，且标签页共享 Cookie。请使用可信来源。
 
 连接或标签页丢失时，新建 DSH 会话并重新授权。要继续原来的对话，重启 Runtime、恢复对话，再给新连接授权。新标签页使用同一份 Chromium 配置。
+
+### 输入门禁
+
+`browser-gate` 位于登录代理与 Chromium 数据连接之间，是唯一承载输入的路径。已固定的 Selkies 会在每个帧上按实时令牌表判定输入权限，并且**先**安装新表**再**通告变更，因此权限收回之后发出的释放帧会被丢弃。这就是交接时按住的鼠标键此前会在整个 Agent 租约期间保持按下的原因。门禁会在 Provider 接管权限**之前**，用 Selkies 自带的 `reset_keyboard()` 与 `release_mouse_buttons()` 原语释放已按住输入，并等待上游确认这些帧。若无法证明，它会在该连接仍持有权限时关闭它，让 Selkies 走离开路径完成释放，并拒绝发放租约。
+
+不碰浏览器即可检查：
+
+```sh
+docker compose exec -T provider node --input-type=module -e '
+  const s = require("node:fs").readFileSync("/run/secrets/gate_control", "utf8").trim()
+  const r = await fetch("http://dsh-workstation-browser-gate:8082/status", {
+    headers: { Authorization: "Bearer " + s },
+  })
+  console.log(await r.json())
+'
+```
+
+只有在你持有权限时 `state` 才是 `OPEN`，交接正在证明释放期间为 `RELEASING`。`POST /handover` 只有在上游确认释放后才返回 `released: true`。[ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) 记录了顺序依据。
 
 ## 维护
 

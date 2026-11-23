@@ -162,6 +162,10 @@ func run() error {
 		// The provider's control listener. Supplied by Compose from the same
 		// derivation as everything else, so a custom subnet moves it too.
 		providerControlAddr: env("AUTH_PROVIDER_CONTROL_ADDR", "172.30.233.2:8081"),
+		// The Selkies data socket is reached through the input gate so held
+		// input can be released before authority changes hands (ADR-0005).
+		browserUpstream: env("AUTH_BROWSER_UPSTREAM", "http://dsh-workstation-browser-gate:8082"),
+		browserDirect:   env("AUTH_BROWSER_DIRECT", "http://dsh-workstation-chromium:3000"),
 		idle:                idle, absolute: absolute, maxSessions: max, hashSlots: make(chan struct{}, 2)}
 	if net.ParseIP(g.edge) == nil {
 		return errors.New("invalid AUTH_EDGE_IP")

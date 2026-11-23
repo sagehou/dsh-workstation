@@ -147,13 +147,31 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 | To | Open or choose |
 | --- | --- |
 | Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
-| Let an Agent use a tab | Open `/_auth/control`, select a live DSH session, and grant a lease for up to 120 seconds. Release the mouse buttons and keys first. The first grant creates a tab, and later grants reuse the tab for that live session. |
+| Let an Agent use a tab | Open `/_auth/control`, select a live DSH session, and grant a lease for up to 120 seconds. The first grant creates a tab, and later grants reuse the tab for that live session. The `browser-gate` service releases any mouse button or key you are still holding before authority moves; if that release cannot be proven, the grant is refused and the browser stays with you. |
 | Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
 | Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate the Provider. An empty list leaves browsing to the operator. |
 
 The Agent gets the current generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. The allowlist limits those tools and the page text they return. Chromium still handles scripts and redirects normally, and tabs share cookies. Use trusted origins.
 
 For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
+
+### The input gate
+
+`browser-gate` sits between the login proxy and the Chromium data socket, and it is the only path that carries input. The pinned Selkies decides input authority per frame against its live token table and installs a new table *before* announcing the change, so a release frame sent after a revocation is dropped. That is why a mouse button held at handoff used to stay down for the whole Agent lease. The gate releases held input with Selkies' own `reset_keyboard()` and `release_mouse_buttons()` primitives *before* the Provider takes authority, and waits for the upstream to acknowledge the frames. If it cannot, it closes that socket while it still holds authority so Selkies releases on the departure path, and the lease is refused.
+
+Check it without touching the browser:
+
+```sh
+docker compose exec -T provider node --input-type=module -e '
+  const s = require("node:fs").readFileSync("/run/secrets/gate_control", "utf8").trim()
+  const r = await fetch("http://dsh-workstation-browser-gate:8082/status", {
+    headers: { Authorization: "Bearer " + s },
+  })
+  console.log(await r.json())
+'
+```
+
+`state` is `OPEN` only while you hold authority, and `RELEASING` while a handover is proving its release. A `POST /handover` returns `released: true` only after the upstream acknowledged the release. [ADR-0005](../adr/0005-release-held-input-at-selkies.md) records the ordering evidence.
 
 ## Maintain
 

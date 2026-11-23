@@ -4,7 +4,7 @@
 
 [Issue #1](https://github.com/sagehou/dsh-workstation/issues/1) · [M0 决策](M0-evidence.zh-CN.md) · [已批准的实验设计](M0-design.zh-CN.md)
 
-**门槛 C 仍未通过。** 实验验证了 Agent 租约和接管排空，但交接前已按住的鼠标键没有释放。
+**门槛 C 在本次实验中失败，现已由 [ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) 补齐。** 实验验证了 Agent 租约和接管排空，但交接前已按住的鼠标键没有释放。原因是固定版本 Selkies 的顺序性质，而不是客户端缺口；释放路径见下文。
 
 ## 实验拓扑
 
@@ -67,9 +67,21 @@ DSH 调度器会串行执行未声明并发安全的工具。最终驱动保持�
 AssertionError [ERR_ASSERTION]: Gate C BLOCKED: a mouse button held before grant was not released by the live Selkies token update
 ```
 
+## 按住鼠标为何失败
+
+释放不能在权限收回之后发出，本次实验从服务端视角记录了原因。
+
+- 输入权限按每个输入帧对实时令牌表判定（`websockets_mode.py:6235`）。
+- `provision_tokens()` **先**安装新表、再由 `reconcile_clients()` 宣布变更（`:8071-8072`、`:8356`）。
+- `reconcile_clients()` 推送 `MK_ACCESS,0`，但从不调用 `_release_held_input()`。该原语存在，只在 socket 拆除与重连宽限期结束时运行（`:6287`、`:6303`）。
+
+因此，那条能释放已按住鼠标键的帧，会被门禁赖以工作的同一条规则丢弃；而客户端得知变更时，已经无法再对它采取动作。上游没有任何设置暴露「权限丢失即释放」；即使给 `reconcile_clients()` 打补丁，它仍然在令牌表安装之后运行。
+
 ## 决策
 
-给 Agent 授权前，需停止并释放已进入浏览器的人工输入，再确认释放完成。固定版本的 Selkies 在在线连接上同步令牌权限，在断开路径释放按住的设备。实验没有使用输入代理或界面开关。[令牌同步逻辑](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L8297) · [释放已按住的输入](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L3103)
+给 Agent 授权前，需停止并释放已进入浏览器的人工输入，再**确认**释放完成。本次实验没有使用输入代理或界面开关，它记录的缺口由一个位于数据连接之前的服务端 WebSocket 对端补齐。[ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) · [令牌同步逻辑](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L8297) · [释放已按住的输入](https://github.com/selkies-project/selkies/blob/d6b9351421bd503ffa89bdee78e2bce758b1ffe5/src/selkies/websockets_mode.py#L3103)
+
+门禁用上游自己的原语（`kr`、`m2,0,0,0,0,<seq>`）释放，顺序上先于 Provider 切换令牌表，并用同一连接上的 PING/PONG 屏障证明派发。实测结果见 [M1](M1.zh-CN.md)。
 
 - 实验使用**单个 Provider**、固定 Docker 拓扑和 WebSocket Selkies，仅使用键盘和鼠标，禁用文件传输。可信 ACP 驱动提供每会话凭据。
 - 实验不覆盖 Web Profile 会话绑定、租约下的官方 Playwright MCP Browser Use、网络分区及宿主机断电。
