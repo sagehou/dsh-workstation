@@ -52,11 +52,17 @@ The release therefore has to happen **while the socket still holds authority**, 
 
    A pointer echo would *not* have worked as the barrier, which is worth recording because it looks like it should: the echo is suppressed when the pointer is already drawn at the new position (`input_handler.py:2013-2016`), and a zero-delta release leaves the pointer exactly where it was — so the echo is silent in precisely the held-drag case the barrier exists for.
 
+   The barrier proves *dispatch on this connection*, not authorisation, and the difference is load-bearing. On a socket that has already lost authority the release frames are dropped at `:6235` while the PING behind them is still answered inline, so a handover there would confirm a release that never happened. A handover is therefore refused unless the socket currently holds authority, or provably never held any: a connection the gate forwarded nothing for cannot have left anything down.
+
+   A release that cannot be proven is remembered as unproven rather than treated as done. The desktop's held state is global, so a page having reconnected says nothing about a press the gate failed to clear; the refusal persists until some later handover actually proves a release. In practice the page reconnects on its own, Selkies re-grants from the unchanged token table, and that handover proves it.
+
 4. **It closes operator input at that same instant, not when `MK_ACCESS,0` arrives.** Between the release and the table flip, upstream still accepts the operator's frames. If a new press landed in that window it would be stranded by the flip. The gate therefore stops forwarding operator input as soon as it starts releasing, so the interval contains no client frames at all, and `MK_ACCESS,0` arriving later is confirmation rather than the trigger.
 
 5. **`MK_ACCESS,1` reopens input.** Hand-back is the reverse transition and needs no release: the gate has been holding input closed, so nothing was held when the Agent stopped. It reopens only on that explicit verdict, so a grant that arrives while a release is still outstanding is refused.
 
-   If the release barrier times out, the gate does not fail open and does not report success. It closes the operator's upstream socket **while that socket still holds authority**, which makes Selkies run its own `_release_held_input()` on the departure path (`:6303`), and reports the handover as refused so the Provider does not issue the lease.
+   If the release barrier times out, the gate does not fail open and does not report success. It closes the operator's upstream socket **while that socket still holds authority**, which makes Selkies run its own `_release_held_input()` on the departure path (`:6303`), and reports the handover as refused so the Provider does not issue the lease. That departure release is expected but unproven, which is why the refusal outlives the socket.
+
+6. **It forwards the operator's handshake untouched.** Selkies authorises the socket itself, from the session token in the `selkies.token.<base64url>` subprotocol, and checks the `Origin` against the `Host` it receives (`stream_server.py:2408-2442`). The gate passes `Host`, `Origin` and the subprotocol through unchanged, so it is never the authority; rewriting any of them would make Selkies reject the operator's own page.
 
 6. **Fail closed.** Lease expiry, Provider crash, upstream disconnect, gate crash, a malformed frame, or a release that never clears its barrier all end as *input not forwarded*. The gate forwards operator input only when it holds a current `MK_ACCESS,1` and is not mid-release.
 
@@ -89,7 +95,8 @@ Provider `input(true)` becomes `POST /handover` **then** the revoking token tabl
 
 ## Unverified
 
-- The gate has not yet been run against a live Selkies instance; this ADR records the traced gap and the chosen design, not a measured result.
+- The gate has run only against a fake upstream that reproduces the traced ordering, not against a live Selkies instance. The fake answers PING inline and drops input frames without authority because the traced code does; that is a model of the pinned source, not the source itself.
 - The PING/PONG barrier is argued from the pinned source, not measured. The argument depends on the read loop awaiting each input dispatch before reading the next frame; if that changes, the barrier weakens and must be re-examined rather than assumed.
+- The full transition matrix on a real host (HUMAN→AGENT, AGENT→HUMAN, lease expiry, client disconnect, Chromium restart, concurrent input during handoff, Provider abnormal exit) has not been run. It is the gate's acceptance test, not a follow-up.
 - Only keyboard and mouse are in scope; file transfer, clipboard, gamepad, microphone and webcam are already disabled in Compose. The emitter and the scroller (`co`, `cmd`, `sf`, `sfe`) ride the same authority gate but are not released by `kr` or a pointer mask, so they are dropped while input is closed instead.
 - Whether releasing on authority loss has any effect on a client that is legitimately still a controller on another display is unexamined; this deployment uses one display.
