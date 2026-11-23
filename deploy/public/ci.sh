@@ -154,20 +154,36 @@ expect_status 401 --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://workstation.test/browser/api/websockets
 expect_status 404 -X POST https://workstation.test/browser/api/tokens
 echo 'TLS and ForwardAuth: HTTP redirects to HTTPS, documents to login, unauthenticated API/WebSocket denied, Selkies token API unrouted'
-# The edge reaches DSH over verified internal TLS. Plain HTTP on the same port
-# must fail, and the HTTPS chain must verify against the pinned Runtime CA.
+# The edge reaches DSH over verified internal TLS. DSH binds the concrete
+# container IPv4 (DSH_BIND_IP), not loopback, so probe that address. Plain HTTP
+# on the same port must fail, and the HTTPS chain must verify against the pinned
+# Runtime CA.
 compose exec -T runtime node --input-type=module -e '
   import assert from "node:assert/strict"
   import { readFileSync } from "node:fs"
   import { request } from "node:https"
+  const bind = process.env.DSH_BIND_IP
+  const port = Number(process.env.DSH_BIND_PORT ?? 3080)
+  assert.match(bind ?? "", /^\d+\.\d+\.\d+\.\d+$/, "DSH_BIND_IP must be a concrete IPv4 address")
   const ca = readFileSync("/run/secrets/runtime_ca")
-  await assert.rejects(fetch("http://127.0.0.1:3080/", { signal: AbortSignal.timeout(4000) }), "plain HTTP reached the DSH listener")
+
+  // A plaintext request must not be served. A refused connection or a TLS
+  // handshake error both count as refusal; what must not happen is a plain HTTP
+  // response, so record any answer and assert on it below.
+  let plaintext = null
+  try {
+    const response = await fetch(`http://${bind}:${port}/`, { redirect: "manual", signal: AbortSignal.timeout(4000) })
+    await response.body?.cancel()
+    plaintext = `HTTP ${response.status}`
+  } catch {}
+  assert.equal(plaintext, null, `plaintext HTTP was answered with ${plaintext} on the DSH listener`)
+
   const status = await new Promise((resolve, reject) => {
-    request({ host: "127.0.0.1", port: 3080, path: "/", ca }, response => { response.resume(); resolve(response.statusCode) })
+    request({ host: bind, port, path: "/", ca }, response => { response.resume(); resolve(response.statusCode) })
       .on("error", reject).end()
   })
   assert.equal(status, 401, "DSH must challenge unauthenticated requests over internal TLS")
-  console.log("DSH serves HTTPS with the pinned Runtime CA and refuses plaintext on the workstation network")
+  console.log(`DSH serves HTTPS with the pinned Runtime CA on ${bind}:${port} and does not answer plaintext`)
 '
 node deploy/public/edge-probe.mjs "$traefik_version" "$edge_dir/cert.pem" workstation.test:443
 check() {
