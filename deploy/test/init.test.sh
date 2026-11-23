@@ -162,6 +162,16 @@ pass 'without --release the four images are recorded as local build tags'
 
 # An unpublished image must stop the initializer instead of falling back to a
 # tag: that fallback is the mutable reference this whole mechanism removes.
+#
+# The tracked matrix records real digests once a release has happened, so the
+# unpublished state is constructed here. Reading the checked-in file would make
+# this case depend on whether a release had run.
+cp -- deploy/public/images.env "$work/images-matrix-backup"
+for name in runtime auth provider browser-gate; do
+  awk -v name="$name" '$1 == name { printf "%s %s\n", name, $2; next } { print }' \
+    deploy/public/images.env > deploy/public/images.env.tmp
+  mv deploy/public/images.env.tmp deploy/public/images.env
+done
 run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik --release
 (( status != 0 )) || fail '--release accepted an unpublished image'

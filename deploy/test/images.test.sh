@@ -39,6 +39,12 @@ check 'lists four images' 'runtime auth provider browser-gate' "$(bash "$resolve
 check 'local runtime tag' 'runtime=dsh-workstation-runtime:0.2.0' "$(bash "$resolver" --local runtime)"
 
 # An unpublished version is refused, and nothing is printed on stdout.
+#
+# The tracked matrix may already record real digests once the first release has
+# happened, so the unpublished state is constructed here rather than assumed.
+# Reading the checked-in file would make this test pass or fail depending on
+# whether a release had run -- which is exactly how the first release broke it.
+printf 'runtime 0.2.0\n' > "$matrix"
 set +e
 out="$(bash "$resolver" runtime 2>/dev/null)"; status=$?
 set -e
@@ -46,6 +52,7 @@ check_status 'unpublished image exits non-zero' 1 "$status"
 check 'unpublished image prints no reference' '' "$out"
 
 # The same holds for JSON, which would otherwise be valid but empty.
+printf 'runtime 0.2.0\n' > "$matrix"
 set +e
 bash "$resolver" --json >/dev/null 2>&1; status=$?
 set -e
