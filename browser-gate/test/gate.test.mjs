@@ -147,3 +147,53 @@ test('a resume before the grant leaves input closed until the grant arrives', ()
   assert.equal(gate.grant(), true)
   assert.equal(gate.state, OPEN)
 })
+
+test('the release flag distinguishes a proven release from an abandoned one', () => {
+  const gate = new InputGate()
+  gate.grant()
+  gate.beginHandover()
+  // An abandoned handover records the absence of proof, not a proof.
+  gate.abandon()
+  assert.equal(gate.released, false, 'an abandoned handover claimed a release')
+  assert.equal(gate.state, CLOSED)
+  assert.deepEqual(gate.fromOperator('kd,97'), [], 'an abandoned handover left input open')
+
+  // A later proven handover clears it. Permission was withdrawn by the first
+  // handover, so the handback has to be explicit before a grant can open input.
+  gate.resume()
+  assert.equal(gate.grant(), true)
+  gate.beginHandover()
+  gate.handoverComplete()
+  assert.equal(gate.released, true)
+  assert.equal(gate.everGranted, true)
+})
+
+test('a new authority epoch is releasable again', () => {
+  const gate = new InputGate()
+  gate.grant()
+  gate.beginHandover()
+  gate.handoverComplete()
+  assert.equal(gate.released, true)
+  // Handing control back and out again must not leave the gate thinking this
+  // epoch was already released.
+  gate.resume()
+  assert.equal(gate.grant(), true)
+  assert.equal(gate.released, false, 'a fresh grant inherited the previous release')
+})
+
+test('a connection that never held authority reports no release to prove', () => {
+  const gate = new InputGate()
+  assert.equal(gate.everGranted, false)
+  assert.equal(gate.authority, false)
+  // Nothing was forwarded, so nothing can be held on this connection's behalf.
+  assert.deepEqual(gate.status().keys, [])
+  assert.equal(gate.status().buttons, 0)
+})
+
+test('revocation reports whether input was actually being forwarded', () => {
+  const gate = new InputGate()
+  assert.equal(gate.revoke(), false, 'a closed gate reported a forwarding revocation')
+  gate.grant()
+  assert.equal(gate.revoke(), true, 'a revocation while forwarding went unreported')
+  assert.equal(gate.everGranted, true, 'the connection forgot it once held authority')
+})

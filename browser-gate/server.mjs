@@ -92,13 +92,24 @@ function barrier (socket, timeout) {
   })
 }
 
+// Set when a handover could not be proven. Cleared only by a handover that
+// succeeds, because the desktop's held state is global: a press the gate could
+// not clear may still be down, and a new connection having nothing of its own
+// to release says nothing about that.
+let unproven = null
+
 // Close the operator's upstream socket while it still holds authority, so
 // Selkies runs its own departure release (_release_held_input) instead of
 // leaving the desktop mid-press.
+//
+// This is deliberately not recorded as a release. The departure path is
+// expected to release, but the gate cannot prove it did, and the whole point of
+// the barrier is that a release is reported only when it is proven.
 function abandonUpstream (reason) {
+  unproven = reason
   const current = link
   if (!current) return
-  current.gate.handoverComplete()
+  current.gate.abandon()
   try {
     // 1000 rather than a cut: the departure path releases held input on any
     // close that is not the reconnect-grace case.
@@ -107,15 +118,55 @@ function abandonUpstream (reason) {
   log({ type: 'abandoned_upstream', reason })
 }
 
-async function handover () {
+// One handover at a time. Two concurrent calls would both pass the `released`
+// check before either finished, sending the release twice and interleaving two
+// barriers on one socket.
+let handoverChain = Promise.resolve()
+
+function handover () {
+  // Serialise: the release, the barrier and the state update are one critical
+  // section, and two overlapping calls on one socket would send it twice.
+  const run = handoverChain.then(handoverStep, handoverStep)
+  handoverChain = run.catch(() => {})
+  return run
+}
+
+async function handoverStep () {
   const current = link
   if (!current) {
-    // Nothing is connected, so nothing can be held.
+    // An unproven release leaves the desktop's held state unknown, so it must
+    // not be reported as clear just because no page is currently attached.
+    if (unproven) {
+      throw new Error('a previous handover could not be proven: ' + unproven)
+    }
+    // Nothing is connected, so nothing is currently held.
     return { released: true, frames: 0, barrierMs: 0, note: 'no operator connection' }
   }
   if (current.upstream.readyState !== WebSocket.OPEN) {
     // Cannot prove a release; do not claim one.
     throw new Error('operator upstream socket is not open')
+  }
+  // A retried handover on a connection that already released must not send the
+  // frames again: authority is gone by then, so upstream would drop them and a
+  // second "released" would be a claim the gate cannot support.
+  if (current.gate.released) {
+    return { released: true, frames: 0, barrierMs: 0, note: 'already released' }
+  }
+  // The barrier proves *dispatch on this connection*, not authorisation. A
+  // socket that has lost authority would have its release frames dropped at
+  // websockets_mode.py:6235 while the PING behind them is still answered
+  // inline -- so a "released" there would be exactly the false claim the
+  // barrier exists to prevent.
+  //
+  // A connection that never held authority is different and safe to report:
+  // the gate forwarded no input, so this connection left nothing down. It is
+  // the handed-over-then-revoked case that is dangerous, and only that is
+  // refused.
+  if (!current.gate.authority) {
+    if (current.gate.everGranted) {
+      throw new Error('authority was already revoked, so held input cannot be released through this socket')
+    }
+    return { released: true, frames: 0, barrierMs: 0, note: 'this connection never held input authority' }
   }
   const frames = current.gate.beginHandover()
   // Input closed before the release is written, so no operator frame can be
@@ -134,6 +185,8 @@ async function handover () {
   // refuse the next grant forever; CLOSED is the same closed direction without
   // the permanent lockout.
   current.gate.handoverComplete()
+  // The desktop is now proven clear, so the unproven mark is lifted.
+  unproven = null
   return { released: true, frames: frames.length, barrierMs }
 }
 
@@ -160,6 +213,13 @@ function attach (operator, request) {
   const upstream = new WebSocket(upstreamURL, offered, { headers })
   const gate = new InputGate()
   const current = { operator, upstream, gate, opened: false }
+  // Frames the page sends before the upstream handshake completes. The page
+  // sends SETTINGS the moment its socket opens, which can beat the gate's own
+  // upstream connection; `ws.send()` throws while CONNECTING, and letting that
+  // reach shutdown() killed the session about to start. Buffering is safe
+  // because only non-input verbs can be queued: input is gated on authority,
+  // and authority cannot arrive before the upstream is open.
+  const pending = []
   // A replacement connection supersedes the old one; the old one is closed so
   // two sockets never both carry authority.
   if (link && link !== current) {
@@ -175,6 +235,10 @@ function attach (operator, request) {
 
   upstream.on('open', () => {
     current.opened = true
+    // Replay in order, so the handshake a page sends first is upstream's first.
+    for (const frame of pending.splice(0)) {
+      try { upstream.send(frame) } catch { shutdown('upstream send failed after open'); return }
+    }
     log({ type: 'upstream_open' })
   })
 
@@ -209,7 +273,16 @@ function attach (operator, request) {
       return
     }
     for (const frame of gate.fromOperator(data.toString())) {
-      try { upstream.send(frame) } catch { shutdown('upstream send failed') }
+      if (upstream.readyState === WebSocket.OPEN) {
+        try { upstream.send(frame) } catch { shutdown('upstream send failed') }
+      } else if (upstream.readyState === WebSocket.CONNECTING) {
+        // Queue rather than fail: a handshake that arrives before the upstream
+        // is established is normal, and dropping the session over it was a real
+        // intermittent video failure.
+        pending.push(frame)
+      } else {
+        shutdown('upstream is not open')
+      }
     }
   })
 

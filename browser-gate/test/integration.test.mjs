@@ -334,11 +334,38 @@ test('a release that cannot be proven is refused and closes input', async () => 
   operator.close()
 }, { concurrency: false })
 
-test('handover with no operator connection is reported as nothing to release', async () => {
-  const handover = await call('/handover')
-  assert.equal(handover.status, 200)
-  assert.equal(handover.body.released, true)
-  assert.equal(handover.body.note, 'no operator connection')
+test('an unproven release stays closed until a later handover proves the desktop clear', async () => {
+  // A barrier timeout cannot be waved away by reconnecting: a new connection
+  // having nothing of its own to release says nothing about the press the gate
+  // failed to clear, so /handover keeps refusing while nothing is attached.
+  const operator = await humanHoldingInput()
+  session.autoPong = false
+  assert.notEqual((await call('/handover')).status, 200)
+  operator.close()
+  await waitFor(async () => (await call('/status')).body.connected === false,
+    'the operator connection did not go away')
+  const refused = await call('/handover')
+  assert.notEqual(refused.status, 200, 'an unproven release was forgotten when the page reconnected')
+  assert.equal(refused.body.released, false)
+
+  // The recovery path is a real handover that proves the release. Reconnecting
+  // is what the page does by itself after the socket drop, and Selkies still
+  // grants because the token table never changed.
+  session.autoPong = true
+  const recovered = await humanHoldingInput()
+  const proven = await call('/handover')
+  assert.equal(proven.status, 200, JSON.stringify(proven.body))
+  assert.equal(proven.body.released, true)
+  assert.deepEqual(desktop.held(), { keys: [], buttons: 0 })
+
+  // With the desktop proven clear, the no-connection case is truthful again.
+  recovered.close()
+  await waitFor(async () => (await call('/status')).body.connected === false,
+    'the recovered operator connection did not go away')
+  const idle = await call('/handover')
+  assert.equal(idle.status, 200, JSON.stringify(idle.body))
+  assert.equal(idle.body.released, true)
+  assert.equal(idle.body.note, 'no operator connection')
 }, { concurrency: false })
 
 test('the control API rejects an unauthenticated handover', async () => {
@@ -413,5 +440,74 @@ test('the operator handshake is forwarded intact, so Selkies still authorises it
     // http.close() waits for open upgraded sockets, so destroy them first.
     upgraded.forEach(socket => socket.destroy())
     http.close()
+  }
+}, { concurrency: false })
+
+test('a page that sends its handshake before the gate reaches upstream is not dropped', async () => {
+  // This is the intermittent failure the first live CI run exposed: the page
+  // sends SETTINGS the instant its socket opens, which can beat the gate's own
+  // upstream connection. `ws.send()` throws while CONNECTING, and treating that
+  // as fatal closed a session about to start.
+  //
+  // Delay the fake Selkies' upgrade so the order is guaranteed rather than
+  // probabilistic.
+  const held = []
+  const slow = new WebSocketServer({ noServer: true })
+  const slowHTTP = createServer()
+  const sockets = new Set()
+  slowHTTP.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+  slowHTTP.on('upgrade', (req, socket, head) => {
+    // Hold the upgrade until after the operator has sent its first frame.
+    held.push(() => slow.handleUpgrade(req, socket, head, ws => {
+      const received = []
+      ws.on('message', data => {
+        if (data.toString() === 'SETTINGS,{"displayId":"primary"}') ws.send('MK_ACCESS,1')
+      })
+      ws.on('ping', () => ws.pong())
+    }))
+  })
+  await new Promise(resolve => slowHTTP.listen(PROBE_UPSTREAM_PORT + 1, '127.0.0.1', resolve))
+
+  const env = {
+    ...process.env,
+    GATE_ADDR: `127.0.0.1:${PROBE_GATE_PORT + 1}`,
+    GATE_UPSTREAM: `ws://127.0.0.1:${PROBE_UPSTREAM_PORT + 1}/browser/api/websockets`,
+    GATE_CONTROL_SECRET: join(dir, 'gate-control'),
+  }
+  const gate = spawn(process.execPath, [join(import.meta.dirname, '..', 'server.mjs')], { stdio: 'ignore', env })
+  try {
+    await waitFor(async () => {
+      const response = await fetch(`http://127.0.0.1:${PROBE_GATE_PORT + 1}/health`).catch(() => null)
+      return response?.status === 204
+    }, 'the slow gate did not start')
+
+    const operator = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${PROBE_GATE_PORT + 1}/browser/api/websockets`, ['selkies'])
+      ws.once('open', () => resolve(ws))
+      ws.once('error', reject)
+    })
+    // Send immediately, before the upstream is allowed to complete.
+    operator.send('SETTINGS,{"displayId":"primary"}')
+    let closed = false
+    operator.on('close', () => { closed = true })
+    await new Promise(resolve => setTimeout(resolve, 200))
+    assert.equal(closed, false, 'the gate dropped the session because the page spoke first')
+
+    // Now let the upstream handshake complete; the queued frame must arrive.
+    await waitFor(() => held.length > 0, 'the gate never reached upstream')
+    for (const accept of held.splice(0)) accept()
+    await waitFor(async () => {
+      const status = await fetch(`http://127.0.0.1:${PROBE_GATE_PORT + 1}/status`, {
+        headers: { Authorization: 'Bearer ' + control },
+      })
+      return (await status.json()).authority === true
+    }, 'the queued SETTINGS never reached the upstream, so no grant came back')
+    assert.equal(closed, false, 'the session was closed after the upstream opened')
+    operator.close()
+  } finally {
+    gate.kill('SIGKILL')
+    slow.clients?.forEach(ws => ws.terminate())
+    sockets.forEach(socket => socket.destroy())
+    slowHTTP.close()
   }
 }, { concurrency: false })

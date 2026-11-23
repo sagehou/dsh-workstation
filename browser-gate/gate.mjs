@@ -51,6 +51,14 @@ export class InputGate {
     // The control plane has not withdrawn the operator's permission. True at
     // startup: the first MK_ACCESS,1 of a fresh session should simply work.
     this.permitted = true
+    // Selkies has granted this connection authority at some point. Distinct
+    // from `authority`: a connection that was never granted cannot be holding
+    // anything the gate needs to release, whereas one that lost authority
+    // *outside* a handover is holding state the gate can no longer release.
+    this.everGranted = false
+    // A handover on this connection has already been proven. Makes a retried
+    // /handover idempotent instead of re-sending frames upstream would drop.
+    this.released = false
     this.seq = 0
     // Not used to synthesise the release -- upstream's primitives are. Kept so
     // /status can report what the gate last forwarded, which is what the
@@ -69,6 +77,12 @@ export class InputGate {
   grant () {
     if (this.state === RELEASING) return false
     this.authority = true
+    this.everGranted = true
+    // A fresh grant begins a new authority epoch, so a release proven in an
+    // earlier one must not make this one look already released. Authority
+    // returning mid-handover is refused above, so this cannot clobber an
+    // outstanding release.
+    this.released = false
     this.state = this.permitted ? OPEN : CLOSED
     return this.state === OPEN
   }
@@ -77,11 +91,19 @@ export class InputGate {
   // possible from here -- the frames would be dropped -- which is exactly why
   // the release is ordered before the revocation.
   revoke () {
+    const wasForwarding = this.state === OPEN
     this.authority = false
     this.state = CLOSED
     this.keys.clear()
     this.buttons = 0
-    return true
+    return wasForwarding
+  }
+
+  // Whether a release can still be proven on this connection. Once authority is
+  // gone, the very frames that would release are what upstream drops, so a
+  // handover must be refused rather than reported as a release.
+  get releasable () {
+    return this.authority && !this.released
   }
 
   // Begin a handover. Returns the frames to send upstream, in order, while the
@@ -109,6 +131,16 @@ export class InputGate {
   handoverComplete () {
     this.state = CLOSED
     this.authority = false
+    this.released = true
+  }
+
+  // The release could not be proven and the socket is being closed instead.
+  // Distinct from handoverComplete(): that records a proof, this records the
+  // absence of one, so /handover keeps refusing until a later handover succeeds.
+  abandon () {
+    this.state = CLOSED
+    this.authority = false
+    this.released = false
   }
 
   // The control plane says the operator may drive again. Input still needs
@@ -168,6 +200,8 @@ export class InputGate {
       state: this.state,
       authority: this.authority,
       permitted: this.permitted,
+      everGranted: this.everGranted,
+      released: this.released,
       keys: [...this.keys],
       buttons: this.buttons,
       seq: this.seq,
