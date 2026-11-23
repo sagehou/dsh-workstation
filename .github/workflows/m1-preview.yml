@@ -44,13 +44,15 @@ jobs:
       - name: Test subnet derivation and the overlap preflight
         run: bash deploy/test/network.test.sh
       - name: Test repeatable initialization and PKI consistency
+        # The initializer refuses to run as root, and GitHub-hosted runners
+        # already run as an unprivileged user, so no staging is needed. Fail
+        # loudly instead of silently skipping if that ever stops being true.
         run: |
-          # useradd and chown need root; the runner user is not.
-          sudo useradd --create-home --uid 2000 runner-init
-          sudo install -d -o runner-init -g runner-init /tmp/init-work
-          cp -a . /tmp/init-work/src
-          sudo chown -R runner-init:runner-init /tmp/init-work/src
-          sudo su runner-init -c 'cd /tmp/init-work/src && bash deploy/test/init.test.sh'
+          if [[ $(id -u) == 0 ]]; then
+            echo 'this job must run as a non-root user to exercise init.sh' >&2
+            exit 1
+          fi
+          bash deploy/test/init.test.sh
 
   preview:
     runs-on: ubuntu-24.04

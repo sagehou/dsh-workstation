@@ -61,14 +61,10 @@ jobs:
         # required to be non-root for the other jobs.
         run: |
           if [[ $(id -u) == 0 ]]; then
-            useradd --create-home --uid 1000 runner-init
-            install -d -o runner-init -g runner-init /tmp/init-work
-            cp -a . /tmp/init-work/src
-            chown -R runner-init:runner-init /tmp/init-work/src
-            su runner-init -c 'cd /tmp/init-work/src && bash deploy/test/init.test.sh'
-          else
-            bash deploy/test/init.test.sh
+            echo 'this job must run as a non-root user to exercise init.sh' >&2
+            exit 1
           fi
+          bash deploy/test/init.test.sh
 
   public-compose:
     needs: matrix
