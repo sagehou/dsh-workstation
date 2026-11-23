@@ -55,3 +55,13 @@ Build a Docker Compose workstation around the **official DeepSeek Harness (DSH) 
 - Commands, observed results, and acceptance items passed or failed.
 - Remaining risks and the next blocking decision.
 - Commit, PR, and Issue links when available.
+
+
+## Issue and progress management (required)
+
+- Before implementation, inspect open Issues and the approved specification/roadmap. Every independently deliverable phase or blocking item must have a GitHub Issue before coding starts; do not leave phase planning only in chat or a local TODO list.
+- Keep one parent tracking Issue for the current milestone. Create child Issues with scope, dependencies, concrete checkboxes, acceptance criteria, and links to the parent/spec. Avoid duplicate Issues by searching first.
+- Every PR must reference its Issue with `Closes #N` or `Refs #N`. A PR merge alone does not prove the Issue acceptance criteria passed; close an Issue only after checking the evidence.
+- At the start of each task, comment on the Issue with the intended scope. During work, update checkboxes and post material progress/blockers. On completion, report exact versions, commands, CI run links, observed results, remaining risks, and commit/PR links.
+- Keep status truthful: planned, in progress, blocked, verified, or done. CI on a different dependency version is not target-environment verification. Record compatibility matrices and deployment-host evidence separately.
+- Before handing work to a coding agent, provide the Issue number, dependencies, acceptance criteria, test commands, and required progress-report cadence. The agent must not silently skip Issue creation or progress updates.
