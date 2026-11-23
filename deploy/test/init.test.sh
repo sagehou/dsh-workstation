@@ -140,4 +140,61 @@ run env WORKSTATION_STATE="$fresh" WORKSTATION_TRAEFIK_RESOLVER='' \
 [[ ! -e $fresh ]] || fail 'init created the state directory before the preflight passed'
 pass 'a conflict fails before the state directory exists'
 
-printf 'init OK: repeatability, SAN derivation, subnet-change refusal, reissue and preflight ordering\n'
+# --- 6. image references: local by default, digest-pinned with --release ---
+#
+# The two modes write the same four keys, so a deployment cannot end up with a
+# mixture, and re-running with the other mode must replace them rather than
+# append a second copy that Compose would resolve inconsistently.
+workdir="$(scenario images)"
+cd "$workdir"
+images_state="$work/images-state"
+digest=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
+  bash deploy/public/init.sh "$domain" proxy traefik
+(( status == 0 )) || fail "the local-build init failed: $out"
+grep -Fxq 'WORKSTATION_RUNTIME_IMAGE=dsh-workstation-runtime:0.2.0' .env.public ||
+  fail 'the default mode did not record the local runtime tag'
+grep -Fxq 'WORKSTATION_GATE_IMAGE=dsh-workstation-browser-gate:0.1.0' .env.public ||
+  fail 'the default mode did not record the local gate tag'
+grep -q '@sha256:' .env.public && fail 'the default mode wrote a digest reference'
+pass 'without --release the four images are recorded as local build tags'
+
+# An unpublished image must stop the initializer instead of falling back to a
+# tag: that fallback is the mutable reference this whole mechanism removes.
+run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
+  bash deploy/public/init.sh "$domain" proxy traefik --release
+(( status != 0 )) || fail '--release accepted an unpublished image'
+grep -q 'is not published yet' <<<"$out" || fail "--release did not explain the missing digest: $out"
+grep -Fxq 'WORKSTATION_RUNTIME_IMAGE=dsh-workstation-runtime:0.2.0' .env.public ||
+  fail 'a failed --release run damaged the existing image keys'
+pass '--release refuses an unpublished image and leaves the recorded keys intact'
+
+# With digests recorded, every reference is registry-qualified and pinned.
+for name in runtime auth provider browser-gate; do
+  awk -v name="$name" -v digest="$digest" '
+    $1 == name { printf "%s %s %s\n", name, $2, digest; next } { print }
+  ' deploy/public/images.env > deploy/public/images.env.tmp
+  mv deploy/public/images.env.tmp deploy/public/images.env
+done
+run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
+  bash deploy/public/init.sh "$domain" proxy traefik --release
+(( status == 0 )) || fail "the release init failed: $out"
+for key in WORKSTATION_RUNTIME_IMAGE WORKSTATION_AUTH_IMAGE WORKSTATION_PROVIDER_IMAGE WORKSTATION_GATE_IMAGE; do
+  line="$(grep "^$key=" .env.public)"
+  [[ $line == *'ghcr.io/sagehou/'*'@'$digest ]] || fail "$key is not a pinned GHCR reference: $line"
+  count="$(grep -c "^$key=" .env.public || true)"
+  [[ $count == 1 ]] || fail ".env.public has $count $key lines after switching modes"
+done
+pass '--release writes four digest-pinned references and replaces the local tags'
+
+# Switching back must replace them again, not append.
+run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
+  bash deploy/public/init.sh "$domain" proxy traefik
+(( status == 0 )) || fail "the mode switch back failed: $out"
+count="$(grep -c '^WORKSTATION_RUNTIME_IMAGE=' .env.public || true)"
+[[ $count == 1 ]] || fail ".env.public has $count runtime image lines after switching back"
+grep -q '@sha256:' .env.public && fail 'switching back to a local build left a digest reference'
+pass 'switching back to a local build replaces the pinned references'
+
+printf 'init OK: repeatability, SAN derivation, subnet-change refusal, reissue, preflight ordering and image references\n'

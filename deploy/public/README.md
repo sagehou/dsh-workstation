@@ -6,7 +6,8 @@ English · [简体中文](README.zh-CN.md)
 
 ## Before you start
 
-- Use a **Linux amd64** host with rootful Docker Engine 28+ and Compose v2. Use a non-root user with Docker access and an authenticated GitHub CLI.
+- Use a **Linux amd64** host with rootful Docker Engine 28+ and Compose v2. Use a non-root user with Docker access. No registry credential is needed: the workstation images are public.
+- The release publishes `linux/amd64` only. Do not run it on another architecture.
 - Point **DNS** at the Traefik host. Traefik serves public ports 80 and 443 and manages the certificates.
 - Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. You do **not** have to upgrade Traefik: CI pins and exercises `v3.7.14` and `v3.7.19` through the same full stack. [Compatibility matrix](../../docs/roadmap/public-compose.md#traefik-compatibility-matrix) records which versions have a passing run.
 - Check that neither **Docker subnet** overlaps your host routes. `bash deploy/network.sh check` does this and refuses to continue on a conflict. See [Network addresses](#network-addresses).
@@ -57,25 +58,41 @@ addresses.
 
 Run these steps in order on the deployment host, in the same shell.
 
-### 1. Load the verified images
+### 1. Check out the release and confirm the pinned images
+
+The four images this repository builds are published to GHCR as **public**
+packages, so a deployment needs no `docker login` and no credential on the host.
+
+`deploy/public/images.env` records the manifest-list digest for each image.
+`deploy/public/images.sh` resolves those digests into
+`name:version@sha256:...` references and refuses to run if a digest is missing,
+so there is no path from this file to a floating tag.
 
 ```bash
 gh repo clone sagehou/dsh-workstation && cd dsh-workstation
+release_tag='v0.2.0'
+git switch --detach "$release_tag"
 
-images_dir="$(mktemp -d)"
-release_commit='333e6f332ad054723ca32c8b9436c8109bb62ad4'
-gh run download 44688814854 --repo sagehou/dsh-workstation \
-  --name public-compose-linux-amd64 --dir "$images_dir" &&
-  test "$(cat "$images_dir/source-commit")" = "$release_commit" &&
-  git switch --detach "$release_commit" &&
-  (
-    cd "$images_dir" &&
-    sha256sum -c workstation-images-linux-amd64.sha256 &&
-    docker load -i workstation-images-linux-amd64.tar.gz
-  )
+# Print the references this release deploys. Every line must end in @sha256:.
+bash deploy/public/images.sh
 ```
 
-[Image archive](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/artifacts/14607841816)
+To satisfy yourself that a digest still names the same image, compare it
+against what the registry reports. The value must match exactly:
+
+```bash
+docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.0 \
+  --format '{{json .Manifest.Digest}}'
+```
+
+Pulling happens when Compose starts: each image is already referenced by digest
+in `.env.public` after step 2. Provenance and SBOM attestations are attached to
+those digests, so they travel with the image rather than depending on a workflow
+run staying available.
+
+> A tag without a digest is a mutable reference and is never written by the
+> initializer. If you need a one-off build from source, omit `--release` in step
+> 2 and Compose builds locally instead — the two modes are explicit.
 
 ### 2. Set the domain and Traefik values
 
@@ -88,8 +105,15 @@ traefik='traefik'
 traefik_dynamic='/srv/traefik/dynamic'
 
 WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
+
+`--release` makes the initializer resolve the published digests and write them
+into `.env.public` as `WORKSTATION_RUNTIME_IMAGE`, `WORKSTATION_AUTH_IMAGE`,
+`WORKSTATION_PROVIDER_IMAGE` and `WORKSTATION_GATE_IMAGE`. Without it, the same
+keys are written as local build tags. Either way the file names exactly what
+runs, and re-running the initializer replaces the keys rather than appending a
+second copy.
 
 #### Existing deployment
 
@@ -100,11 +124,13 @@ existing certificate valid and only records the derived keys:
 
 ```bash
 WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$domain" "$proxy" "$traefik"
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 ```
 
-Nothing is reissued and no container is recreated with a different address. If
+Nothing is reissued and no container is recreated with a different address. The
+images do change: an existing deployment that loaded a local archive switches to
+the digest-pinned GHCR references on the next `up`. If
 you *do* want different addresses, that is a migration: back up, re-run with
 `--reissue`, recreate every service, and reconnect Traefik to the (recreated)
 `dsh-workstation_workstation` and `dsh-workstation_browser` networks.
@@ -216,9 +242,31 @@ Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenan
 
 If the old hostname left a browser profile lock, confirm that the old Chromium has stopped before removing the `SingletonLock`, `SingletonSocket`, and `SingletonCookie` symlinks in `/config/chromium` on the profile volume. [Chromium profile locking](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
 
-### Refresh an expired image archive
+### Upgrading and rolling back
 
-Run **Public Compose** for the intended revision on GitHub Actions. Use the successful run ID and its `source-commit` in step 1. Each Traefik version in the matrix uploads its own artifact: the default version keeps the unsuffixed `public-compose-linux-amd64` name, and the other legs add `-<version>`. Pick one leg; the workstation images are identical across legs because only the edge proxy differs. [Workflow](../../.github/workflows/public-compose.yml)
+An upgrade is a change of digests. Back up first, then switch the references and
+recreate the affected services; Compose pulls the new digests on `up`:
+
+```bash
+git switch --detach v0.3.0
+WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
+```
+
+A rollback is the same operation with the older tag: check out `v0.2.0`, re-run
+the initializer to restore the older digests, and `up` again. Because the
+references are digests, the earlier images are still exactly what that tag
+published — an upstream tag cannot have moved under you.
+
+Runtime version rollback is separate and does not touch these images: see
+[Runtime maintenance](../README.md#upgrade-and-rollback). Image rollback and data
+rollback are different operations, and a DSH_HOME migration needs a matching
+backup.
+
+The Actions artifacts the Public Compose workflow uploads remain available for
+90 days as audit evidence of what CI ran. They are no longer the distribution
+channel. [Workflow](../../.github/workflows/public-compose.yml)
 
 ## Back up and restore
 
@@ -232,8 +280,10 @@ For an Auth backup, archive the stopped volume to a private location.
 ```bash
 docker compose --env-file .env.public stop && (
   umask 077
+  # Use the image reference the deployment itself is pinned to.
+  set -a; . ./.env.public; set +a
   docker run --rm --network none --user 0:0 --entrypoint tar \
-    -v dsh-workstation_auth-data:/data:ro dsh-workstation-provider:0.2.0 \
+    -v dsh-workstation_auth-data:/data:ro "$WORKSTATION_PROVIDER_IMAGE" \
     --numeric-owner -C /data -cf - . > auth-data.tar
 )
 ```
