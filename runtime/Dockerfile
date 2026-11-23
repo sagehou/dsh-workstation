@@ -12,11 +12,13 @@ ENV DSH_HOME=/dsh-home \
     npm_config_ignore_scripts=true
 
 COPY --chmod=0755 dsh-runtime /usr/local/bin/dsh-runtime
-# `--chmod` applies to the destination directory as well as the files when the
-# destination ends in `/`, so a 0644 here made /usr/local/lib/dsh-runtime
-# unenterable and the runtime could not find its own modules. Naming each file
-# and its full path applies the mode to the file only; COPY creates the parent
-# directory with the default 0755.
+# `--chmod` applies to implicitly-created parent directories too, not only to the
+# file. `COPY --chmod=0644 x /usr/local/lib/dsh-runtime/x` therefore created
+# /usr/local/lib/dsh-runtime at 0644, which stripped its execute bit; the
+# container runs as `node`, could not enter the directory, and exited with
+# "cannot locate compat.mjs and state.mjs". Creating the directory here, before
+# any COPY, is what keeps COPY from setting its mode.
+RUN install -d -m 0755 /usr/local/lib/dsh-runtime
 COPY --chmod=0644 web.mjs /usr/local/lib/dsh-runtime/web.mjs
 COPY --chmod=0644 compat.mjs /usr/local/lib/dsh-runtime/compat.mjs
 COPY --chmod=0644 state.mjs /usr/local/lib/dsh-runtime/state.mjs
