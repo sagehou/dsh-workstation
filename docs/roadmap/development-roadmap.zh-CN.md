@@ -23,7 +23,7 @@
 | 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Docker 子网可配置和冲突预检 | 目标主机部署前完成。固定 IP、健康检查和证书 SAN 从同一配置生成。 |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | 浏览器输入独占和安全交接 | 开放 Agent 控制共享浏览器前完成。 |
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR 镜像发布和不可变部署引用 | 宣布具备可重复的正式镜像分发前完成。 |
-| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8。#4 通过前关闭 Agent 浏览器控制；#11 通过前关闭不可信网站浏览。 |
+| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8、#9 和 #10。#4 通过前关闭 Agent 浏览器控制；#11 通过前关闭不可信网站浏览。 |
 | 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | 浏览器出口策略和 SSRF 边界 | 开放 Agent 广泛访问不可信网站前完成。 |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | DSH 原生 Browser Sidebar | 延后增强；独立页面持续可用，不阻塞首版。 |
 
