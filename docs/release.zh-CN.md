@@ -38,6 +38,10 @@
 1. 在 `deploy/public/images.env` 中为本次要变更的镜像提升版本号，并清空其摘要——摘要在发布时填入。各镜像版本独立：Runtime 镜像随 Node 或启动脚本变化，门禁镜像按自己的节奏变化。
 2. 合并该变更。
 3. 在 `main` 上运行 **Publish images**（`image: all`），或创建标签 `v<版本>`（例如 `v0.2.0`）来标记发布点。
+
+   `v*` 标签标记的是**仓库**的发布点，不是共用的镜像版本。四个镜像版本独立，因此 `v0.2.0` 标签可能发布
+   `runtime:0.2.0`、`auth:0.1.1`、`provider:0.2.0`、`browser-gate:0.1.0`。这是刻意的：强求同一个号码会让无关改动互相牵连。
+   标签的用处是标记某一组摘要来自哪个源提交，自动生成的发布说明会列出全部四个。
 4. 收到提示时批准 `ghcr-release` 环境。
 5. 下载 `published-images` artifact，用 `docker buildx imagetools inspect` 核对摘要，再提交更新后的 `deploy/public/images.env`。
 
