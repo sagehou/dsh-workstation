@@ -65,3 +65,15 @@
 - 每项工作开始时在 Issue 留言说明范围；执行中更新勾选项并同步实质进度和阻塞。完成时报告确切版本、命令、CI 运行链接、实际结果、剩余风险以及提交/PR 链接。
 - 状态必须真实：计划中、进行中、阻塞、已验证或已完成。不同依赖版本上的 CI 通过不等于目标环境验证。兼容性矩阵与实际部署主机证据应分别记录。
 - 移交 coding agent 前，必须提供 Issue 编号、依赖关系、验收标准、测试命令和进度汇报频率。Agent 不得跳过 Issue 创建或进度更新。
+
+
+## 已批准的产品基线（2026-11-23）
+
+- 遵循 [ADR-0004](docs/adr/0004-single-user-release-and-deferred-sidebar.zh-CN.md)、[产品规格](docs/SPEC.zh-CN.md)、[架构](docs/ARCHITECTURE.zh-CN.md) 和[有序开发路线图](docs/roadmap/development-roadmap.zh-CN.md)。
+- 首版严格只有一个本地管理员。该管理员可以注册多个 Passkey。不得增加多账户、邀请、角色或多人共用模式。
+- 官方 DSH 保持产品核心。不得另造 Agent Runtime、聊天/编辑器、包管理器或公共插件市场。
+- 首版浏览器界面使用已认证的独立浏览器/控制页面。原生 DSH Sidebar 延后，不得阻塞部署。
+- 浏览器独占输入交接验收通过前，不得开放 Agent 浏览器控制。独立浏览器出口控制强制实施并通过测试前，不得开放 Agent 广泛访问不可信网站。`BROWSER_TOOL_ORIGINS` 不是网络出口防火墙或完整 SSRF 防护。
+- 首版部署只支持 Linux amd64。不得宣称支持 ARM64 或多用户隔离。
+- 目标主机部署前，必须完成目标 Traefik 兼容性矩阵和 Docker 子网冲突/配置检查。
+- Runtime 指针回滚不等于数据回滚。修改持久化 Profile/插件数据前必须备份，并证明匹配数据可恢复。

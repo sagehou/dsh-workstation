@@ -81,6 +81,9 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 
 ## 使用浏览器
 
+> **首版发布门槛：** 首版正式浏览器入口是独立浏览器/控制页面。 [#4](https://github.com/sagehou/dsh-workstation/issues/4) 的已按住输入释放和独占交接验收通过前，不得在生产环境开放 Agent 浏览器控制。[#11](https://github.com/sagehou/dsh-workstation/issues/11) 的独立出口策略测试通过前，不得开放 Agent 广泛访问不可信网站。仅配置 `BROWSER_TOOL_ORIGINS` 不构成网络出口防火墙或完整 SSRF 防护。
+
+
 | 要做什么 | 在哪里操作 |
 | --- | --- |
 | 打开共享 Chromium | 从 `/_auth/browser` 打开同源的 `/browser/`，沿用工作台登录。 |
