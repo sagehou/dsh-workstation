@@ -34,8 +34,10 @@ compose_files=(-f compose.yml -f deploy/public/compose.core.yml -f deploy/public
 compose() { docker compose --env-file .env.public "${compose_files[@]}" "$@"; }
 cleanup() {
   if (( $? != 0 )); then
-    docker logs --tail=30 "$edge" 2>&1 || true
-    if [[ -f .env.public ]]; then compose logs --no-color --tail=40 auth runtime || true; fi
+    # Traefik's own view is what distinguishes "the route is wrong" from "the
+    # upstream is unreachable", and both look like a 502 from the client.
+    docker logs --tail=60 "$edge" 2>&1 || true
+    if [[ -f .env.public ]]; then compose logs --no-color --tail=60 auth runtime || true; fi
   fi
   docker rm -f "$edge" >/dev/null 2>&1 || true
   if [[ -f .env.public ]]; then compose down --volumes --remove-orphans || true; fi
