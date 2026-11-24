@@ -87,7 +87,13 @@ func (g *gateway) websocket(w http.ResponseWriter, r *http.Request) {
 	proxy := g.dshWS
 	if strings.HasPrefix(r.URL.Path, "/browser/") {
 		if strings.HasPrefix(r.URL.Path, "/browser/api/tokens") {
-			http.NotFound(w,r)
+			http.NotFound(w, r)
+			return
+		}
+		// A core deployment runs no Chromium, so there is nothing to upgrade
+		// to. Say so, rather than proxying to an address that never answers.
+		if !g.browserEnabled {
+			http.Error(w, "The browser is not part of this deployment", http.StatusServiceUnavailable)
 			return
 		}
 		// Only the data socket carries input, so only it goes through the gate.
@@ -166,6 +172,10 @@ func (g *gateway) dsh(w http.ResponseWriter, r *http.Request) {
 	unavailable(w)
 }
 func (g *gateway) openBrowser(w http.ResponseWriter, r *http.Request) {
+	if !g.browserEnabled {
+		http.Error(w, "The browser is not part of this deployment", http.StatusServiceUnavailable)
+		return
+	}
 	http.Redirect(w, r, "/browser/#token="+url.QueryEscape(g.browserToken), http.StatusSeeOther)
 }
 

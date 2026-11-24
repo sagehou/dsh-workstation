@@ -166,12 +166,18 @@ func run() error {
 		// input can be released before authority changes hands (ADR-0005).
 		browserUpstream: env("AUTH_BROWSER_UPSTREAM", "http://dsh-workstation-browser-gate:8082"),
 		browserDirect:   env("AUTH_BROWSER_DIRECT", "http://dsh-workstation-chromium:3000"),
+		// A core deployment sets this to 0: no Chromium, gate or provider is
+		// running, so /browser/ answers with a clear refusal rather than
+		// proxying to an address nothing listens on.
+		browserEnabled:      env("AUTH_BROWSER_ENABLED", "1") != "0",
 		idle:                idle, absolute: absolute, maxSessions: max, hashSlots: make(chan struct{}, 2)}
 	if net.ParseIP(g.edge) == nil {
 		return errors.New("invalid AUTH_EDGE_IP")
 	}
-	if err := g.initBrowser(); err != nil {
-		return err
+	if g.browserEnabled {
+		if err := g.initBrowser(); err != nil {
+			return err
+		}
 	}
 
 	server := func(addr string, h http.HandlerFunc) *http.Server {
