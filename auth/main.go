@@ -174,6 +174,9 @@ func run() error {
 	if net.ParseIP(g.edge) == nil {
 		return errors.New("invalid AUTH_EDGE_IP")
 	}
+	if err := g.initRuntime(); err != nil {
+		return err
+	}
 	if g.browserEnabled {
 		if err := g.initBrowser(); err != nil {
 			return err

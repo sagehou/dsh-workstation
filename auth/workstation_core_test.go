@@ -70,6 +70,32 @@ func TestCoreRefusalIsNotAProxyFailure(t *testing.T) {
 	}
 }
 
+// The DSH client is not browser state. A core deployment skips initBrowser, and
+// when dshClient lived there it was nil, so the first authenticated /_auth/dsh
+// request panicked the handler. This asserts the split: initRuntime must be what
+// supplies the DSH client, whatever the deployment shape.
+func TestDSHClientIsNotBrowserState(t *testing.T) {
+	g, _ := loginForBrowserTest(t)
+	// No initBrowser call, mirroring a core deployment.
+	if g.dshClient != nil {
+		t.Fatal("dshClient was already set; the test no longer mirrors a core start")
+	}
+	if err := g.initRuntime(); err != nil {
+		// The CI fixture has no /run/secrets/runtime_ca; reaching this error means
+		// the function ran and failed on its input rather than on a missing field.
+		t.Skipf("initRuntime needs the Runtime CA, which this fixture does not provide: %v", err)
+	}
+	if g.dshClient == nil {
+		t.Fatal("initRuntime left dshClient nil")
+	}
+	if g.dshWS == nil {
+		t.Fatal("initRuntime left dshWS nil")
+	}
+	if g.browserWS != nil || g.browserDirectWS != nil {
+		t.Fatal("initRuntime set browser proxies; those belong to initBrowser")
+	}
+}
+
 // /_auth/browser hands the operator a link to /browser/. In a core deployment
 // there is nothing behind that link, so the redirect must not be issued.
 func TestCoreDeploymentRefusesOpenBrowser(t *testing.T) {
