@@ -12,8 +12,9 @@
 //   - the password step must return 303 and must NOT set a session. A session
 //     after the password alone would mean TOTP is not a separate required
 //     factor, which AGENTS.md forbids.
-//   - DSH must answer the authenticated root with its boot marker. A 401 means
-//     the session does not work for the Runtime, which is what core must show.
+//   - /_auth/dsh must redirect to the Runtime and the exchange must carry DSH's
+//     boot marker. A bare root request 401s by design, so it would test the
+//     wrong thing; the launch path is what a sign-in actually follows.
 //   - /browser/ must be refused with 503 *while signed in*. Una authenticated
 //     requests are redirected to the login page before reaching that branch, so
 //     a 303 would prove nothing about the core refusal.
@@ -121,14 +122,21 @@ console.log('password + TOTP issued a session')
 }
 
 // --- 4. that session reaches DSH -------------------------------------------
-const dsh = await request('/', { headers: { accept: 'text/html' } })
-if (dsh.status !== 200) {
-  console.log(`sent cookie header: ${cookies().replace(/=[^;]+/g, '=<redacted>')}`)
-  console.log(`response location: ${dsh.location ?? '(none)'}`)
-  throw Error(`the authenticated root answered ${dsh.status}, expected 200`)
-}
-if (!dsh.text.includes('__DSH_BOOT__')) throw Error('the authenticated root carried no DSH boot marker')
-console.log('authenticated session reaches DSH; boot marker present')
+// /_auth/dsh is DSH's entry point: it mints a launch token and redirects to the
+// Runtime, which exchanges it for a cookie. Requesting "/" directly returns 401
+// by design -- DSH expects that exchange, not a bare root request -- so a root
+// request would test the wrong thing.
+//
+// The same request also proves ForwardAuth accepts the session: /_auth/dsh is
+// reached through the edge, and the edge only forwards a request whose session
+// its ForwardAuth call accepted.
+const entry = await request('/_auth/dsh')
+if (entry.status !== 303) throw Error(`/_auth/dsh answered ${entry.status}, expected 303 to the Runtime`)
+if (!entry.location) throw Error('/_auth/dsh did not redirect to the Runtime')
+const exchange = await request(entry.location)
+if (exchange.status !== 200) throw Error(`the DSH launch exchange answered ${exchange.status}, expected 200`)
+if (!exchange.text.includes('__DSH_BOOT__')) throw Error('the DSH launch exchange carried no boot marker')
+console.log('authenticated session reaches DSH; launch exchange carried the boot marker')
 
 // --- 5. /browser/ is refused by the core path, while signed in -------------
 const browser = await request('/browser/')
