@@ -111,10 +111,22 @@ const totp = await request('/_auth/totp', {
 if (totp.status !== 303) throw Error(`the TOTP step answered ${totp.status}, expected 303`)
 if (!has('__Host-dsh_session')) throw Error('TOTP succeeded but no session cookie was issued')
 console.log('password + TOTP issued a session')
+// The jar is printed without the session value: the Gateway rejects a session
+// cookie whose length is not 43, and the length is what a parse bug would break.
+{
+  const names = [...jar.keys()].sort()
+  const session = jar.get('__Host-dsh_session') ?? ''
+  console.log(`cookies: ${names.join(', ')}`)
+  console.log(`session cookie length: ${session.length}`)
+}
 
 // --- 4. that session reaches DSH -------------------------------------------
-const dsh = await request('/')
-if (dsh.status !== 200) throw Error(`the authenticated root answered ${dsh.status}, expected 200`)
+const dsh = await request('/', { headers: { accept: 'text/html' } })
+if (dsh.status !== 200) {
+  console.log(`sent cookie header: ${cookies().replace(/=[^;]+/g, '=<redacted>')}`)
+  console.log(`response location: ${dsh.location ?? '(none)'}`)
+  throw Error(`the authenticated root answered ${dsh.status}, expected 200`)
+}
 if (!dsh.text.includes('__DSH_BOOT__')) throw Error('the authenticated root carried no DSH boot marker')
 console.log('authenticated session reaches DSH; boot marker present')
 
