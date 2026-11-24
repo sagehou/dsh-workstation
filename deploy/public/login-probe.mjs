@@ -54,7 +54,13 @@ async function request(path, { method = 'GET', form, headers = {} } = {}) {
   }
   // node:https rather than fetch: the CI edge presents a certificate from a CA
   // that exists only for the run, and fetch has no per-request CA option.
-  const target = connectAt ? { ...url, host: '127.0.0.1', port: connectAt, hostname: '127.0.0.1' } : url
+  // Spreading a URL object copies internal symbols, not its fields, so the
+  // address is substituted on a real URL instance instead.
+  const target = new URL(url)
+  if (connectAt) {
+    target.hostname = '127.0.0.1'
+    target.port = String(connectAt)
+  }
   if (connectAt) allHeaders.host = url.host
   return new Promise((resolve, reject) => {
     const request = httpsRequest(target, { method, headers: allHeaders, ca, servername: url.hostname }, response => {
