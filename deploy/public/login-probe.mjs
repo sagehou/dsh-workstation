@@ -138,10 +138,23 @@ if (exchange.status !== 200) throw Error(`the DSH launch exchange answered ${exc
 if (!exchange.text.includes('__DSH_BOOT__')) throw Error('the DSH launch exchange carried no boot marker')
 console.log('authenticated session reaches DSH; launch exchange carried the boot marker')
 
-// --- 5. /browser/ is refused by the core path, while signed in -------------
-const browser = await request('/browser/')
-if (browser.status !== 503) throw Error(`authenticated /browser/ answered ${browser.status}, expected 503 from the core path`)
-if (!browser.text.includes('not part of this deployment')) throw Error('the refusal did not name the deployment shape')
-console.log('authenticated /browser/ refused by the core path with 503')
+// --- 5. the browser data socket is refused by the core path ----------------
+// Not /browser/ as a plain request: that path is routed by Traefik straight to
+// the Chromium service, never reaching Auth, so in this shape it answers 502 and
+// says nothing about the core refusal. The Gateway's browserEnabled branch sits
+// on the *WebSocket upgrade* for /browser/api/websockets, which Traefik sends to
+// Auth. That is the path a page actually opens, and the one under test.
+const socket = await request('/browser/api/websockets', {
+  headers: {
+    origin: root,
+    upgrade: 'websocket',
+    connection: 'Upgrade',
+    'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+    'sec-websocket-version': '13',
+  },
+})
+if (socket.status !== 503) throw Error(`the authenticated data socket answered ${socket.status}, expected 503 from the core path`)
+if (!socket.text.includes('not part of this deployment')) throw Error('the refusal did not name the deployment shape')
+console.log('authenticated browser data socket refused by the core path with 503')
 
-console.log('core login verified: separate password and TOTP, session reaches DSH, /browser/ refused')
+console.log('core login verified: separate password and TOTP, session reaches DSH, browser data socket refused')
