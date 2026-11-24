@@ -28,14 +28,12 @@ func readSecret(name string) (string, error) {
 	}
 	return value, nil
 }
-func (g *gateway) initBrowser() error {
-	var err error
-	if g.browserToken, err = readSecret("m0_controller"); err != nil {
-		return errors.New("could not load browser controller credential")
-	}
-	if g.providerAdmin, err = readSecret("m0_admin"); err != nil {
-		return errors.New("could not load provider admin credential")
-	}
+// initRuntime wires the DSH client. It has nothing to do with the browser: DSH is
+// served by the Runtime in every deployment shape, so these fields must be set
+// even when no Chromium exists. They used to live in initBrowser, which left
+// dshClient and dshWS nil in a core deployment and panicked the first time an
+// authenticated request reached /_auth/dsh.
+func (g *gateway) initRuntime() error {
 	full, err := os.ReadFile("/run/secrets/runtime_ca")
 	if err != nil {
 		return errors.New("could not load Runtime CA")
@@ -49,6 +47,19 @@ func (g *gateway) initBrowser() error {
 		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "runtime", MinVersion: tls.VersionTLS12}},
 	}
 	g.dshWS = g.socketProxy(dshUpstream, g.dshClient.Transport)
+	return nil
+}
+
+// initBrowser wires only what the browser stack provides. A core deployment
+// skips it entirely.
+func (g *gateway) initBrowser() error {
+	var err error
+	if g.browserToken, err = readSecret("m0_controller"); err != nil {
+		return errors.New("could not load browser controller credential")
+	}
+	if g.providerAdmin, err = readSecret("m0_admin"); err != nil {
+		return errors.New("could not load provider admin credential")
+	}
 	// Input authority is enforced at the gate, not here: the operator's data
 	// socket goes through it so held input can be released before a handover
 	// (ADR-0005). Static assets and the video pane still talk to Chromium
