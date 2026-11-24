@@ -44,3 +44,8 @@ services:
   auth:
     environment:
       AUTH_BROWSER_ENABLED: "0"
+
+  # compose.ci.yml adds `fixture` for the full-stack legs. It belongs to the
+  # browser side of the stack, so a core run must not start it either.
+  fixture:
+    profiles: ["browser"]

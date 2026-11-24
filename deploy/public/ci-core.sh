@@ -72,27 +72,43 @@ compose build auth runtime
 
 # --- the shape itself -------------------------------------------------------
 # Read the resolved config, not this file: the question is what Compose will
-# actually start, and a service moved out of its profile would go unnoticed by
-# anything that only inspected the override.
+# actually start. `compose config` drops `profiles` from its JSON output, so the
+# only trustworthy statement about a profiled-out service is the one Compose
+# itself makes -- `config --services` lists exactly the services that would run
+# for the given files and profiles.
+run_services="$(compose config --services | sort | tr '\n' ' ')"
+printf 'Services that would start: %s\n' "$run_services"
+# `compose config --services` lists services that are not profiled out, which
+# includes the ones gated behind the `maintenance` profile (auth-admin,
+# maintenance). Those do not start on `up`; only auth and runtime do. This
+# assertion is about the *set*, so it checks for absence of the browser stack and
+# presence of the two services rather than an exact string.
+for n in browser-gate chromium cdp-relay provider fixture; do
+  case " $run_services " in
+    *" $n "*) echo "FAIL: $n would start in the core shape" >&2; exit 1 ;;
+  esac
+done
+for n in auth runtime; do
+  case " $run_services " in
+    *" $n "*) ;;
+    *) echo "FAIL: $n is missing from the core run set" >&2; exit 1 ;;
+  esac
+done
+echo "Core run set excludes the browser stack: $run_services"
+
 if ! compose config --format json | node -e '
   const j = JSON.parse(require("node:fs").readFileSync(0, "utf8"))
-  const profiled = ["browser-gate", "chromium", "cdp-relay", "provider"]
-  const unprofiled = ["auth", "runtime"]
-  let bad = 0
-  for (const n of profiled) {
-    if (!(j.services[n]?.profiles ?? []).length) { console.log(`FAIL: ${n} is not behind a profile`); bad++ }
-  }
-  for (const n of unprofiled) {
-    if ((j.services[n]?.profiles ?? []).length) { console.log(`FAIL: ${n} is behind a profile`); bad++ }
-  }
   const bundle = j.services.runtime?.environment?.WORKSTATION_BROWSER_MCP
+  const enabled = j.services.auth?.environment?.AUTH_BROWSER_ENABLED
+  let bad = 0
   if (bundle !== "0") { console.log(`FAIL: WORKSTATION_BROWSER_MCP=${bundle}, expected 0`); bad++ }
+  if (enabled !== "0") { console.log(`FAIL: AUTH_BROWSER_ENABLED=${enabled}, expected 0`); bad++ }
   process.exit(bad ? 1 : 0)
 '; then
   echo 'FAIL: the resolved core shape is wrong' >&2
   exit 1
 fi
-echo 'Core shape: auth and runtime profile-less; browser stack profiled out; bundle disabled'
+echo 'Core shape: bundle disabled, browser proxy disabled'
 
 compose up -d --no-build --wait --wait-timeout 420
 started="$(compose ps --services --status running | sort | tr '\n' ' ')"
