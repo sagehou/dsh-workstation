@@ -112,6 +112,37 @@ docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap ad
 2. 将显示的 TOTP 密钥添加到验证器，输入当前验证码。
 3. 离线保存显示的恢复码。创建首个账号后，初始化功能关闭。
 
+## 选择部署形态
+
+两种形态共用同一份 `compose.yml`。在第 3 步之前选定一种。
+
+| 形态 | 服务 | 何时使用 |
+| --- | --- | --- |
+| **full**（默认） | `auth`、`runtime`、`browser-gate`、`chromium`、`cdp-relay`、`provider` | 需要共享浏览器：操作者的 `/browser/` 页面，或 Agent 浏览器工具。 |
+| **core** | `auth`、`runtime` | 主机承载不了浏览器栈，或 Agent 浏览器控制尚未获批。 |
+
+`core` 是明确的取舍，不是等价替代。它**没有 `/browser/` 页面，也没有 Agent 浏览器工具**。DSH 本身——聊天、会话、终端、插件、文件编辑——不受影响，因为这些由 Runtime 提供，而不是 Chromium。
+
+### 浏览器栈为什么贵
+
+`chromium` 预留 `shm_size: 1gb`（`compose.yml:162`），那是 tmpfs，直接占用宿主机内存。再加上 Chromium 进程树、Selkies、Provider 和输入门禁，浏览器栈在编码视频流时约占 2 GiB 常驻内存和 1–2 个核。2 GiB 主机无法与其他服务一并承载。
+
+### 运行 core
+
+```bash
+docker compose --env-file .env.public \
+  -f compose.yml -f deploy/public/compose.core.yml \
+  up -d --no-build --wait --wait-timeout 420
+```
+
+覆盖文件给每个浏览器服务打上 `browser` profile，因此 Compose 不启动它们；同时设置 `WORKSTATION_BROWSER_MCP=0`，使 Runtime 不把浏览器 Bundle 装进 Web Profile。它还设置 `AUTH_BROWSER_ENABLED=0`，让 `/browser/` 与 `/_auth/browser` 返回 `503 The browser is not part of this deployment`，而不是反代到一个无人监听的地址。
+
+本指南后续每一条 `compose` 命令都要带同一对 `-f`，包括 `down`、`logs` 和 `run`。core 部署之后再执行不带覆盖文件的 `docker compose up`，会试图在承载不了的主机上启动完整栈。
+
+### core 没有验证什么
+
+CI 的 `core-shape` 只证明 `auth` 与 `runtime` 能启动、浏览器 Bundle 未安装、以及 `/browser/` 经由 core 路径拒绝。它不证明完整栈在你的主机上可用，也不能替代 `full` 的各条 leg。**两种形态都未在 2 GiB 机器上运行过**；上面的内存数字是依据配置限制的估算，不是实测。
+
 ### 4. 启动 Compose 并添加路由
 
 Traefik 对每张工作台网络只需接入一次。把生成的路由文件放进 Traefik 监视的宿主机目录。

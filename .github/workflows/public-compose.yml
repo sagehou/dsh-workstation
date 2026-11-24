@@ -301,8 +301,30 @@ jobs:
             evidence-release.log
             evidence-release-references
 
+  # The core shape (#26) is verified once, not per Traefik version and subnet
+  # plan: what it asserts is "the browser stack is absent and Auth says so",
+  # none of which varies with the edge. Running it across the matrix would
+  # multiply the cost without adding a distinct claim.
+  core-shape:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Drop the deployment state a stale run may have left
+        run: sudo rm -rf .workstation .env.public
+      - name: Run the core deployment
+        run: bash deploy/public/ci-core.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: core-shape-log
+          path: |
+            core-shape.log
+
   matrix-summary:
-    needs: [input-gate, matrix, public-compose, release-compose]
+    needs: [input-gate, matrix, public-compose, release-compose, core-shape]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -316,6 +338,7 @@ jobs:
           RESULT: ${{ needs.public-compose.result }}
           GATE: ${{ needs.input-gate.result }}
           RELEASE: ${{ needs.release-compose.result }}
+          CORE: ${{ needs.core-shape.result }}
         run: |
           {
             printf '## Traefik compatibility matrix\n\n'
@@ -341,9 +364,15 @@ jobs:
             else
               printf 'The `release-compose` leg reported `%s`. The published digests have **not** been shown to run; only the locally built images have.\n' "$RELEASE"
             fi
+            printf '\n## Core deployment shape\n\n'
+            if [[ "$CORE" == success ]]; then
+              printf '`deploy/public/compose.core.yml` started `auth` and `runtime` only, left the browser Bundle uninstalled, and answered `/browser/` with a `503` from the core path. No browser service ran.\n'
+            else
+              printf 'The `core-shape` leg reported `%s`. The core deployment has **not** been shown to work.\n' "$CORE"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail when any pinned version failed
-        if: needs.public-compose.result != 'success' || needs.input-gate.result != 'success' || needs.release-compose.result != 'success'
+        if: needs.public-compose.result != 'success' || needs.input-gate.result != 'success' || needs.release-compose.result != 'success' || needs.core-shape.result != 'success'
         run: |
-          echo "Either the input gate tests or a pinned Traefik version failed; see the jobs." >&2
+          echo "The input gate, a pinned Traefik version, the published digests, or the core shape failed; see the jobs." >&2
           exit 1

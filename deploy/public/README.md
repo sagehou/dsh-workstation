@@ -145,6 +145,55 @@ docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap ad
 2. Add the displayed TOTP key to your authenticator and enter the current code.
 3. Save the displayed recovery codes offline. Bootstrap closes after the first account is created.
 
+## Choose a deployment shape
+
+Two shapes run from the same `compose.yml`. Pick one before step 3.
+
+| Shape | Services | Use it when |
+| --- | --- | --- |
+| **full** (default) | `auth`, `runtime`, `browser-gate`, `chromium`, `cdp-relay`, `provider` | You need the shared browser: the operator's `/browser/` page, or Agent browser tools. |
+| **core** | `auth`, `runtime` | The host cannot carry the browser stack, or Agent browser control is not approved yet. |
+
+`core` is a deliberate restriction, not an equivalent substitute. With it you
+have **no `/browser/` page and no Agent browser tools**. DSH itself — chat,
+sessions, terminal, plugins, file editing — is unaffected, because it is served
+by the Runtime, not by Chromium.
+
+### Why the browser stack is expensive
+
+`chromium` reserves `shm_size: 1gb` (`compose.yml:162`), which is tmpfs and comes
+straight out of host memory. Add the Chromium process tree, Selkies, the Provider
+and the input gate and the browser stack is roughly 2 GiB of resident memory and
+one to two cores while a video stream is being encoded. A 2 GiB host cannot run
+it alongside the rest.
+
+### Running core
+
+```bash
+docker compose --env-file .env.public \
+  -f compose.yml -f deploy/public/compose.core.yml \
+  up -d --no-build --wait --wait-timeout 420
+```
+
+The override file assigns every browser service the `browser` profile, so
+Compose does not start them, and sets `WORKSTATION_BROWSER_MCP=0` so the Runtime
+does not install the browser Bundle into the Web Profile. It also sets
+`AUTH_BROWSER_ENABLED=0`, which makes `/browser/` and `/_auth/browser` answer
+`503 The browser is not part of this deployment` rather than proxying to an
+address nothing listens on.
+
+Use the same `-f` pair for every later `compose` command in this guide,
+including `down`, `logs` and `run`. A plain `docker compose up` after a core
+deployment will try to start the full stack on a host that cannot hold it.
+
+### What core does not verify
+
+`core-shape` in CI proves only that `auth` and `runtime` start, that the browser
+Bundle is absent, and that `/browser/` refuses through the core path. It does not
+prove the full stack works on your host, and it is not a substitute for the
+`full` legs. Neither shape has been run on a 2 GiB machine; the memory figures
+above are an estimate from the configured limits, not a measurement.
+
 ### 4. Start Compose and add the routes
 
 Connect Traefik once to each workstation network. The routes file goes in the host directory watched by Traefik.

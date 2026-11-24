@@ -52,6 +52,11 @@ type gateway struct {
 	hashSlots                   chan struct{}
 	mu                          sync.Mutex
 	limits                      map[string]*limit
+	// browserEnabled is false in a core deployment (compose.core.yml), where no
+	// Chromium, gate or provider exists. Without it, /browser/ would proxy to an
+	// address nothing listens on and surface as a stalled WebSocket instead of a
+	// clear refusal.
+	browserEnabled bool
 }
 
 func cookie(r *http.Request, name string) string {
