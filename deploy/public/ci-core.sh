@@ -114,6 +114,10 @@ echo 'Core shape: bundle disabled, browser proxy disabled'
 # first, exactly as ci.sh does it. The bootstrap TOTP code is only valid for a
 # short window, hence the sleep.
 mkdir -m 0700 "$state/ci-state"
+# otp.mjs reads the password from WORKSTATION_CI_STATE (default /ci-state), which
+# is a path inside the viewer container. Without this export it looks for
+# /ci-state/password on the host and the bootstrap fails with ENOENT.
+export WORKSTATION_CI_STATE="$state/ci-state"
 node deploy/public/otp.mjs password > "$state/ci-state/password"
 if (( $(date +%s) % 30 > 20 )); then sleep "$((30 - $(date +%s) % 30 + 1))"; fi
 node deploy/public/otp.mjs bootstrap | compose run --rm -T --no-deps auth-admin bootstrap operator > "$state/ci-state/recovery" \
