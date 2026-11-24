@@ -125,6 +125,17 @@ node deploy/public/otp.mjs bootstrap | compose run --rm -T --no-deps auth-admin 
 echo 'Administrator bootstrapped'
 
 compose up -d --no-build --wait --wait-timeout 420
+
+# The edge must join the workstation network and pick up the route file, or
+# Traefik answers with its own 404 instead of reaching Auth. Only the workstation
+# network is connected here: the browser network exists but has no consumer, and
+# connecting the edge to it would suggest the browser side is wired up.
+docker network connect dsh-workstation_workstation "$edge"
+install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
+mv "$edge_dir/.routes.tmp" "$edge_dir/routes.yml"
+# Traefik watches the directory, but give the file watcher a moment so the first
+# request below does not race the reload.
+sleep 3
 started="$(compose ps --services --status running | sort | tr '\n' ' ')"
 printf 'Running services: %s\n' "$started"
 [[ "$started" == "auth runtime " ]] \
