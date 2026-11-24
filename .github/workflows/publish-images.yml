@@ -80,10 +80,17 @@ jobs:
       # Required for keyless signing of the build provenance attestation.
       id-token: write
       attestations: write
-    # A repository administrator can attach required reviewers to this
-    # environment. That is the "approved release workflow" in #10: a tag push or
-    # a manual dispatch still waits for approval before anything is pushed.
-    environment: ghcr-release
+    # No approval gate. This repository has a single operator who is also the
+    # only person able to trigger a publish, so a second human approving the
+    # first would add a click, not a control. What actually restricts publishing
+    # is the trigger set at the top of this file: a `v*` tag or a manual
+    # dispatch, neither reachable from a fork PR -- and `images.env` refuses to
+    # republish a version whose digest is already recorded.
+    #
+    # A previous revision targeted a `ghcr-release` environment. With no
+    # required reviewers it gated nothing while the docs described it as an
+    # approval gate, so the binding is removed rather than left to imply a
+    # control that does not exist.
     strategy:
       fail-fast: false
       matrix:

@@ -19,7 +19,7 @@ error, so there is no code path from that file to a floating tag.
 | Fork PRs cannot publish | The workflow has no `pull_request` trigger. Only `push: tags` and `workflow_dispatch` run it, and neither is reachable from a fork. |
 | Untrusted input never meets a credential | The `plan` job holds no registry credential and only reads the tracked image list. `publish` receives its matrix from `plan` and validates image names against `deploy/public/images.sh`. |
 | A tag cannot be republished with different content | If `images.env` already records a digest for that version, publishing a different one fails instead of overwriting a reference a deployment may already run. |
-| A release is gated on approval | `publish` targets the `ghcr-release` environment. Add required reviewers there and every publish waits for a person, including a tag push. |
+| A release cannot be triggered from a fork | Publishing needs a `v*` tag or a manual dispatch by someone with write access. There is no approval prompt and none is claimed: this repository has one operator, who is also the only person who can trigger a publish, so a second reviewer would add a click rather than a control. The triggers are the gate. |
 | Provenance travels with the image | `provenance: mode=max` and `sbom: true` attach attestations to the digest, not to the Actions run. |
 | The published tag is the one a deployment reads | The resolver supplies the image name in both the workflow and the initializer. |
 | `latest` cannot be deployed | The resolver only accepts `X.Y.Z`, and no workflow produces a `latest` tag. |
@@ -27,13 +27,18 @@ error, so there is no code path from that file to a floating tag.
 
 ## One-time setup (repository administrator)
 
-1. Create the `ghcr-release` environment under **Settings → Environments** and
-   add at least one required reviewer. Without this, a tag push publishes
-   immediately.
-2. After the first publish, confirm each package's visibility is **Public**
-   under the package settings (they inherit public visibility from a public
-   repository, but a package created by a private run may not).
-3. Protect `v*` tags so only a maintainer can create one.
+1. After a first publish, confirm each package's visibility is **Public** under
+   the package settings. A package created by a job without `packages: write`
+   can end up private even in a public repository; `record` fails if that
+   happens, but the visibility itself is a repository setting, not code.
+2. Protect `v*` tags so only a maintainer can create one. This is the control
+   that matters, because a tag is a publish trigger.
+
+There is deliberately **no approval environment**. A `ghcr-release` environment
+with no required reviewers does not gate anything, and describing it as an
+approval gate would overstate what is enforced. If this ever becomes a
+multi-operator repository, add required reviewers *and* re-test that the gate
+actually blocks a tag push before claiming it.
 
 No repository secret is required: the workflow uses the automatic
 `GITHUB_TOKEN`, restricted to `packages: write` in the `publish` job only.
@@ -54,8 +59,7 @@ No repository secret is required: the workflow uses the automatic
    `browser-gate:0.1.0`. That is intentional: forcing one number would couple
    unrelated changes. The tag is useful because it marks which source commit a
    set of digests came from, and the generated release notes list all four.
-4. Approve the `ghcr-release` environment when prompted.
-5. Download the `published-images` artifact, verify the digests against
+4. Download the `published-images` artifact, verify the digests against
    `docker buildx imagetools inspect`, and commit the updated
    `deploy/public/images.env`.
 
@@ -161,9 +165,6 @@ superseded.
 
 ## Not yet verified
 
-- Approval gating requires an administrator to add required reviewers to the
-  `ghcr-release` environment. Until that is done a tag push publishes without a
-  gate, which is what happened for `v0.2.0`. This cannot be asserted from code.
 - Upgrade and rollback across two real releases on a deployment host has not
   been run; there is only one release. The digest mechanism itself is proven,
   but not the operator procedure on a real host.
