@@ -3,7 +3,11 @@ name: Public Compose
 on:
   workflow_dispatch:
   push:
-    branches: ["public/**"]
+    # main is included because a green pull request does not prove the merged
+    # tree is green: a squash, a conflict resolution, or two individually
+    # passing PRs can still interact badly. Without this, nothing ever runs on
+    # the commit that is actually deployed.
+    branches: ["public/**", "main"]
     paths:
       - auth/**
       - runtime/**

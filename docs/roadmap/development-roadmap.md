@@ -25,6 +25,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR image publishing and immutable deployment references | Before declaring repeatable release distribution. |
 | 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3, #8, #9, and #10. Agent browser control stays disabled until #4; untrusted-site browsing stays disabled until #11. |
 | 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | Browser egress policy and SSRF boundary | Required before enabling broad Agent browsing of untrusted sites. |
+| 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | CI coverage on `main` | Before trusting that the merged tree is the tested tree; #6 deploys from main. |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | Native DSH Browser Sidebar | Deferred enhancement; standalone page remains supported. Does not block first release. |
 
 ## Release gates
@@ -87,5 +88,9 @@ The first publish **has** happened: tag `v0.2.0` pushed all four images, and eac
 The `release-compose` leg found, on its first run, that `runtime:0.2.0` could not start: `COPY --chmod` had set its module directory to 0644, so the container running as `node` could not enter it. Release now smoke-tests an image before pushing it, and runtime is `0.2.1`; `0.2.0` stays published and visibly superseded. A locally built image had passed every stack test, so nothing short of running the published artifact would have caught this.
 
 There is no approval gate, and none is claimed: one operator is also the only person able to trigger a publish, so the trigger set is the control. What remains unverified: an upgrade/rollback drill across two releases on a real deployment host, and any non-`amd64` artifact.
+
+[#23 — CI coverage on `main`](https://github.com/sagehou/dsh-workstation/issues/23) closes a gap this handoff previously left out rather than fixed: until now no workflow triggered on `main`, so `?branch=main` returned **zero** runs. Every PR passed on its own branch, which is why this was not a shipped-broken-code problem, but a green pull request does not prove the merged tree is green — a squash, a conflict resolution, or two individually passing PRs can still interact badly, and nothing would have noticed on the commit that is actually deployed. `Public Compose` and `M1 private preview` now also run on `main`; `Publish images` stays restricted to a `v*` tag or a manual dispatch, so a main push cannot publish. The M0 workflows lose their `push` trigger, because the `m0/issue-1` branch they watched no longer exists — they remain available by manual dispatch so the M0 evidence stays reproducible without putting prototype jobs on every main run.
+
+Next is [#6 — target-host deployment, HTTPS, backup/restore and recovery drill](https://github.com/sagehou/dsh-workstation/issues/6). Its four dependencies (#3, #8, #9, #10) are complete, so nothing but a host blocks it. Agent browser control stays disabled until #4's remaining matrix is measured, and untrusted-site browsing stays disabled until #11.
 
 The standalone browser page remains the first-release interface. Sidebar work (#5) is explicitly deferred.
