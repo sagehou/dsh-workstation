@@ -142,28 +142,22 @@ printf 'Running services: %s\n' "$started"
   || { echo "FAIL: core started '$started', expected only auth and runtime" >&2; exit 1; }
 echo 'Only auth and runtime are running'
 
-# --- Auth serves -----------------------------------------------------------
-# /_auth/login is the public entry point ForwardAuth leaves open. There is no
-# public health route: /health lives on the internal verify listener, which the
-# edge reaches on 8081 rather than through the public origin.
-curlcore() { curl -sS --max-time 10 --resolve workstation.test:443:127.0.0.1 --cacert "$edge_dir/cert.pem" "$@"; }
-code="$(curlcore -o /dev/null -w '%{http_code}' https://workstation.test/_auth/login || true)"
-[[ "$code" == 200 ]] \
-  || { echo "FAIL: /_auth/login answered $code, expected 200" >&2; exit 1; }
-echo 'Auth serves its login page with no browser service running'
+# --- a real login, then DSH, then the core refusal --------------------------
+# login-probe.mjs completes password + TOTP over HTTPS and asserts that the
+# session reaches DSH and that /browser/ is refused *while signed in*. That last
+# detail is why this is not a bare curl for a status code: unauthenticated
+# requests are redirected to the login page before they reach the core branch.
+node deploy/public/login-probe.mjs https://workstation.test "$edge_dir/cert.pem" \
+  || { echo 'FAIL: the core login probe failed' >&2; exit 1; }
 
-# The core refusal on /browser/ is NOT asserted here by an HTTP status: the route
-# requires an authenticated session and a matching Origin header, and an
-# unauthenticated request is redirected to the login page before it reaches the
-# branch under test. Driving a full login here would duplicate check.mjs for one
-# status code. The behaviour is covered by the resolved-config assertion above
-# (AUTH_BROWSER_ENABLED=0) plus the Go unit test below.
-if [[ -f auth/workstation_core_test.go ]]; then
-  echo 'Core /browser/ refusal is covered by auth/workstation_core_test.go'
-else
-  echo 'FAIL: no Go test covers the core /browser/ refusal' >&2
-  exit 1
-fi
+# --- the handler-level refusal is covered by a Go test ---------------------
+# The probe above proves the 503 over HTTP. The Go test covers the handler
+# directly (a wrong method, a missing Origin, an already-revoked session), which
+# would be expensive to reach over the wire. Failing here means the coverage was
+# deleted, not that the code broke -- the code is compiled by the auth image.
+[ -f auth/workstation_core_test.go ] \
+  || { echo 'FAIL: the Go test for the core refusal is missing' >&2; exit 1; }
+echo 'Core refusal has handler-level coverage: auth/workstation_core_test.go'
 
 # --- the Bundle must not have been installed --------------------------------
 if compose exec -T runtime test -e /dsh-home/profiles/web/.workstation-browser-0.1.0; then
