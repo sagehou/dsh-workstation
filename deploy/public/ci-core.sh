@@ -147,7 +147,7 @@ echo 'Only auth and runtime are running'
 # session reaches DSH and that /browser/ is refused *while signed in*. That last
 # detail is why this is not a bare curl for a status code: unauthenticated
 # requests are redirected to the login page before they reach the core branch.
-node deploy/public/login-probe.mjs https://workstation.test "$edge_dir/cert.pem" \
+node deploy/public/login-probe.mjs https://workstation.test "$edge_dir/cert.pem" 443 \
   || { echo 'FAIL: the core login probe failed' >&2; exit 1; }
 
 # --- the handler-level refusal is covered by a Go test ---------------------

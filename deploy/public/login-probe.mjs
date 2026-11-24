@@ -1,7 +1,7 @@
 // Complete a real password + TOTP login over HTTPS and prove the resulting
 // session reaches DSH, without a browser.
 //
-//   node deploy/public/login-probe.mjs <base-url> <ca-file>
+//   node deploy/public/login-probe.mjs <base-url> <ca-file> [connect-host]
 //
 // check.mjs drives Playwright because the full-stack legs need a browser for
 // Selkies. The core shape has no browser stack, so pulling in a Chromium viewer
@@ -23,6 +23,11 @@ import { request as httpsRequest } from 'node:https'
 
 const root = process.argv[2] ?? 'https://workstation.test'
 const ca = process.argv[3] ? readFileSync(process.argv[3]) : undefined
+// The CI edge listens on 127.0.0.1 but the certificate names workstation.test, so
+// the connection is dialled at the host given here while the Host header and SNI
+// keep the certificate name. curl gets this from --resolve; node:https has no
+// equivalent, so the address is substituted explicitly.
+const connectAt = process.argv[4] ? Number(process.argv[4]) : undefined
 
 const jar = new Map()
 function store(headers) {
@@ -49,8 +54,10 @@ async function request(path, { method = 'GET', form, headers = {} } = {}) {
   }
   // node:https rather than fetch: the CI edge presents a certificate from a CA
   // that exists only for the run, and fetch has no per-request CA option.
+  const target = connectAt ? { ...url, host: '127.0.0.1', port: connectAt, hostname: '127.0.0.1' } : url
+  if (connectAt) allHeaders.host = url.host
   return new Promise((resolve, reject) => {
-    const request = httpsRequest(url, { method, headers: allHeaders, ca }, response => {
+    const request = httpsRequest(target, { method, headers: allHeaders, ca, servername: url.hostname }, response => {
       const chunks = []
       response.on('data', chunk => chunks.push(chunk))
       response.on('end', () => {
