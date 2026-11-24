@@ -25,6 +25,7 @@
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR 镜像发布和不可变部署引用 | 宣布具备可重复的正式镜像分发前完成。 |
 | 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8、#9 和 #10。#4 通过前关闭 Agent 浏览器控制；#11 通过前关闭不可信网站浏览。 |
 | 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | 浏览器出口策略和 SSRF 边界 | 开放 Agent 广泛访问不可信网站前完成。 |
+| 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | `main` 分支的 CI 覆盖 | 在相信「合并后的树就是被测试过的树」之前完成；#6 从 main 部署。 |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | DSH 原生 Browser Sidebar | 延后增强；独立页面持续可用，不阻塞首版。 |
 
 ## 发布门槛
@@ -87,5 +88,9 @@
 `release-compose` 腿在首次运行时就发现 `runtime:0.2.0` 无法启动：`COPY --chmod` 把其模块目录设成了 0644，以 `node` 运行的容器无法进入该目录。发布流程现在会在推送前对镜像做冒烟测试，runtime 因此为 `0.2.1`；`0.2.0` 保持公开并明确标注为已被取代。本地构建的镜像此前通过了全部栈测试，因此除了实际运行发布产物，没有任何检查能发现这个问题。
 
 不存在审批门槛，也不声称有：唯一操作者也是唯一能触发发布的人，因此触发器集合就是控制手段。仍未验证：在真实部署主机上跨两个发布的升级/回滚演练、以及任何非 `amd64` 产物。
+
+[#23 — `main` 分支的 CI 覆盖](https://github.com/sagehou/dsh-workstation/issues/23) 补上了本交接此前略过而非修掉的缺口：在此之前没有任何 workflow 在 `main` 上触发，`?branch=main` 返回 **零** 次运行。每个 PR 都在自己的分支上通过，所以这不是「把坏代码发了出去」，但绿色的 PR 并不证明合并后的树是绿的——squash、冲突解决、或两个各自通过的 PR 交互后失败，都不会被任何运行发现，而真正被部署的正是那个提交。`Public Compose` 与 `M1 private preview` 现在也在 `main` 上运行；`Publish images` 仍限于 `v*` 标签或手动触发，因此 main 推送无法发布任何镜像。M0 的两个 workflow 去掉了 `push` 触发，因为它们监听的 `m0/issue-1` 分支已不存在——它们仍可手动触发，这样 M0 证据依旧可复现，又不会把原型作业塞进每次 main 运行。
+
+下一项是 [#6 — 目标主机部署、HTTPS、备份/恢复与恢复演练](https://github.com/sagehou/dsh-workstation/issues/6)。它的四项依赖（#3、#8、#9、#10）均已完成，除了一台主机之外没有别的阻塞。Agent 浏览器控制在 #4 剩余矩阵实测前保持关闭，不可信站点浏览在 #11 完成前保持关闭。
 
 首版界面使用独立浏览器页面。Sidebar #5 明确延期。

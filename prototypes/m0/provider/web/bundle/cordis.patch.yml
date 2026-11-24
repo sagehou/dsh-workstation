@@ -1,0 +1,3 @@
+- insert:
+    - id: m0-browser-web
+      name: ./host.mjs

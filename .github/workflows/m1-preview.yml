@@ -3,7 +3,7 @@ name: M1 private preview
 on:
   workflow_dispatch:
   push:
-    branches: ["m1/**"]
+    branches: ["m1/**", "main"]
     paths: [runtime/**, deploy/**, compose.preview.yml, .github/workflows/m1-preview.yml]
   pull_request:
     paths: [runtime/**, deploy/**, compose.preview.yml, .github/workflows/m1-preview.yml]

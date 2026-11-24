@@ -1,9 +1,9 @@
 name: M0 remote experiments
 
 on:
-  push:
-    branches: [m0/issue-1]
-    paths: [.github/workflows/m0.yml, 'prototypes/m0/browser/**', 'prototypes/m0/runtime/**']
+  # M0 is finished and its `m0/issue-1` branch is gone, so a branch push can
+  # never fire this again. It stays manual so the M0 evidence remains
+  # reproducible without putting prototype jobs on every main run.
   workflow_dispatch:
 
 permissions:
