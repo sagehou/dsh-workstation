@@ -348,6 +348,7 @@ time { font-variant-numeric: tabular-nums; }
   border-block-start: 1px solid var(--stroke);
   font-size: .88rem;
 }
+.version-empty { display: grid; justify-items: start; gap: .55rem; color: var(--subtle); }
 .installed-versions { margin-block-start: .45rem; padding: .9rem 1.22rem 1.1rem; border-block-start: 1px solid var(--stroke); }
 .installed-versions h3 { color: var(--subtle); font-size: .84rem; }
 .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-block-start: .55rem; }

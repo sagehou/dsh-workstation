@@ -182,8 +182,7 @@
         <p class="hint-bubble">升级和回滚在停服后通过 Runtime 命令执行。</p>
       </details>
     </div>
-    {{if .Versions.Error}}<p class="panel-message feedback error" role="alert">无法获取已发布版本。</p>
-    {{else if .Versions.Values}}
+    {{if .Versions.Values}}
     <ul class="data-list version-list" role="list">
       {{range $i, $v := .Versions.Values}}
       {{if lt $i 4}}
@@ -191,7 +190,12 @@
       {{end}}
       {{end}}
     </ul>
-    {{else}}<p class="panel-message subtle">暂无版本信息。</p>{{end}}
+    {{else}}
+    <div class="panel-body version-empty">
+      {{if .Versions.Error}}<p role="alert">无法获取已发布版本。</p>{{else}}<p>暂无版本信息。</p>{{end}}
+      <a class="button" href="/mgmt">刷新版本</a>
+    </div>
+    {{end}}
     {{if .Runtime.Installed}}
     <div class="installed-versions">
       <h3>已安装版本</h3>
