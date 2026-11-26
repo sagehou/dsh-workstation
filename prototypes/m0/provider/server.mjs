@@ -15,7 +15,24 @@ const [master, controller, sentinel, admin] = await Promise.all(
 const publicMode = process.env.WORKSTATION_PROVIDER === '1'
 const enroll = publicMode ? (await readFile('/run/secrets/browser_enroll', 'utf8')).trim() : ''
 if (publicMode && !/^[0-9a-f]{64}$/.test(enroll)) throw Error('Invalid workstation MCP admission key')
-const origins = new Set((process.env.BROWSER_TOOL_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean))
+// The allowlist is optional. `BROWSER_TOOL_ORIGINS` names origins the Agent may
+// drive; leaving it empty means every HTTPS origin is allowed.
+//
+// Default-open is a deliberate product decision that OVERRIDES the egress rule in
+// AGENTS.md ("Keep broad browsing of untrusted sites disabled until browser egress
+// controls are independently enforced"). It was taken by the product owner on
+// 2026-11-26 and is recorded in ADR-0006 and issue #30. The rule it replaces
+// remains the right default for any deployment that has not made the same
+// decision, which is why the allowlist still works when it is set.
+//
+// What this does NOT change: `allowed()` still rejects a non-HTTPS scheme and any
+// URL carrying credentials. Neither of those is a browsing case, and both were
+// rejected before the allowlist existed.
+const rawOrigins = (process.env.BROWSER_TOOL_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean)
+// A literal `*` is accepted as "no restriction" so an operator can be explicit
+// rather than relying on an unset variable.
+const allowAllOrigins = rawOrigins.length === 0 || rawOrigins.includes('*')
+const origins = new Set(allowAllOrigins ? [] : rawOrigins)
 for (const origin of origins) {
   if (!origin.startsWith('https://') || new URL(origin).origin !== origin) throw Error('Expected bare HTTPS browser tool origins')
 }
@@ -112,6 +129,55 @@ async function recover() {
       attached.on('disconnected', () => {
         if (browser === attached) fault('BROWSER_LOST')
       })
+      // Chromium exits when its last tab closes, which would tear down the shared
+      // profile mid-task and force a full reconnect (#29). Chromium has no
+      // --keep-alive flag, so the context is watched instead: the moment the last
+      // page goes, a blank one is opened to hold the process open.
+      // Recording (#31). The operator's actions are captured by a script injected
+      // into every document; Agent actions are recorded on this side, where the
+      // tool name and generation are known. Both land in one JSONL file so the
+      // timeline can be read in order.
+      try {
+        await installRecorder(attached)
+      } catch (error) {
+        // Recording is an audit aid. A browser that cannot record is still a
+        // browser, so this must not take the attachment down.
+        console.warn('Recorder install failed:', error?.message ?? error)
+      }
+
+      // Chromium exits when its last tab closes, which tears down the shared
+      // profile mid-task (#29). It has no --keep-alive flag, so the context is
+      // watched instead.
+      //
+      // The listener runs synchronously on every page event: by the time a
+      // deferred callback fired, the browser had already begun shutting down and
+      // `newPage()` failed with EPIPE. `pages()` still reports the closing tab at
+      // that instant, so the count is taken after filtering closed ones rather
+      // than trusting the length alone.
+      const keepOnePage = context => {
+        const live = context.pages().filter(page => !page.isClosed())
+        if (live.length > 0) return
+        context.newPage().catch(() => { /* the browser is going away anyway */ })
+      }
+      // A tab closing is what empties the browser, so the close has to be the
+      // trigger. `context.on('page')` only fires on creation and would never see
+      // the last tab go. Each page is watched when it appears, and the watcher is
+      // re-attached to whatever the replacement page is.
+      const watch = context => {
+        keepOnePage(context)
+        for (const page of context.pages()) {
+          page.once('close', () => keepOnePage(context))
+        }
+        context.on('page', page => page.once('close', () => keepOnePage(context)))
+      }
+      for (const context of attached.contexts()) watch(context)
+      attached.on('targetcreated', () => {
+        for (const context of attached.contexts()) {
+          for (const page of context.pages()) {
+            if (page.listenerCount('close') === 0) page.once('close', () => keepOnePage(context))
+          }
+        }
+      })
     }
     if (!publicMode) {
       const context = browser.contexts()[0]
@@ -130,12 +196,132 @@ async function recover() {
     recovering = false
   }
 }
+// --- Recording (#31) -------------------------------------------------------
+//
+// Two streams, one file:
+//   - human: DOM events from recorder.js, injected into every document
+//   - agent: tool calls recorded in `browserAction`
+//
+// The split matters because the two sides see different things. The page cannot
+// tell a CDP click from a real one except through `isTrusted`, and the Provider
+// cannot see what the operator typed. Each records what it alone knows.
+const RECORD_DIR = process.env.WORKSTATION_RECORD_DIR ?? '/state/recordings'
+const RECORD_ENABLED = process.env.WORKSTATION_RECORD !== '0'
+const RECORDER_SOURCE = await readFile(new URL('./recorder.js', import.meta.url), 'utf8').catch(() => '')
+
+let recordStream
+let recordFile
+
+async function recordSink () {
+  if (recordStream !== undefined) return recordStream
+  const { mkdirSync, createWriteStream } = await import('node:fs')
+  // Synchronous on purpose: this runs once, before the first write, and the
+  // async form returned a promise whose rejection was invisible here.
+  mkdirSync(RECORD_DIR, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  recordFile = `${RECORD_DIR}/session-${stamp}.jsonl`
+  recordStream = createWriteStream(recordFile, { flags: 'a' })
+  recordStream.on('error', error => console.warn('Recording stream error:', error.message))
+  return recordStream
+}
+
+// Recording is on by default (#31), but an operator may want a clean file for one
+// task, so the state is explicit and exposed to the UI.
+let recordActive = RECORD_ENABLED
+function recordStatus () {
+  return { active: recordActive, file: recordFile ?? null, dir: RECORD_DIR }
+}
+
+// Serialised writes: two events in the same millisecond would otherwise interleave
+// inside a line and produce a file no reader can parse.
+let recordQueue = Promise.resolve()
+function record (entry) {
+  if (!recordActive) return
+  recordQueue = recordQueue.then(async () => {
+    try {
+      const stream = await recordSink()
+      stream.write(JSON.stringify(entry) + '\n')
+    } catch (error) {
+      console.warn('Recording write failed:', error?.message ?? error)
+    }
+  })
+}
+
+async function installRecorder (attached) {
+  if (!RECORD_ENABLED || RECORDER_SOURCE === '') return
+  for (const context of attached.contexts()) {
+    // `addInitScript` is Playwright's equivalent of CDP's
+    // Page.addScriptToEvaluateOnNewDocument: it runs before any page script in
+    // every new document, including iframes, which is what octop-browser uses.
+    await context.addInitScript(RECORDER_SOURCE).catch(error => {
+      console.warn('Recorder init script failed:', error?.message ?? error)
+    })
+    // A binding is how the page reaches back. Playwright exposes it as
+    // `context.exposeBinding`, which installs the Runtime.addBinding the injected
+    // script calls by name.
+    await context.exposeBinding('__workstationRecord', (_source, payload) => {
+      let parsed
+      try { parsed = JSON.parse(payload) } catch { return }
+      record({ source: 'human', receivedAt: Date.now(), ...parsed })
+    }).catch(error => {
+      console.warn('Recorder binding failed:', error?.message ?? error)
+    })
+    // Documents that already exist were loaded before the init script, so the
+    // listener has to be added to them explicitly.
+    for (const page of context.pages()) {
+      await page.evaluate(RECORDER_SOURCE).catch(() => {})
+    }
+  }
+  record({ source: 'recorder', event: 'installed', at: Date.now(), file: recordFile })
+}
+
 const liveBinding = binding => binding && binding.browserId === browserId && !binding.page.isClosed()
+
+// Does an open tab look like the thing this call is about?
+//
+// Deliberately shallow: a URL host comparison and a title substring. A deeper
+// match (full URL, page content) would bind to a stale tab after a navigation and
+// then act on the wrong page, which is worse than opening a new one. Returning
+// `undefined` is the safe answer.
+function matchTab (pages, intent) {
+  if (!intent) return undefined
+  const want = String(intent).trim().toLowerCase()
+  if (want === '') return undefined
+  let wantHost
+  try {
+    // Accept a bare host, a URL, or a title fragment.
+    wantHost = new URL(want.includes('://') ? want : 'https://' + want).hostname.replace(/^www\./, '')
+  } catch { wantHost = undefined }
+  for (const page of pages) {
+    let pageHost
+    try { pageHost = new URL(page.url()).hostname.replace(/^www\./, '') } catch { pageHost = '' }
+    if (wantHost && pageHost && (pageHost === wantHost || pageHost.endsWith('.' + wantHost))) return page
+    // A title fragment covers "the tab I am already reading about X".
+    if (pageHost === '' || !wantHost) continue
+    const title = (() => { try { return page.url() } catch { return '' } })()
+    if (title.toLowerCase().includes(want)) return page
+  }
+  return undefined
+}
 
 async function bindTab(peer) {
   if (peer.binding) return peer.binding
   const id = browserId
-  const tab = await browser.contexts()[0].newPage()
+  // Agent-first (#29): the Agent drives a real page, not the M0 fixture.
+  //
+  // Binding is by intent, not by position. Taking `pages[0]` meant the Agent drove
+  // whichever tab happened to be first in the list, which is rarely the one the
+  // operator is looking at and never related to the task. The rule now:
+  //
+  //   the call carries a target (a URL host or a page title fragment) and a live
+  //   tab matches it  -> bind that tab, so a follow-up continues where it started
+  //   no target, or nothing matches -> open a fresh tab and bind that
+  //
+  // Nothing is ever closed: a mismatched tab stays exactly where the operator left
+  // it. `intent` is supplied by the caller through the tool arguments.
+  const context = browser.contexts()[0]
+  const pages = context.pages().filter(page => !page.isClosed())
+  const tab = matchTab(pages, peer.intent) ?? await context.newPage()
   // The Agent's tab has to be the one on the shared desktop: a binding that is
   // not foregrounded would take input without the Agent or the operator being
   // able to see what it is driving.
@@ -146,7 +332,6 @@ async function bindTab(peer) {
   }
   peer.binding = { browserId: id, page: tab, onClose }
   tab.once('close', onClose)
-  if (!publicMode) await tab.goto(fixture, { timeout: 5000 })
   return peer.binding
 }
 
@@ -154,8 +339,18 @@ async function grant(peerId, ttl) {
   const peer = [...tickets.values()].find(candidate => candidate.id === peerId)
   check(peer?.stream, 'NO_LIVE_MCP_CONNECTION')
   check(Number.isSafeInteger(ttl) && ttl >= 500 && ttl <= 120_000, 'BAD_TTL', 400)
-  check(state === 'HUMAN', 'NOT_HUMAN')
+  // Agent-first (#29): a live MCP session may take control from HUMAN or from
+  // another AGENT lease. The old HUMAN-only gate made "Agent may take over"
+  // impossible. Input release still runs through the gate below, so a takeover
+  // does not strand a held button.
+  check(state === 'HUMAN' || state === 'AGENT', 'NOT_TAKEABLE')
   if (peer.binding) check(liveBinding(peer.binding), 'TAB_UNAVAILABLE')
+  // A lease held by someone else must be drained before this one starts, or two
+  // peers would both believe they own input. `handover` is the existing drain
+  // path (it waits for `flight`), so a takeover reuses it rather than racing it.
+  if (lease && lease.peer !== peer) {
+    try { await handover('PREEMPTED') } catch { fault('PREEMPT_DRAIN_FAILED'); throw Error('PREEMPT_DRAIN_FAILED') }
+  }
   state = 'HANDOVER'
   try {
     await input(true)
@@ -169,7 +364,7 @@ async function grant(peerId, ttl) {
     lease = { peer, binding, generation, expires: performance.now() + ttl }
     state = 'AGENT'
     reason = 'GRANTED'
-    expiry = setTimeout(() => { void handover('EXPIRED').catch(() => {}) }, ttl)
+    armExpiry(IDLE_RELEASE_MS)
     return { generation, mcpSession: peer.transport.sessionId, protocol: peer.protocol }
   } catch (error) {
     fault('GRANT_FAILED')
@@ -205,6 +400,50 @@ function retire(peer) {
 function toolResult(code) {
   return { isError: code !== 'M0_OK', content: [{ type: 'text', text: code }] }
 }
+// Agent-first (#29): a browser tool call takes the lease itself when nobody else
+// holds a live one. The old flow required the operator to press "grant" on the
+// control page first, which made every Agent task start with a manual step. The
+// safety property is unchanged: control still passes through the input gate, and
+// a takeover still drains the previous owner's in-flight action.
+//
+// `ttl` is the same window a manual grant uses. It is renewed on each successful
+// call so a long task is not cut off mid-way.
+// Two windows, not one.
+//
+// A lease is acquired with a long window because a single call may wait on a slow
+// page, but it is *released* on a short one. The previous code used 120 s for both,
+// so an Agent that finished a task kept the browser for two minutes and the
+// operator could not touch it. Ten seconds is long enough for an Agent to issue
+// its next call in a sequence and short enough that finishing means finishing.
+//
+// Taking the lease back costs nothing: `ensureLease` re-acquires automatically, so
+// a short release window does not make multi-step work slower.
+const AUTO_LEASE_MS = 120_000
+const IDLE_RELEASE_MS = 10_000
+
+// Arm the expiry at `ms`. Split out so every re-arm path uses the same callback.
+function armExpiry (ms) {
+  clearTimeout(expiry)
+  expiry = setTimeout(() => { void handover('EXPIRED').catch(() => {}) }, ms)
+}
+
+async function ensureLease(peer) {
+  if (lease && lease.peer === peer && performance.now() < lease.expires && liveBinding(lease.binding)) {
+    lease.expires = performance.now() + AUTO_LEASE_MS
+    armExpiry(IDLE_RELEASE_MS)
+    return undefined
+  }
+  if (state === 'DISCONNECTED') return 'DISCONNECTED'
+  if (state === 'HANDOVER') return 'HANDOVER'
+  if (!peer.stream) return 'NO_LIVE_MCP_CONNECTION'
+  try {
+    await grant(peer.id, AUTO_LEASE_MS)
+    return undefined
+  } catch (error) {
+    return String(error?.message ?? 'AUTO_LEASE_FAILED')
+  }
+}
+
 function leaseDenied(peer) {
   if (state === 'HANDOVER' || state === 'DISCONNECTED') return state
   if (!lease) return 'NO_LEASE'
@@ -232,6 +471,7 @@ async function mark(peer, args) {
     if (await work !== 'done') throw new Error('marker not confirmed')
     return toolResult('M0_OK')
   } catch {
+    recordOutcome('ACTION_UNCERTAIN')
     fault('ACTION_UNCERTAIN')
     return toolResult('ACTION_UNCERTAIN')
   } finally {
@@ -270,11 +510,14 @@ function admit(authorization, key, initialize) {
 function allowed(raw) {
   try {
     const url = new URL(raw)
-    return url.protocol === 'https:' && !url.username && !url.password && origins.has(url.origin)
+    if (url.protocol !== 'https:' || url.username || url.password) return false
+    return allowAllOrigins || origins.has(url.origin)
   } catch { return false }
 }
 const textResult = text => ({ content: [{ type: 'text', text }] })
 async function browserAction(peer, args, operation) {
+  const acquired = await ensureLease(peer)
+  if (acquired) return toolResult(acquired)
   const denied = leaseDenied(peer)
   if (denied) return toolResult(denied)
   if (lease.generation !== args.generation) return toolResult('STALE_GENERATION')
@@ -282,6 +525,18 @@ async function browserAction(peer, args, operation) {
   const tab = lease.binding.page
   const target = operation === 'navigate' ? args.url : tab.url()
   if (!allowed(target)) return toolResult('ORIGIN_NOT_ALLOWED')
+  // Recorded before the work, so a call that fails still appears in the timeline
+  // with the reason. An audit that only shows successes cannot explain a break.
+  const startedAt = Date.now()
+  const recordOutcome = outcome => record({
+    source: 'agent',
+    at: startedAt,
+    event: operation,
+    generation: lease.generation,
+    args: operation === 'navigate' ? { url: args.url } : operation === 'click' ? { role: args.role, name: args.name } : {},
+    intent: args.intent ?? null,
+    outcome,
+  })
   const work = (async () => {
     if (operation === 'navigate') await tab.goto(target, { waitUntil: 'domcontentloaded', timeout: 10_000 })
     if (operation === 'click') {
@@ -289,10 +544,14 @@ async function browserAction(peer, args, operation) {
       await match.click({ timeout: 4_000 })
     }
     if (!allowed(tab.url())) return toolResult('ORIGIN_NOT_ALLOWED')
-    if (operation !== 'read') return textResult('OK')
+    if (operation !== 'read') { recordOutcome('OK'); return textResult('OK') }
     // Browser-side constants only; no model-supplied JavaScript.
     const visible = await tab.evaluate(() => (document.body?.innerText ?? '').slice(0, 8000))
-    return allowed(tab.url()) ? textResult(visible) : toolResult('ORIGIN_NOT_ALLOWED')
+    const ok = allowed(tab.url())
+    // The text itself is not stored: a recording is a timeline, not a transcript,
+    // and page content is where credentials end up.
+    recordOutcome(ok ? 'OK' : 'ORIGIN_NOT_ALLOWED')
+    return ok ? textResult(visible) : toolResult('ORIGIN_NOT_ALLOWED')
   })()
   flight = work
   let timer
@@ -301,6 +560,7 @@ async function browserAction(peer, args, operation) {
       timer = setTimeout(() => reject(new Error('browser timeout')), 12_000)
     })])
   } catch {
+    recordOutcome('ACTION_UNCERTAIN')
     fault('ACTION_UNCERTAIN')
     return toolResult('ACTION_UNCERTAIN')
   } finally {
@@ -310,14 +570,26 @@ async function browserAction(peer, args, operation) {
 }
 function publicTools(server, peer) {
   const generation = z.string().max(64)
+  // `intent` says which page the call is about, so the binding can reuse a tab
+  // that already shows it instead of opening another one (#29). It is optional:
+  // without it every call gets a fresh tab, which is the old behaviour and never
+  // wrong, only wasteful.
+  const intent = z.string().max(200).optional()
   for (const [operation, description, inputs] of [
     ['navigate', 'Open an allowed HTTPS URL in this session’s assigned tab.', { url: z.string().max(2048) }],
     ['read', 'Read visible, untrusted text from this session’s assigned tab.', {}],
     ['click', 'Click an exact accessible button or link in this session’s assigned tab.',
       { role: z.enum(['button', 'link']), name: z.string().min(1).max(200) }],
   ]) {
-    server.registerTool(operation, { description, inputSchema: { generation, ...inputs } },
-      args => browserAction(peer, args, operation))
+    server.registerTool(operation, {
+      description: description + ' Pass `intent` (a URL host or title fragment) to reuse a tab already showing it.',
+      inputSchema: { generation, intent, ...inputs },
+    }, args => {
+      // Recorded on the peer so `bindTab` can consult it when the lease is
+      // created, which happens inside `browserAction`.
+      if (args.intent !== undefined) peer.intent = args.intent
+      return browserAction(peer, args, operation)
+    })
   }
 }
 
@@ -361,7 +633,12 @@ async function mcp(req, res) {
     if (peer.tab) server.registerTool('lease_status', {
       description: 'Get this session’s active lease generation before using browser tools.',
       inputSchema: {},
-    }, () => {
+    }, async () => {
+      // Agent-first (#29): this is the first call an Agent makes, so it must be
+      // able to create the lease. Returning NO_LEASE here would make the tools
+      // unreachable without a manual grant.
+      const acquired = await ensureLease(peer)
+      if (acquired) return toolResult(acquired)
       const denied = leaseDenied(peer)
       return denied ? toolResult(denied) : { content: [{ type: 'text', text: lease.generation }] }
     })
@@ -397,7 +674,7 @@ async function control(req, res) {
   if (req.method === 'GET' && req.url === '/status') {
     const peers = publicMode ? [...tickets.values()].filter(peer => peer.label && peer.stream)
       .map(peer => ({ id: peer.id, label: peer.label, tab: Boolean(liveBinding(peer.binding)) })) : undefined
-    return respond(res, 200, { state, reason, inFlight: Boolean(flight), lease: Boolean(lease), mcpProtocol: lease?.peer.protocol, peers })
+    return respond(res, 200, { state, reason, inFlight: Boolean(flight), lease: Boolean(lease), mcpProtocol: lease?.peer.protocol, peers, record: recordStatus() })
   }
   check(req.method === 'POST', 'NOT_FOUND', 404)
   const args = await json(req)
@@ -420,6 +697,17 @@ async function control(req, res) {
       result = { id, credential, acceptUntil }
       break
     }
+    case '/record/start':
+      recordActive = true
+      await recordSink().catch(() => {})
+      record({ source: 'recorder', event: 'started', at: Date.now(), file: recordFile })
+      result = recordStatus()
+      break
+    case '/record/stop':
+      record({ source: 'recorder', event: 'stopped', at: Date.now(), file: recordFile })
+      recordActive = false
+      result = recordStatus()
+      break
     case '/grant': result = await grant(args.peer, args.ttl); break
     case '/takeover': result = await handover('TAKEOVER'); break
     default: throw new Denied('NOT_FOUND', 404)
