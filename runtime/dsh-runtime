@@ -191,6 +191,34 @@ select_version() {
 
 case "${1:-}" in
   serve)
+    # Apply a change the management console deferred: that process cannot stop the
+    # supervisor it belongs to and survive, so it writes the request and exits, and
+    # this start is the one that runs it with the tree idle.
+    pending=/run/dsh-runtime/.pending-maintenance
+    if [[ -s $pending ]]; then
+      action="$(node -e 'const j=require("node:fs").readFileSync(process.argv[1],"utf8");try{process.stdout.write(JSON.parse(j).action||"")}catch{}' "$pending")"
+      case $action in
+        upgrade|rollback|restore)
+          printf 'Applying deferred %s\n' "$action"
+          # Removed before running: a failure must not replay on every restart. The
+          # operator sees it in this run's output instead.
+          args="$(node -e 'const j=require("node:fs").readFileSync(process.argv[1],"utf8");try{const a=JSON.parse(j).args||{};process.stdout.write(JSON.stringify(a))}catch{process.stdout.write("{}")}' "$pending")"
+          rm -f -- "$pending"
+          # Re-enter this script so the action goes through the same lock and
+          # validation as the CLI.
+          case $action in
+            upgrade)
+              target="$(node -e 'const a=JSON.parse(process.argv[1]);process.stdout.write(String(a.version||""))' "$args")"
+              "$0" upgrade "$target" || printf 'Deferred upgrade failed\n' >&2 ;;
+            rollback)
+              "$0" rollback || printf 'Deferred rollback failed\n' >&2 ;;
+            restore)
+              target="$(node -e 'const a=JSON.parse(process.argv[1]);process.stdout.write(String(a.id||""))' "$args")"
+              "$0" restore "$target" || printf 'Deferred restore failed\n' >&2 ;;
+          esac
+          ;;
+      esac
+    fi
     lock
     if [[ -z $active ]]; then
       version=${DSH_INITIAL_VERSION:?set DSH_INITIAL_VERSION to an exact version}
@@ -222,14 +250,23 @@ case "${1:-}" in
     fi
     node "$web" serve "$(bin "$active")" &
     web_pid=$!
+    # The PID file is what tells an upgrade that the service is live: the pointer
+    # lock is released above, so the lock alone cannot answer that question.
+    printf '%s\n' "$web_pid" > /run/dsh-runtime/.web-pid
     trap 'kill "$web_pid" ${maintenance_pid:+"$maintenance_pid"} 2>/dev/null || true' TERM INT
     wait "$web_pid"
     status=$?
+    rm -f /run/dsh-runtime/.web-pid
     if [[ -n $maintenance_pid ]]; then kill "$maintenance_pid" 2>/dev/null || true; fi
     exit "$status"
     ;;
   install) lock; install_version "${2:-}" ;;
   upgrade)
+    # A released pointer lock is not permission to upgrade: the serving process no
+    # longer holds it, so `lock` alone would let an upgrade rewrite DSH_HOME under
+    # a live Web process. The supervisor writes its PID, and its absence is what
+    # says the service is down.
+    [[ ! -s /run/dsh-runtime/.web-pid ]] || die 'runtime is serving; stop it before upgrading'
     lock
     from=${active:-none}
     want=${2:-}

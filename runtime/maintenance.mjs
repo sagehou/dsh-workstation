@@ -18,7 +18,7 @@
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 
 const ADDR = process.env.MAINTENANCE_ADDR ?? '127.0.0.1:8099'
 const SECRET_FILE = process.env.MAINTENANCE_SECRET ?? '/run/secrets/maintenance'
@@ -90,26 +90,28 @@ function argvFor (action, args) {
   }
 }
 
-// A change to DSH_HOME needs the Web supervisor stopped, because it holds the
-// version pointer open. The supervisor is `exec`'d, so stopping it means stopping
-// the container — which is exactly what the compose restart policy is for.
+// A change to DSH_HOME needs the Web supervisor stopped, because `dsh-runtime
+// upgrade` refuses while `/run/dsh-runtime/.web-pid` names a live process — an
+// upgrade under a running Web process rewrites the tree it is reading.
 //
-// The sequence is therefore: run the command with the pointer lock held (the
-// supervisor releases it at boot), then exit non-zero so the container restarts
-// and picks up the new selection. Exiting zero on success would leave DSH down
-// until someone noticed.
+// This process cannot stop its own parent and survive: the shell traps the
+// listener's death, so killing the supervisor kills the listener too. The change
+// is therefore written as a *request* and the container is restarted, which is the
+// one lifecycle transition that can both stop the tree and re-run the work:
+//
+//   write /run/dsh-runtime/.pending-maintenance {action, args}
+//   exit non-zero  ->  `restart: on-failure` re-execs dsh-runtime serve
+//   serve sees the request before starting Web, runs it with the tree idle,
+//   then starts Web on the new selection.
+//
+// The caller gets "restart scheduled" rather than the command's output, because
+// the command has not run yet when the response is written.
+const PENDING_FILE = '/run/dsh-runtime/.pending-maintenance'
 
-async function withWebStopped (work) {
-  const result = await work()
-  // The supervisor is `exec`'d, so the only way to make it re-read the version
-  // pointer is to end the container and let `restart: on-failure` bring it back.
-  // Exiting zero would leave DSH down until someone noticed, so this exits
-  // non-zero whether the change succeeded or not: after a failed upgrade the old
-  // version should come back, not stay down.
-  return result
+function scheduleAfterRestart (action, args) {
+  writeFileSync(PENDING_FILE + '.new', JSON.stringify({ action, args, at: Date.now() }), { mode: 0o600 })
+  renameSync(PENDING_FILE + '.new', PENDING_FILE)
 }
-// Set when a change ran, so the response is sent before the process ends.
-let restartAfterResponse = false
 
 function run (argv) {
   return new Promise(resolve => {
@@ -155,20 +157,23 @@ const server = createServer(async (req, res) => {
   }
   // Only the commands that rewrite DSH_HOME need the supervisor stopped. Reading
   // commands run as-is, so a status check never interrupts the service.
-  const NEEDS_STOP = new Set(['upgrade', 'rollback', 'restore'])
-  const result = NEEDS_STOP.has(action)
-    ? await withWebStopped(() => run(argv))
-    : await run(argv)
+  // Commands that rewrite DSH_HOME are deferred to the next container start: this
+  // process cannot stop the supervisor it belongs to and survive to run them.
+  const NEEDS_RESTART = new Set(['upgrade', 'rollback', 'restore'])
+  let result
+  if (NEEDS_RESTART.has(action)) {
+    scheduleAfterRestart(action, parsed.args ?? {})
+    result = { code: 0, stdout: 'Change scheduled; the container restarts and applies it.', stderr: '' }
+    respond(res, 200, { action, argv, ok: true, deferred: true, ...result })
+    // Exit non-zero so `restart: on-failure` re-execs the supervisor, which reads
+    // the request before it starts Web again.
+    res.on('finish', () => setTimeout(() => process.exit(1), 300))
+    return
+  }
+  result = await run(argv)
   // A non-zero exit is a result, not a server error: the CLI prints why it
   // refused, and that text is what the operator needs to see.
   respond(res, 200, { action, argv, ok: result.code === 0, ...result })
-  if (NEEDS_STOP.has(action)) {
-    // The response is on the wire; now end the container so `restart:
-    // on-failure` re-execs the supervisor against the new version pointer. A
-    // delay covers the write flush without holding the connection open.
-    restartAfterResponse = true
-    res.on('finish', () => setTimeout(() => process.exit(1), 300))
-  }
 })
 
 const [host, port] = ADDR.split(':')
