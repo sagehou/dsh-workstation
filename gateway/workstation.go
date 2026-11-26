@@ -242,10 +242,12 @@ func (g *gateway) provider(r *http.Request, method, route string, body io.Reader
 	return nil
 }
 func (g *gateway) controlPage(w http.ResponseWriter, r *http.Request) {
-	var status browserStatus
-	p := page{View: "control", Title: "浏览器控制", Control: status}
-	if err := g.provider(r, "GET", "/status", nil, &p.Control); err != nil {
-		p.Error = "浏览器控制服务不可用。"
+	p := page{View: "control", Title: "浏览器控制"}
+	if g.browserEnabled {
+		p.ProviderOK = g.provider(r, "GET", "/status", nil, &p.Control) == nil
+		if !p.ProviderOK {
+			p.Error = "浏览器控制服务不可用。"
+		}
 	}
 	if r.URL.Query().Get("failed") == "1" {
 		p.Error = "浏览器未接受此操作。"

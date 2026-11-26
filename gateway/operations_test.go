@@ -19,6 +19,7 @@ func TestManagementMaintenance(t *testing.T) {
 	g, _, seed := newTestGateway(t)
 	const id = "20261126T101500Z.abcdef123456"
 	var calls atomic.Int32
+	var refuseVerify atomic.Bool
 	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var command struct {
 			Action string
@@ -32,6 +33,10 @@ func TestManagementMaintenance(t *testing.T) {
 		calls.Add(1)
 		if command.Action == "verify" && command.Args["id"] != id {
 			t.Error("Gateway forwarded the wrong archive id")
+		}
+		if command.Action == "verify" && refuseVerify.Load() {
+			writeJSON(w, map[string]any{"ok": false, "stderr": "archive checksum mismatch"})
+			return
 		}
 		switch command.Action {
 		case "backup", "verify":
@@ -84,11 +89,19 @@ func TestManagementMaintenance(t *testing.T) {
 	if calls.Load() != 2 || !strings.Contains(verified.Body.String(), "备份校验通过。") || !strings.Contains(verified.Body.String(), "0.2.2-rc.1") {
 		t.Fatal("Gateway did not show the verified backup and its DSH version")
 	}
+	refuseVerify.Store(true)
+	failed := post("verify")
+	response(t, failed, http.StatusConflict)
+	for _, required := range []string{"无法校验备份。", "archive checksum mismatch", `<option value="` + id + `" selected>`} {
+		if !strings.Contains(failed.Body.String(), required) {
+			t.Fatalf("backup error lost %q", required)
+		}
+	}
 	if _, err := g.db.Exec("UPDATE sessions SET stepped=?", time.Now().Add(-5*time.Minute).Unix()); err != nil {
 		t.Fatal(err)
 	}
 	response(t, post("backup"), http.StatusSeeOther)
-	if calls.Load() != 2 {
+	if calls.Load() != 3 {
 		t.Fatal("an expired step-up authorized a backup")
 	}
 }

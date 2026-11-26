@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,9 @@ var pages string
 //go:embed passkey.js
 var passkeyJS []byte
 
+//go:embed ui.js
+var uiJS []byte
+
 //go:embed style.css
 var styleCSS []byte
 
@@ -24,27 +28,78 @@ type auditEvent struct {
 	Event string
 }
 type page struct {
-	View, Title, CSRF, Next, Error, Key, Challenge, Notice string
-	Status                                                 int
-	Recent                                                 bool
-	Codes                                                  []string
-	Keys                                                   []namedKey
-	Sessions                                               []session
-	Events                                                 []auditEvent
-	Control                                                browserStatus
-	ProviderOK                                             bool
-	Runtime                                                runtimeState
-	Backups                                                []backupEntry
-	Components                                             components
-	Versions                                               availableVersions
+	View, Title, CSRF, Next    string
+	Error, ErrorDetail, Notice string
+	Key, Challenge, BackupID   string
+	Status                     int
+	Recent, BrowserEnabled     bool
+	Codes                      []string
+	Keys                       []namedKey
+	Sessions                   []session
+	Events                     []auditEvent
+	Control                    browserStatus
+	ProviderOK                 bool
+	Runtime                    runtimeState
+	Backups                    []backupEntry
+	Components                 components
+	Versions                   availableVersions
+}
+
+const displayTime = "2006-01-02 15:04 UTC"
+
+var componentLabels = map[string]string{
+	"node": "Node.js", "git": "Git", "python": "Python", "os": "系统", "arch": "架构", "runtime-image": "Runtime 镜像",
+}
+
+var auditLabels = map[string]string{
+	"account_created": "初始化管理员", "account_enable": "启用账户", "account_disable": "停用账户",
+	"login_totp": "动态验证码登录", "login_passkey": "Passkey 登录", "login_recovery": "恢复码登录",
+	"password_failed": "登录验证失败", "login_totp_failed": "动态验证码验证失败", "login_recovery_failed": "恢复码验证失败",
+	"passkey_failed": "Passkey 登录失败", "stepup": "重新验证身份", "stepup_failed": "重新验证身份失败",
+	"password_changed": "修改密码", "passkey_added": "添加 Passkey", "passkey_removed": "移除 Passkey",
+	"totp_changed": "更换动态验证器", "recovery_regenerated": "重新生成恢复码",
+	"session_revoked": "撤销会话", "sessions_revoked": "撤销全部会话",
+	"runtime_backup": "创建备份", "runtime_backup_failed": "创建备份失败", "runtime_backup_denied": "创建备份被拒绝",
+	"runtime_verify": "校验备份", "runtime_verify_failed": "备份校验失败", "runtime_verify_denied": "备份校验被拒绝",
+	"browser_takeover": "接管浏览器", "browser_grant": "移交浏览器控制权",
+}
+
+func displayLabel(labels map[string]string, key string) string {
+	if text := labels[key]; text != "" {
+		return text
+	}
+	return key
+}
+
+func fileSize(bytes int64) string {
+	switch {
+	case bytes >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(bytes)/(1<<30))
+	case bytes >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(bytes)/(1<<20))
+	case bytes >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(bytes)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
 }
 
 var ui = template.Must(template.New("page").Funcs(template.FuncMap{
-	"stamp": func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format("2006-01-02 15:04 UTC") },
-	"mib":   func(bytes int64) float64 { return float64(bytes) / (1024 * 1024) },
+	"stamp":          func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(displayTime) },
+	"isoTime":        func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(time.RFC3339) },
+	"fileSize":       fileSize,
+	"componentLabel": func(key string) string { return displayLabel(componentLabels, key) },
+	"auditLabel":     func(key string) string { return displayLabel(auditLabels, key) },
+	"archiveTime": func(raw string) string {
+		if stamp, err := time.Parse(time.RFC3339, raw); err == nil {
+			return stamp.UTC().Format(displayTime)
+		}
+		return raw
+	},
 }).Parse(pages))
 
 func (g *gateway) render(w http.ResponseWriter, r *http.Request, p page) {
+	p.BrowserEnabled = g.browserEnabled
 	p.CSRF = cookie(r, csrfCookie)
 	if len(p.CSRF) != 43 {
 		p.CSRF = randomText(random(32))

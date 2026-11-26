@@ -68,6 +68,19 @@ func response(t *testing.T, r *httptest.ResponseRecorder, status int) {
 		t.Fatalf("got %d, want %d", r.Code, status)
 	}
 }
+
+func TestLoginReturnsDirectlyToManagement(t *testing.T) {
+	g := &gateway{origin: "https://workstation.test", absolute: 3600}
+	for _, path := range []string{"/mgmt", "/mgmt/backup", "/mgmt/account?tab=security"} {
+		w := httptest.NewRecorder()
+		g.loginDone(w, req(g, "POST", "/_auth/totp", nil), randomText(random(32)), path, false)
+		response(t, w, http.StatusSeeOther)
+		if location := w.Header().Get("Location"); location != path {
+			t.Fatalf("login to %s redirected to %s", path, location)
+		}
+	}
+}
+
 func TestTwoStepLoginAndReplay(t *testing.T) {
 	g, _, seed := newTestGateway(t)
 	csrf := named(request(g, req(g, "GET", "/_auth/login", nil)), csrfCookie)

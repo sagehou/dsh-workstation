@@ -142,27 +142,23 @@ func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request) {
 	inventoryCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	g.fetchInventory(r.WithContext(inventoryCtx), &page)
-	// The Provider status is the one live dependency; without it the browser
-	// cards read as unknown rather than empty.
-	var status browserStatus
-	if err := g.provider(r, "GET", "/status", nil, &status); err == nil {
-		page.Control = status
-		page.ProviderOK = true
+	if g.browserEnabled {
+		page.ProviderOK = g.provider(r, "GET", "/status", nil, &page.Control) == nil
 	}
 	g.render(w, r, page)
 }
 
-// backupPage is the same data as the operations page, on its own tab. It exists
-// separately because a restore decision should not be one scroll away from a
-// version listing: the two are read for different reasons.
-func (g *gateway) backupPage(w http.ResponseWriter, r *http.Request, s session) {
-	page := page{
-		View:   "backup",
-		Title:  "备份",
-		Recent: stepped(s),
+func backupView(s session) page {
+	return page{
+		View:    "backup",
+		Title:   "备份",
+		Recent:  stepped(s),
+		Backups: readBackups(os.Getenv("WORKSTATION_BACKUP_DIR")),
 	}
-	page.Backups = readBackups(os.Getenv("WORKSTATION_BACKUP_DIR"))
-	g.render(w, r, page)
+}
+
+func (g *gateway) backupPage(w http.ResponseWriter, r *http.Request, s session) {
+	g.render(w, r, backupView(s))
 }
 
 // runtimeAction forwards one maintenance request to the Runtime container.
@@ -227,26 +223,33 @@ func (g *gateway) runtimeControl(w http.ResponseWriter, r *http.Request, s sessi
 	// Large archives can outlast the default page write deadline.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Minute))
 	result, err := g.runtimeAction(r, action, args)
-	if err != nil {
-		g.failure(r, "runtime_"+action+"_denied")
-		http.Error(w, err.Error(), http.StatusConflict)
-		return
-	}
-	// The CLI explains a refusal in its own words; that text is the point of
-	// surfacing the command rather than a boolean.
-	if ok, _ := result["ok"].(bool); !ok {
-		g.failure(r, "runtime_"+action+"_failed")
-		message, _ := result["stderr"].(string)
-		if message == "" {
-			message, _ = result["stdout"].(string)
+	if ok, _ := result["ok"].(bool); err != nil || !ok {
+		view := backupView(s)
+		view.Status = http.StatusConflict
+		view.Error = "无法创建备份。"
+		if action == "verify" {
+			view.Error = "无法校验备份。"
+			view.BackupID = r.PostForm.Get("id")
 		}
-		http.Error(w, message, http.StatusConflict)
+		if err != nil {
+			g.failure(r, "runtime_"+action+"_denied")
+			view.ErrorDetail = err.Error()
+		} else {
+			g.failure(r, "runtime_"+action+"_failed")
+			view.ErrorDetail, _ = result["stderr"].(string)
+			if view.ErrorDetail == "" {
+				view.ErrorDetail, _ = result["stdout"].(string)
+			}
+		}
+		g.render(w, r, view)
 		return
 	}
 	g.failure(r, "runtime_"+action)
 	if action == "verify" {
-		g.render(w, r, page{View: "backup", Title: "备份", Recent: stepped(s), Notice: "备份校验通过。",
-			Backups: readBackups(os.Getenv("WORKSTATION_BACKUP_DIR"))})
+		view := backupView(s)
+		view.Notice = "备份校验通过。"
+		view.BackupID = r.PostForm.Get("id")
+		g.render(w, r, view)
 		return
 	}
 	http.Redirect(w, r, "/mgmt/backup", http.StatusSeeOther)

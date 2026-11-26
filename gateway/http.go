@@ -161,11 +161,13 @@ func (g *gateway) loginDone(w http.ResponseWriter, r *http.Request, token, next 
 	setCookie(w, preCookie, "", -1)
 	setCookie(w, csrfCookie, "", -1)
 	next = safePath(next)
+	target, _, _ := strings.Cut(next, "?")
+	target = path.Clean(target)
 	to := next
 	switch {
-	case next == "/browser" || strings.HasPrefix(next, "/browser/"):
+	case target == "/browser" || strings.HasPrefix(target, "/browser/"):
 		to = "/_auth/browser"
-	case !strings.HasPrefix(next, "/_auth/"):
+	case target != "/mgmt" && !strings.HasPrefix(target, "/mgmt/") && !strings.HasPrefix(target, "/_auth/"):
 		to = nextURL("/_auth/dsh", next)
 	}
 	if asJSON {
@@ -316,6 +318,10 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 	case "GET /_auth/passkey.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = w.Write(passkeyJS)
+		return
+	case "GET /_auth/ui.js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write(uiJS)
 		return
 	}
 
