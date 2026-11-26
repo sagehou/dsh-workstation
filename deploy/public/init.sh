@@ -117,7 +117,7 @@ SAN
 }
 
 if $fresh; then
-  for name in auth-key provider-admin selkies-master selkies-controller selkies-sentinel browser-enroll gate-control; do
+  for name in auth-key provider-admin selkies-master selkies-controller selkies-sentinel browser-enroll gate-control maintenance; do
     openssl rand -hex 32 | tr -d '\n' > "$state/secrets/$name"
   done
   issue_runtime_pki

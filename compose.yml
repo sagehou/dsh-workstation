@@ -45,13 +45,26 @@ services:
       AUTH_BROWSER_UPSTREAM: http://dsh-workstation-browser-gate:8082
       # Every other browser WebSocket bypasses the gate.
       AUTH_BROWSER_DIRECT: http://dsh-workstation-chromium:3000
+      # Read-only paths for the operations page (#32). Both volumes are mounted
+      # read-only above; these names keep the Go code free of hard-coded paths.
+      WORKSTATION_DSH_HOME: /dsh-home
+      WORKSTATION_BACKUP_DIR: /backup
+      # The Gateway forwards maintenance actions to the Runtime listener (#32).
+      # It never runs dsh-runtime itself.
+      WORKSTATION_MAINTENANCE_ADDR: dsh-workstation-runtime:8099
+      WORKSTATION_MAINTENANCE_SECRET: /run/secrets/maintenance
       AUTH_IDLE: ${AUTH_IDLE:-30m}
       AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-12h}
       AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-8}
-    secrets: [auth_key, m0_controller, m0_admin, runtime_ca]
+    secrets: [auth_key, m0_controller, m0_admin, runtime_ca, maintenance]
     volumes:
       - auth-data:/data
       - runtime-launch:/run/dsh-runtime:ro
+      # Read-only view of the Runtime's version state for the operations page
+      # (#32). The Gateway never writes here: upgrades stay on the CLI, where the
+      # explicit `docker compose run` is part of the safety story.
+      - dsh-home:/dsh-home:ro
+      - backups:/backup:ro
     networks:
       proxy:
         aliases: [dsh-workstation-auth-edge]
@@ -89,9 +102,13 @@ services:
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
       WORKSTATION_BROWSER_MCP: "1"
+      # The maintenance listener is the only path that may change the DSH version
+      # from outside this container (#32). Auth calls it with the same secret.
+      MAINTENANCE_ADDR: 0.0.0.0:8099
+      MAINTENANCE_SECRET: /run/secrets/maintenance
       WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.1}
       NODE_EXTRA_CA_CERTS: /run/secrets/runtime_ca
-    secrets: [runtime_ca, runtime_cert, runtime_key, browser_enroll]
+    secrets: [runtime_ca, runtime_cert, runtime_key, browser_enroll, maintenance]
     healthcheck:
       test: ["CMD", "dsh-runtime", "health"]
       interval: 15s
@@ -275,6 +292,8 @@ secrets:
     file: ${WORKSTATION_STATE:-./.workstation}/secrets/browser-enroll
   gate_control:
     file: ${WORKSTATION_STATE:-./.workstation}/secrets/gate-control
+  maintenance:
+    file: ${WORKSTATION_STATE:-./.workstation}/secrets/maintenance
 
 volumes:
   auth-data:

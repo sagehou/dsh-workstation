@@ -4,6 +4,9 @@ COPY provider/package.json provider/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund \
  && install -d -m 0700 -o node -g node /state /run/workstation-cdp
 COPY prototypes/m0/provider/server.mjs ./
+# The recording script is injected into pages at runtime (#31); it lives beside
+# the server so `new URL('./recorder.js', import.meta.url)` resolves.
+COPY prototypes/m0/provider/recorder.js ./
 COPY provider/cdp.mjs ./
 USER node
 CMD ["node", "cdp.mjs"]
