@@ -5,6 +5,7 @@
 !prototypes/m0/
 !prototypes/m0/provider/
 !prototypes/m0/provider/server.mjs
+!prototypes/m0/provider/recorder.js
 !prototypes/m0/browser/
 !prototypes/m0/browser/relay.mjs
 # The input gate builds from the repository root, and this file is an allowlist:

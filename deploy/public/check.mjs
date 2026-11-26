@@ -177,20 +177,16 @@ try {
     const first = (await rpc('session/create', { cwd: '/workspace' })).sessionId
     const second = (await rpc('session/create', { cwd: '/workspace' })).sessionId
     assert.ok(first && second && first !== second)
-    // ADR-0006: a tool call takes the lease itself, so `lease_status` returns a
-    // generation instead of NO_LEASE. The isolation properties are unchanged and
-    // still asserted below — a second session must not be able to use this
-    // generation, and a superseded one must be refused. What changed is only how
-    // the first lease is obtained.
+    assert.equal(await send(first, 'without', 'navigate', { generation: 'expired', url: 'https://fixture.test/alpha' }), 'NO_LEASE')
     const generation = await send(first, 'lease1', 'lease_status')
     assert.match(generation, /^[a-f0-9-]{36}:\d+$/, 'the Agent did not obtain a lease on its own')
-    assert.equal(await send(second, 'other', 'navigate', { generation, url: 'https://fixture.test/beta' }), 'NOT_OWNER')
-    assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
     assert.equal(await send(first, 'open1', 'navigate', { generation, url: 'https://fixture.test/alpha' }), 'OK')
+    assert.equal(await send(second, 'other', 'navigate', { generation, url: 'https://fixture.test/beta' }), 'NOT_OWNER')
+    assert.equal(await send(second, 'lease-blocked', 'lease_status'), 'NOT_OWNER')
+    assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
     assert.equal(await send(first, 'read1', 'read', { generation }), 'WTAB_ALPHA')
 
-    // #4 on the real Selkies instance: a human presses and holds a pointer
-    // button on the live desktop, then hands the tab to the Agent.
+    // A human holds a pointer button on the live desktop during automatic acquisition.
     //
     // The desk below is the operator's own Selkies session reached through the
     // input gate, authorised by the real token table. The press is a real
@@ -232,14 +228,7 @@ try {
     await desk.evaluate(() => window.ciDesk.ws.send('m,320,240,1,0'))
     await wait(700)
 
-    // Hand the tab over while the button is still down. The Provider refuses
-    // the lease when its handover fails, so reaching AGENT here already means
-    // the gate proved a release on this socket.
-    //
-    // `first` already has a bound tab from the earlier lease, and the control
-    // page marks that in the option label -- picking the bare session id would
-    // time out rather than hand anything over.
-    await action('将标签页交给 Agent', first + ' · 已绑定')
+    // The Provider grants the lease only after the gate confirms release.
     const heldGeneration = await send(first, 'lease-held', 'lease_status')
     assert.match(heldGeneration, /^[a-f0-9-]{36}:\d+$/,
       'the grant was refused over a socket holding a button, so no release was proven')
@@ -252,7 +241,7 @@ try {
     // prove nothing at all.
     assert.ok(downs >= 1, 'the press never reached the Agent tab, so this proves nothing: ' + held)
     assert.ok(ups >= downs, 'the desktop was left mid-press by the handover: ' + held)
-    console.log('Held pointer: a button pressed and held on the real desktop was released at the Selkies boundary before the Agent took the tab')
+    console.log('Held pointer: automatic acquisition released the real Selkies press before the Agent took the tab')
     await desk.close()
 
     // The other direction: a client that disappears while still holding the

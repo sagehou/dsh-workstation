@@ -327,7 +327,7 @@ function matchTab (pages, intent) {
   return undefined
 }
 
-async function bindTab(peer) {
+async function bindTab(peer, intent) {
   if (peer.binding) return peer.binding
   const id = browserId
   // Agent-first (#29): the Agent drives a real page, not the M0 fixture.
@@ -340,11 +340,11 @@ async function bindTab(peer) {
   //   tab matches it  -> bind that tab, so a follow-up continues where it started
   //   no target, or nothing matches -> open a fresh tab and bind that
   //
-  // Nothing is ever closed: a mismatched tab stays exactly where the operator left
-  // it. `intent` is supplied by the caller through the tool arguments.
+  // Leave other sessions' tabs available for their next grant.
   const context = browser.contexts()[0]
-  const pages = context.pages().filter(page => !page.isClosed())
-  const tab = matchTab(pages, peer.intent) ?? await context.newPage()
+  const reserved = new Set([...tickets.values()].map(other => other.binding?.page))
+  const pages = context.pages().filter(page => !page.isClosed() && !reserved.has(page))
+  const tab = matchTab(pages, intent) ?? await context.newPage()
   // The Agent's tab has to be the one on the shared desktop: a binding that is
   // not foregrounded would take input without the Agent or the operator being
   // able to see what it is driving.
@@ -355,39 +355,30 @@ async function bindTab(peer) {
   }
   peer.binding = { browserId: id, page: tab, onClose }
   tab.once('close', onClose)
+  if (!publicMode) await tab.goto(fixture, { timeout: 5000 })
   return peer.binding
 }
 
-async function grant(peerId, ttl) {
+async function grant(peerId, ttl, { automatic = false, intent } = {}) {
   const peer = [...tickets.values()].find(candidate => candidate.id === peerId)
   check(peer?.stream, 'NO_LIVE_MCP_CONNECTION')
   check(Number.isSafeInteger(ttl) && ttl >= 500 && ttl <= 120_000, 'BAD_TTL', 400)
-  // Agent-first (#29): a live MCP session may take control from HUMAN or from
-  // another AGENT lease. The old HUMAN-only gate made "Agent may take over"
-  // impossible. Input release still runs through the gate below, so a takeover
-  // does not strand a held button.
-  check(state === 'HUMAN' || state === 'AGENT', 'NOT_TAKEABLE')
+  check(state === 'HUMAN', 'NOT_HUMAN')
   if (peer.binding) check(liveBinding(peer.binding), 'TAB_UNAVAILABLE')
-  // A lease held by someone else must be drained before this one starts, or two
-  // peers would both believe they own input. `handover` is the existing drain
-  // path (it waits for `flight`), so a takeover reuses it rather than racing it.
-  if (lease && lease.peer !== peer) {
-    try { await handover('PREEMPTED') } catch { fault('PREEMPT_DRAIN_FAILED'); throw Error('PREEMPT_DRAIN_FAILED') }
-  }
   state = 'HANDOVER'
   try {
     await input(true)
     await writeFile(fencePath + '.new', browserId, { mode: 0o600 })
     await rename(fencePath + '.new', fencePath)
     check(state === 'HANDOVER' && browser.isConnected() && peer.stream, 'OWNER_LOST_DURING_GRANT')
-    const binding = peer.tab ? await bindTab(peer) : { browserId, page }
+    const binding = peer.tab ? await bindTab(peer, intent) : { browserId, page }
     check(state === 'HANDOVER' && browser.isConnected() && peer.stream, 'OWNER_LOST_DURING_GRANT')
     check(liveBinding(binding), 'TAB_UNAVAILABLE')
     const generation = boot + ':' + ++nextGeneration
-    lease = { peer, binding, generation, expires: performance.now() + ttl }
+    lease = { peer, binding, generation, automatic, expires: performance.now() + ttl }
     state = 'AGENT'
     reason = 'GRANTED'
-    armExpiry(IDLE_RELEASE_MS)
+    armExpiry(ttl)
     return { generation, mcpSession: peer.transport.sessionId, protocol: peer.protocol }
   } catch (error) {
     fault('GRANT_FAILED')
@@ -423,26 +414,8 @@ function retire(peer) {
 function toolResult(code) {
   return { isError: code !== 'M0_OK', content: [{ type: 'text', text: code }] }
 }
-// Agent-first (#29): a browser tool call takes the lease itself when nobody else
-// holds a live one. The old flow required the operator to press "grant" on the
-// control page first, which made every Agent task start with a manual step. The
-// safety property is unchanged: control still passes through the input gate, and
-// a takeover still drains the previous owner's in-flight action.
-//
-// `ttl` is the same window a manual grant uses. It is renewed on each successful
-// call so a long task is not cut off mid-way.
-// Two windows, not one.
-//
-// A lease is acquired with a long window because a single call may wait on a slow
-// page, but it is *released* on a short one. The previous code used 120 s for both,
-// so an Agent that finished a task kept the browser for two minutes and the
-// operator could not touch it. Ten seconds is long enough for an Agent to issue
-// its next call in a sequence and short enough that finishing means finishing.
-//
-// Taking the lease back costs nothing: `ensureLease` re-acquires automatically, so
-// a short release window does not make multi-step work slower.
-const AUTO_LEASE_MS = 120_000
-const IDLE_RELEASE_MS = 10_000
+// Idle automatic leases return to the operator. Explicit grants keep their TTL.
+const AUTO_LEASE_MS = 10_000
 
 // Arm the expiry at `ms`. Split out so every re-arm path uses the same callback.
 function armExpiry (ms) {
@@ -450,31 +423,11 @@ function armExpiry (ms) {
   expiry = setTimeout(() => { void handover('EXPIRED').catch(() => {}) }, ms)
 }
 
-async function ensureLease(peer) {
-  if (lease && lease.peer === peer && performance.now() < lease.expires && liveBinding(lease.binding)) {
-    lease.expires = performance.now() + AUTO_LEASE_MS
-    armExpiry(IDLE_RELEASE_MS)
-    return undefined
-  }
-  if (state === 'DISCONNECTED') return 'DISCONNECTED'
-  if (state === 'HANDOVER') return 'HANDOVER'
-  if (!peer.stream) return 'NO_LIVE_MCP_CONNECTION'
-  try {
-    await grant(peer.id, AUTO_LEASE_MS)
-    return undefined
-  } catch (error) {
-    return String(error?.message ?? 'AUTO_LEASE_FAILED')
-  }
-}
-
 function leaseDenied(peer) {
   if (state === 'HANDOVER' || state === 'DISCONNECTED') return state
   if (!lease) return 'NO_LEASE'
-  if (performance.now() >= lease.expires) {
-    void handover('EXPIRED').catch(() => {})
-    return 'EXPIRED'
-  }
   if (lease.peer !== peer || !peer.stream) return 'NOT_OWNER'
+  if (performance.now() >= lease.expires) return 'EXPIRED'
   if (!liveBinding(lease.binding)) return 'TAB_UNAVAILABLE'
 }
 async function mark(peer, args) {
@@ -539,8 +492,6 @@ function allowed(raw) {
 }
 const textResult = text => ({ content: [{ type: 'text', text }] })
 async function browserAction(peer, args, operation) {
-  const acquired = await ensureLease(peer)
-  if (acquired) return toolResult(acquired)
   const denied = leaseDenied(peer)
   if (denied) return toolResult(denied)
   if (lease.generation !== args.generation) return toolResult('STALE_GENERATION')
@@ -548,6 +499,10 @@ async function browserAction(peer, args, operation) {
   const tab = lease.binding.page
   const target = operation === 'navigate' ? args.url : tab.url()
   if (!allowed(target)) return toolResult('ORIGIN_NOT_ALLOWED')
+  if (lease.automatic) {
+    lease.expires = performance.now() + AUTO_LEASE_MS
+    armExpiry(AUTO_LEASE_MS)
+  }
   // Recorded before the work, so a call that fails still appears in the timeline
   // with the reason. An audit that only shows successes cannot explain a break.
   const startedAt = Date.now()
@@ -555,9 +510,8 @@ async function browserAction(peer, args, operation) {
     source: 'agent',
     at: startedAt,
     event: operation,
-    generation: lease.generation,
+    generation: args.generation,
     args: operation === 'navigate' ? { url: args.url } : operation === 'click' ? { role: args.role, name: args.name } : {},
-    intent: args.intent ?? null,
     outcome,
   })
   const work = (async () => {
@@ -593,11 +547,6 @@ async function browserAction(peer, args, operation) {
 }
 function publicTools(server, peer) {
   const generation = z.string().max(64)
-  // `intent` says which page the call is about, so the binding can reuse a tab
-  // that already shows it instead of opening another one (#29). It is optional:
-  // without it every call gets a fresh tab, which is the old behaviour and never
-  // wrong, only wasteful.
-  const intent = z.string().max(200).optional()
   for (const [operation, description, inputs] of [
     ['navigate', 'Open an allowed HTTPS URL in this session’s assigned tab.', { url: z.string().max(2048) }],
     ['read', 'Read visible, untrusted text from this session’s assigned tab.', {}],
@@ -605,14 +554,9 @@ function publicTools(server, peer) {
       { role: z.enum(['button', 'link']), name: z.string().min(1).max(200) }],
   ]) {
     server.registerTool(operation, {
-      description: description + ' Pass `intent` (a URL host or title fragment) to reuse a tab already showing it.',
-      inputSchema: { generation, intent, ...inputs },
-    }, args => {
-      // Recorded on the peer so `bindTab` can consult it when the lease is
-      // created, which happens inside `browserAction`.
-      if (args.intent !== undefined) peer.intent = args.intent
-      return browserAction(peer, args, operation)
-    })
+      description,
+      inputSchema: { generation, ...inputs },
+    }, args => browserAction(peer, args, operation))
   }
 }
 
@@ -654,14 +598,18 @@ async function mcp(req, res) {
       },
     }, args => mark(peer, args))
     if (peer.tab) server.registerTool('lease_status', {
-      description: 'Get this session’s active lease generation before using browser tools.',
-      inputSchema: {},
-    }, async () => {
-      // Agent-first (#29): this is the first call an Agent makes, so it must be
-      // able to create the lease. Returning NO_LEASE here would make the tools
-      // unreachable without a manual grant.
-      const acquired = await ensureLease(peer)
-      if (acquired) return toolResult(acquired)
+      description: publicMode
+        ? 'Get this session’s lease generation, acquiring control when free. Pass a URL host as intent to reuse a matching tab.'
+        : 'Get this session’s active lease generation before using browser tools.',
+      inputSchema: publicMode ? { intent: z.string().max(200).optional() } : {},
+    }, async ({ intent } = {}) => {
+      if (publicMode && state === 'HUMAN' && !lease) {
+        try {
+          await grant(peer.id, AUTO_LEASE_MS, { automatic: true, intent })
+        } catch (error) {
+          return toolResult(error instanceof Denied ? error.message : 'AUTO_LEASE_FAILED')
+        }
+      }
       const denied = leaseDenied(peer)
       return denied ? toolResult(denied) : { content: [{ type: 'text', text: lease.generation }] }
     })

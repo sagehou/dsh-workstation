@@ -201,13 +201,6 @@ function resume () {
 
 function attach (operator, request) {
   const protocols = request.headers['sec-websocket-protocol']
-  // TEMPORARY DIAGNOSTIC (#5): the operator page offers the session token as a
-  // `selkies.token.<base64url>` subprotocol. If it arrives empty, Selkies answers
-  // 401 to every upgrade and the page loops on "WebSocket disconnected". Record
-  // the shape without the token value, then remove this line.
-  log({ type: 'attach_protocols', count: protocols ? protocols.split(',').length : 0,
-    kinds: protocols ? protocols.split(',').map(v => v.trim().split('.')[0] + (v.includes('token') ? '+' : '')).join(' ') : 'none',
-    host: request.headers.host ?? 'none', origin: request.headers.origin ?? 'none' })
   const headers = {}
   // Host and Origin are forwarded unchanged. Selkies checks that an upgrade's
   // Origin is allowed (stream_server.py:2408-2442), and it matches against the
