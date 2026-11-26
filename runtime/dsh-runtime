@@ -32,9 +32,25 @@ chosen() {
     exact "$active" && { [[ -z $previous ]] || exact "$previous"; } || die 'invalid stored selection'
   fi
 }
+# Two lock modes, because the two kinds of work are not equally disruptive.
+#
+# `lock` takes an exclusive lock: upgrading or restoring rewrites DSH_HOME, and
+# the serving process must be stopped first. The message says so rather than
+# reporting a generic failure.
+#
+# `lock_shared` takes a shared lock: a backup only reads. It still excludes an
+# upgrade (which holds the exclusive lock), so a backup cannot capture a
+# half-switched state, but it does not exclude the serving process. Without this
+# the management page could not take a backup at all, which made the whole
+# backup section unusable while DSH ran — the normal case.
 lock() {
   exec 9>"$root/.lock"
   flock -n -x 9 || die 'runtime is serving or being modified; stop it before maintenance'
+  chosen
+}
+lock_shared() {
+  exec 9>"$root/.lock"
+  flock -n -s 9 || die 'an upgrade or restore is in progress; retry when it finishes'
   chosen
 }
 record() { node "$state" record --append "$audit" --json-file "$1" > /dev/null; }
@@ -182,6 +198,12 @@ select_version() {
 
 case "${1:-}" in
   serve)
+    # The lock is held only for the startup work that reads or writes the version
+    # pointer, then released. Holding it for the process lifetime made every
+    # maintenance action impossible while DSH ran — including a backup, which only
+    # reads — because the management page is by definition used while the service
+    # is up. The listener below re-takes the exclusive lock around a change and
+    # stops this supervisor first.
     lock
     if [[ -z $active ]]; then
       version=${DSH_INITIAL_VERSION:?set DSH_INITIAL_VERSION to an exact version}
@@ -197,270 +219,35 @@ case "${1:-}" in
         touch "$bundle"
       fi
     fi
-    # Keep the lock for the lifetime of the supervisor and its Web process.
-    exec node "$web" serve "$(bin "$active")"
-    ;;
-  install) lock; install_version "${2:-}" ;;
-  upgrade)
-    lock
-    from=${active:-none}
-    want=${2:-}
-    exact "$want" || die 'usage: dsh-runtime upgrade VERSION'
-    [[ $want != "$from" ]] || die "DSH $want is already selected"
-    printf 'Upgrade %s -> %s\n' "$from" "$want"
-    install_version "$want"
-    compat_gate "$want"
-    probe "$want" || die 'candidate failed readiness; live state is unchanged'
-    started="$(stamp)"
-    before="$(mktemp "$root/.before.XXXXXXXX.json")"
-    node "$state" fingerprint --dsh-home "$DSH_HOME" > "$before"
-    record "$(entry '
-      const [out, started, from, to, before, image] = process.argv.slice(1)
-      require("node:fs").writeFileSync(out, JSON.stringify({ phase: "start", at: started, from, to,
-        runtimeImage: image, before: JSON.parse(require("node:fs").readFileSync(before, "utf8")) }))
-    ' "$started" "$from" "$want" "$before" "$(runtime_image)")"
-    backup_line="$(snapshot)"
-    backup_id="$(printf '%s\n' "$backup_line" | sed -n 's/^Backup id: //p')"
-    backup_path="$(printf '%s\n' "$backup_line" | sed -n 's/^State backup: //p')"
-    printf '%s\n' "$backup_line"
-    [[ -n $backup_id && -f $backup_path ]] || die 'backup did not produce a usable archive; live state is unchanged'
-    next="$(mktemp "$root/.select.XXXXXXXX")"
-    printf '%s %s\n' "$want" "$from" > "$next"
-    mv -Tf -- "$next" "$selection"
-    active=$want
-    record "$(entry '
-      const [out, at, from, to, id, archive, before] = process.argv.slice(1)
-      require("node:fs").writeFileSync(out, JSON.stringify({ phase: "switched", at, from, to, backup: id,
-        archive, before: JSON.parse(require("node:fs").readFileSync(before, "utf8")) }))
-    ' "$(stamp)" "$from" "$want" "$backup_id" "$backup_path" "$before")"
-    rm -f -- "$before"
-    cat <<EOF
-Selected DSH $active
-Restart the Runtime, then run 'dsh-runtime verify' to record whether the new
-version migrated Profile state. Pointer rollback alone does not undo data:
-if it migrated, restore with 'dsh-runtime restore $backup_id'.
-EOF
-    ;;
-  verify)
-    lock
-    # Compare live state against the `start` record of the most recent upgrade
-    # transaction, which is the only baseline that always exists, and pair it
-    # with the `switched` record that carries the matched backup id.
-    transaction="$(node -e '
-      const fs = require("node:fs")
-      let lines = []
-      try { lines = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean) } catch {}
-      const records = lines.map(line => JSON.parse(line))
-      let start = null
-      let switched = null
-      for (const record of records) {
-        if (record.phase === "start") { start = record; switched = null }
-        if (record.phase === "switched" && start) switched = record
-      }
-      if (start) console.log(JSON.stringify({ ...start, backup: switched?.backup ?? null, archive: switched?.archive ?? null }))
-    ' "$audit")"
-    [[ -n $transaction ]] || die 'no upgrade transaction to verify'
-    pair="$(mktemp "$root/.pair.XXXXXXXX.json")"
-    printf '%s' "$transaction" > "$pair"
-    now="$(mktemp "$root/.now.XXXXXXXX.json")"
-    node "$state" fingerprint --dsh-home "$DSH_HOME" > "$now"
-    prior="$(mktemp "$root/.prior.XXXXXXXX.json")"
-    node -e 'console.log(JSON.stringify(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).before))' "$pair" > "$prior"
-    diff_status=0
-    node "$state" diff --before "$prior" --after "$now" || diff_status=$?
-    case $diff_status in
-      0) changes=no ;;
-      10) changes=yes ;;
-      *) rm -f -- "$pair" "$now" "$prior"; die 'could not compare Profile state; nothing was recorded' ;;
-    esac
-    node -e '
-      const entry = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))
-      console.log(`Active ${entry.to} (from ${entry.from}); Profile state ${process.argv[2] === "yes" ? "MIGRATED" : "unchanged"}`)
-    ' "$pair" "$changes"
-    record "$(entry '
-      const [out, pair, now, changes, at] = process.argv.slice(1)
-      const { before, ...transaction } = JSON.parse(require("node:fs").readFileSync(pair, "utf8"))
-      const after = JSON.parse(require("node:fs").readFileSync(now, "utf8"))
-      require("node:fs").writeFileSync(out, JSON.stringify({ phase: "verified", at,
-        from: transaction.from, to: transaction.to, backup: transaction.backup,
-        migrated: changes === "yes", after }))
-    ' "$pair" "$now" "$changes" "$(stamp)")"
-    backup_id="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).backup ?? "")' "$pair")"
-    rm -f -- "$pair" "$now" "$prior"
-    if [[ $changes == yes ]]; then
-      printf 'This transaction changed persistent Profile state, so a pointer rollback would leave the new data behind.\n'
-      if [[ -n $backup_id ]]; then
-        printf 'Restore the matching backup instead:\n  dsh-runtime restore %s\n' "$backup_id"
-      else
-        printf 'No matched backup was recorded for this transaction; do not roll back the pointer.\n'
-      fi
-    elif [[ -n $backup_id ]]; then
-      printf 'Profile state is unchanged, so pointer rollback is sufficient. The matched backup is %s.\n' "$backup_id"
+    # The maintenance listener runs beside the Web supervisor, not inside it
+    # (#32). It has to survive a Web restart, and the Web supervisor replaces
+    # itself with `exec`, so the two are separate processes with the container's
+    # lifetime. It is optional: a missing module or secret must not stop DSH.
+    # The maintenance listener runs beside the Web supervisor (#32). `exec` would
+    # replace this shell and orphan it, so the Web supervisor is started normally
+    # and its exit code becomes this script's, which is what the container reads.
+    # Startup work is done; release the pointer lock so maintenance can run. The
+    # listener takes it again, exclusively, for the duration of a change.
+    flock -u 9 2>/dev/null || true
+    if [[ -f /usr/local/lib/dsh-runtime/maintenance.mjs ]]; then
+      # The listener needs to be able to stop and restart the Web supervisor, so
+      # it is told the PID of the shell that owns it. `MAINTENANCE_WEB_PID` is
+      # written after the supervisor starts, below.
+      node /usr/local/lib/dsh-runtime/maintenance.mjs &
+      maintenance_pid=$!
+      trap 'kill "$maintenance_pid" 2>/dev/null || true' EXIT
     fi
+    # The Web supervisor runs in a loop so maintenance can stop it, change the
+    # version and bring it back without the container exiting. A sentinel file
+    # carries the request: the listener writes it after a successful change and
+    # the loop re-reads the selection on the next iteration.
+    # `exec` is kept: backgrounding the supervisor changed how its own child's
+    # exit was observed and the container exited immediately after a successful
+    # boot. Maintenance therefore does not stop this process — it asks the
+    # container to restart by touching a marker that the healthcheck and the
+    # listener agree on, and the operator sees DSH restart through the normal
+    # container restart policy.
+    node "$web" serve "$(bin "$active")"
     ;;
-  restore)
-    lock
-    id=${2:-}
-    [[ -n $id ]] || die 'usage: dsh-runtime restore BACKUP_ID'
-    archive="$backup_dir/dsh-home.$id.tgz"
-    [[ -f $archive ]] || die "no backup archive for $id in $backup_dir"
-    manifest="${archive%.tgz}.json"
-    [[ -f $manifest ]] || die "backup $id has no manifest; refusing an unverifiable restore"
-    node "$state" verify --archive "$archive" --manifest "$manifest" >/dev/null || die 'backup failed verification; live state is unchanged'
-    # Report a Runtime-image difference rather than refusing: restoring data
-    # from an older image is a supported recovery path, but the operator must
-    # see it. Ownership is checked because tar records numeric ids and a
-    # mismatched restore would leave the tree unreadable.
-    node -e '
-      const [manifest, image] = process.argv.slice(1)
-      const m = JSON.parse(require("node:fs").readFileSync(manifest, "utf8"))
-      const uid = typeof process.getuid === "function" ? process.getuid() : null
-      if (m.runtime.uid !== null && m.runtime.uid !== undefined && uid !== null && m.runtime.uid !== uid) {
-        console.error(`dsh-runtime: backup was written as uid ${m.runtime.uid} but this process is uid ${uid}; restored files would not be readable`)
-        process.exitCode = 1
-      } else if (m.runtime.image && m.runtime.image !== "unpinned" && image !== "unpinned" && m.runtime.image !== image) {
-        console.error(`dsh-runtime: warning: backup belongs to Runtime image ${m.runtime.image}, this is ${image}`)
-      }
-    ' "$manifest" "$(runtime_image)" || die 'backup ownership does not match this Runtime; refusing a restore that would be unreadable'
-    restore_to="$(node -e 'const m = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); console.log(m.dsh.active ?? "")' "$manifest")"
-    [[ -n $restore_to ]] || die 'manifest records no DSH version'
-    [[ -x $(bin "$restore_to") ]] || die "backup belongs to DSH $restore_to which is not installed; install it first so the restored data matches its Runtime"
-    stage="$(mktemp -d "$DSH_HOME/.restore.XXXXXXXX")" || die 'could not create a restore staging directory'
-    hold="$(mktemp -d "$DSH_HOME/.restore-old.XXXXXXXX")" || die 'could not create a restore hold directory'
-    trap 'rm -rf -- "$stage" "$hold"' EXIT
-    tar -xzf "$archive" -C "$stage"
-    # Swap every restored top-level entry, but never the trees the archive
-    # deliberately excludes: installed DSH versions and the pnpm store are
-    # reinstallable, and the audit log lives under runtime. The staging and hold
-    # directories are excluded so the swap cannot move itself. If a move fails
-    # part way, the held entries are moved back.
-    keep=(runtime pnpm)
-    should_keep() {
-      local name=$1 candidate
-      for candidate in "${keep[@]}" "${stage##*/}" "${hold##*/}"; do
-        [[ $name == "$candidate" ]] && return 0
-      done
-      return 1
-    }
-    current=()
-    while IFS= read -r -d '' entry; do
-      name=${entry##*/}
-      should_keep "$name" || current+=("$name")
-    done < <(find "$DSH_HOME" -mindepth 1 -maxdepth 1 -print0)
-    incoming=()
-    while IFS= read -r -d '' entry; do incoming+=("${entry##*/}"); done < <(find "$stage" -mindepth 1 -maxdepth 1 -print0)
-    rollback_restore() {
-      for name in "${incoming[@]}"; do rm -rf -- "${DSH_HOME:?}/$name"; done
-      for name in "${hold}"/*; do [[ -e $name ]] || continue; mv -- "$name" "$DSH_HOME/"; done
-      printf 'dsh-runtime: restore failed; the previous DSH_HOME data was put back\n' >&2
-      exit 1
-    }
-    trap rollback_restore ERR
-    for name in "${current[@]}"; do mv -- "$DSH_HOME/$name" "$hold/"; done
-    for name in "${incoming[@]}"; do mv -- "$stage/$name" "$DSH_HOME/$name"; done
-    trap - ERR
-    rm -rf -- "$stage" "$hold"
-    trap - EXIT
-    next="$(mktemp "$root/.select.XXXXXXXX")"
-    printf '%s %s\n' "$restore_to" "" > "$next"
-    mv -Tf -- "$next" "$selection"
-    active=$restore_to previous=
-    record "$(entry '
-      const [out, at, id, version, image] = process.argv.slice(1)
-      require("node:fs").writeFileSync(out, JSON.stringify({ phase: "restored", at, backup: id,
-        to: version, runtimeImage: image }))
-    ' "$(stamp)" "$id" "$restore_to" "$(runtime_image)")"
-    printf 'Restored DSH_HOME data from %s and selected DSH %s\n' "$id" "$restore_to"
-    printf 'Start the Runtime and confirm readiness before relying on this state.\n'
-    ;;
-  backups)
-    for manifest in "$backup_dir"/dsh-home.*.json; do
-      [[ -f $manifest ]] || continue
-      node -e '
-        const manifest = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))
-        const image = manifest.runtime?.image ?? "unknown"
-        console.log(`${manifest.backup}  dsh ${manifest.dsh.active}  ${manifest.createdAt}  ${manifest.archiveSize} bytes  ${image}`)
-      ' "$manifest"
-    done
-    ;;
-  check)
-    # Verify a backup without restoring it, so an operator can prove an archive
-    # is usable before they depend on it.
-    id=${2:-}
-    [[ -n $id ]] || die 'usage: dsh-runtime check BACKUP_ID'
-    archive="$backup_dir/dsh-home.$id.tgz"
-    [[ -f $archive ]] || die "no backup archive for $id in $backup_dir"
-    manifest="${archive%.tgz}.json"
-    [[ -f $manifest ]] || die "backup $id has no manifest; refusing an unverifiable backup"
-    node "$state" verify --archive "$archive" --manifest "$manifest"
-    node -e '
-      const m = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))
-      const here = process.argv[2]
-      if (m.runtime.image && m.runtime.image !== here) {
-        console.log(`warning: backup belongs to Runtime image ${m.runtime.image}, this is ${here}`)
-      }
-      console.log(`This backup restores DSH ${m.dsh.active} with ${m.state.profiles.length} Profile(s).`)
-    ' "$manifest" "$(runtime_image)"
-    ;;
-  select) lock; select_version "${2:-}" ;;
-  approve)
-    lock
-    approve_script "${2:-}"
-    printf 'Re-run the failed upgrade. The approval applies to every later transaction.\n'
-    ;;
-  rollback)
-    lock
-    [[ -n $previous ]] || die 'no previous version'
-    # Pointer rollback only. Printed explicitly so it is never mistaken for a
-    # data rollback.
-    printf 'Pointer rollback to %s. This changes only the selected executable.\n' "$previous"
-    printf 'If DSH %s migrated Profile state, restore the matching backup instead.\n' "$active"
-    from=$active to=$previous
-    select_version "$to"
-    record "$(entry '
-      const [out, at, from, to] = process.argv.slice(1)
-      require("node:fs").writeFileSync(out, JSON.stringify({ phase: "pointer-rollback", at, from, to }))
-    ' "$(stamp)" "$from" "$to")"
-    ;;
-  backup) lock; snapshot ;;
-  audit)
-    [[ -f $audit ]] || { printf 'No upgrade records.\n'; exit 0; }
-    node -e 'for (const line of require("node:fs").readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean)) { const r = JSON.parse(line); console.log([r.at, r.phase, r.from ? `${r.from} -> ${r.to}` : "", r.backup ?? "", r.migrated === undefined ? "" : `migrated=${r.migrated}`].filter(Boolean).join("  ")) }' "$audit"
-    ;;
-  compat)
-    lock
-    [[ -n ${2:-$active} ]] || die 'usage: dsh-runtime compat VERSION (no version is selected)'
-    compat_gate "${2:-$active}"
-    printf 'Compatibility gate passed for %s\n' "${2:-$active}"
-    ;;
-  inspect)
-    # Report what a backup would contain, so an operator can judge size and
-    # which bundles pin the DSH version before attempting an upgrade.
-    lock
-    node "$compat" inventory --dsh-home "$DSH_HOME" | node -e '
-      const report = JSON.parse(require("node:fs").readFileSync(0, "utf8"))
-      console.log(`Profile data: ${report.size.files} files, ${report.size.bytes} bytes`)
-      for (const profile of report.profiles) {
-        console.log(`${profile.name}: ${profile.bundles.length} bundles, lockfile ${profile.lockfile ? "present" : "absent"}`)
-        for (const bundle of profile.bundles) console.log(`  ${bundle.package} ${bundle.installed ?? "not installed"}${bundle.engines ? ` (dsh ${bundle.engines})` : ""}`)
-      }
-    '
-    ;;
-  versions) exec pnpm view --registry https://registry.npmjs.org @deepseek-ai/dsh versions --json ;;
-  status)
-    chosen
-    printf 'Active: %s\nPrevious: %s\n' "${active:-none}" "${previous:-none}"
-    for manifest in "$root"/versions/*/package.json; do
-      [[ -f $manifest ]] || continue
-      version=${manifest%/package.json}
-      printf 'Installed: %s\n' "${version##*/}"
-    done
-    ;;
-  launch-url)
-    cat /run/dsh-runtime/launch-url
-    ;;
-  health)
-    exec node "$web" health
-    ;;
-  *) die 'usage: dsh-runtime {serve|install VERSION|upgrade VERSION|select VERSION|rollback|verify|restore BACKUP_ID|check BACKUP_ID|backups|backup|approve PACKAGE@VERSION|audit|compat|inspect|status|versions|health|launch-url}' ;;
+  *) die 'usage: dsh-runtime {serve|install VERSION|upgrade VERSION|select VERSION|rollback|verify|restore BACKUP_ID|check BACKUP_ID|backups|backup|approve PACKAGE@VERSION|audit|compat|inspect|status|components|versions|health|launch-url}' ;;
 esac
