@@ -3,11 +3,20 @@ FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b
 # Debian's default mirror and the public npm registry are both unreliable from
 # mainland China, where this image is built and deployed. The substitution is
 # inside the layer, so it does not depend on host configuration.
-RUN sed -i "s|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null; \
+# Empty by default: Debian's own mirror is correct everywhere except mainland
+# China, where it is unreliable. A build there passes
+# --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn. Baking the
+# substitution in unconditionally made CI slower, not faster, because the
+# mirror is far from the runner.
+ARG DEBIAN_MIRROR=
+# Same reasoning as DEBIAN_MIRROR: the public registry is the right default, and a
+# build in mainland China passes --build-arg NPM_REGISTRY=https://registry.npmmirror.com.
+ARG NPM_REGISTRY=
+RUN if [ -n "$DEBIAN_MIRROR" ]; then sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g" /etc/apt/sources.list.d/debian.sources; fi; \
     apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git openssh-client python3 make g++ util-linux \
  && rm -rf /var/lib/apt/lists/* \
- && npm install --global --registry=https://registry.npmmirror.com --ignore-scripts --no-audit --no-fund pnpm@11.28.5 \
+ && npm install --global ${NPM_REGISTRY:+--registry=$NPM_REGISTRY} --ignore-scripts --no-audit --no-fund pnpm@11.28.5 \
  && install -d -o node -g node /dsh-home /workspace /backup /run/dsh-runtime
 
 ENV DSH_HOME=/dsh-home \
