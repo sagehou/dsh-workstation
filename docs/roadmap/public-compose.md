@@ -8,11 +8,11 @@ The owner approved a single-administrator public Compose release. The authentica
 
 | Network | What it carries |
 | --- | --- |
-| Existing proxy | Go Auth listeners. Auth checks the exact Traefik source IP from the trusted proxy network. |
-| `workstation` | DSH and official MCP. Traefik and Auth can reach DSH here. |
-| `browser` | Chromium, Selkies, and the credential-protected Provider management listener. Traefik connects for HTTP and Auth for WebSockets. |
+| Existing proxy | Gateway's public and verification listeners. Gateway checks the exact Traefik source IP. |
+| `workstation` | DSH and official MCP. Traefik and Gateway reach DSH here. |
+| `browser` | Chromium, the input gate, and the credential-protected Provider management listener. Traefik reaches Selkies over HTTP and Gateway forwards the WebSockets. |
 
-Five workstation containers reuse external Traefik. Runtime and Chromium keep independent outbound routes. [Deployment guide](../../deploy/public/README.md)
+Core starts two workstation containers, Gateway and Runtime. Full starts six by adding Chromium, Provider, the CDP relay and the input gate. Both reuse external Traefik. The published Auth deployment uses the same service counts. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape)
 
 The CDP relay shares Chromium's network namespace. It forwards loopback CDP over a dedicated Unix socket volume. The relay writes the socket, and the Provider mounts the volume read-only. Playwright attaches via the Provider's own loopback listener. The topology requires no custom host firewall rules.
 
@@ -26,8 +26,8 @@ The job matrix reads its versions only from [`deploy/public/traefik-matrix.env`]
 
 | Traefik | Pinned digest | Status |
 | --- | --- | --- |
-| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Passed the full stack at `540ddd5` |
-| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Passed the full stack at `540ddd5` |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Default and custom subnets passed at `f57e92d` |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Default and custom subnets passed at `f57e92d` |
 
 Lowest version with a recorded pass: **v3.7.14**. Both legs passed [run 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598) with identical checks: `v3.7.14` ([job 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)) and `v3.7.19` ([job 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)); both passed again at `43065af` in [run 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367).
 
@@ -41,7 +41,17 @@ CONNECT behaves differently across the matrix, and the probe records the observe
 - `v3.7.14` has **no `denyConnect`** at all. A `CONNECT` falls through to the router, so it answers **404**. That is still not a tunnel, but it is not the 501 guarantee.
 - The migration guide's `v3.7.9` note about HTTP/1 `CONNECT` does not match the `v3.7.14` source; the observed `v3.7.14` status is therefore recorded from the run instead of being assumed from the prose.
 
-### Observed results
+### Gateway candidate verification
+
+- Go 1.27.3 ran `go test -race -v ./...`. All four `bash deploy/public/ci.sh` jobs passed on DSH 0.2.2-rc.1 and Playwright 1.61.1. The probes covered HTTPS sign-in, Passkey, existing-session restore, Gateway management pages, backup creation and verification, and browser input handoff. [Public Compose at f57e92d](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100)
+- `bash deploy/public/ci-core.sh` verified that only Gateway and Runtime were running, that a real TOTP login reached DSH, and that a signed-in request to `/browser/` returned 503. The separate `release-compose` job pulled the published Auth images for `81feffd` anonymously. [Core job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [Published-image job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+- Gateway pages were rendered with Chromium 156.0.8078.4 and Playwright 1.61.1 using fixture data. Desktop, narrow viewport, system dark mode, keyboard controls, authentication and archive feedback were verified. [Gateway UI evidence](https://github.com/sagehou/dsh-workstation/issues/35#issuecomment-7191691647)
+
+These runs used GitHub-hosted runners or local test fixtures. The deployment-host acceptance remains open. [Deployment issue](https://github.com/sagehou/dsh-workstation/issues/6)
+
+## Historical runs
+
+### Observed results at `333e6f3`
 
 The job passed at `333e6f3` with a single Traefik 3.7.19 leg. It used Traefik `3.7.19`, Chromium `156.0.8078.79`, Selkies `2.2.1`, DSH `0.2.2-rc.1`, and Playwright `1.61.1`. [GitHub Actions job at `333e6f3`](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 

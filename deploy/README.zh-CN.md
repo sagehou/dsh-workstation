@@ -2,7 +2,7 @@
 
 [English](README.md) · 简体中文
 
-供可信宿主机上的一位可信用户使用。需要 Docker Engine 28+ 和 Compose v2。Traefik 只在宿主机回环地址发布端口 3080，浏览器供人工操作。使用公网域名时，选用[带认证和 HTTPS 的公网部署](public/README.zh-CN.md)。
+供可信宿主机上的一位可信用户使用。需要 Docker Engine 28+ 和 Compose v2。常驻服务为 `runtime`、`chromium` 和 Traefik（`edge`），共 3 个。Traefik 只在宿主机回环地址发布端口 3080，浏览器供人工操作。使用公网域名时，选用[带认证和 HTTPS 的公网部署](public/README.zh-CN.md)。
 
 ## 1. 加载镜像并启动
 
@@ -137,7 +137,7 @@ preview run --rm --no-deps maintenance restore 20260101T120000Z.a1b2c3d4e5f6
 preview up -d --no-build --wait --wait-timeout 360 runtime
 ```
 
-恢复会替换 DSH_HOME 除 `runtime` 与 `pnpm` 之外的每个顶层条目，因此已安装版本、pnpm 存储和审计日志得以保留。它不改动工作区、Chromium 配置和 Auth 数据库：迁移涉及它们时，用各自的备份恢复。
+恢复会替换 DSH_HOME 除 `runtime` 与 `pnpm` 之外的每个顶层条目，因此已安装版本、pnpm 存储和审计日志得以保留。若迁移涉及工作区、Chromium 配置或公网部署的 Gateway SQLite 卷，需要用各自的备份恢复。
 
 把实际结果记入部署日志。`preview run --rm --no-deps maintenance audit` 输出事务轨迹（`start`、`switched`、`verified`、`pointer-rollback`、`restored`、`script-approved`），不含凭据。
 

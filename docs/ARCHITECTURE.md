@@ -18,19 +18,25 @@ The first release is single-user: one local administrator, one DSH_HOME, one wor
 | Go Gateway | Hosts authentication, browser controls and the operations console. Stores the single administrator's state in SQLite WAL. Calls the Runtime for backups and archive checks and the Provider for browser control. |
 | Browser Provider | Receives official MCP calls, validates the session-bound lease and generation for every operation, and attaches to Chromium over CDP. Only explicitly approved tools are exposed. |
 | Chromium and Selkies | One Chromium process and one persistent profile. Selkies handles human interaction, and the Provider automates the same browser. |
+| Browser input gate | Proxies the Selkies data WebSocket and confirms held input is released before Provider changes control. |
 | Traefik | Routes the public HTTPS origin and delegates DSH and Selkies authentication to Go Gateway. |
 | Native Sidebar | Deferred enhancement. The authenticated standalone browser/control page is the supported first-release entry point. |
 
 ## Public Compose networks
 
+Core runs `gateway` and `runtime`. Full adds `chromium`, `provider`, `cdp-relay`, and `browser-gate`. Both reuse Traefik from outside the Workstation Compose project. [Service inventory](../deploy/public/README.md#choose-a-deployment-shape)
+
 ```mermaid
 flowchart LR
     Person["Single operator"] -->|"HTTPS"| Edge["Existing Traefik"]
-    Edge -->|"Auth and WebSockets"| Gateway["Go Gateway"]
+    Edge -->|"ForwardAuth and WebSockets"| Gateway["Go Gateway"]
     Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
     Edge -->|"Desktop HTTP"| Browser["Chromium and Selkies"]
     Gateway -->|"Lease management"| Provider["Browser Provider"]
     Gateway -->|"Inventory and backups"| DSH
+    Gateway -->|"Selkies data WebSocket"| Gate["Browser input gate"]
+    Gate -->|"Selkies input and video"| Browser
+    Provider -->|"Confirm input release"| Gate
     DSH -->|"Official MCP"| Provider
     Provider -->|"Unix socket"| Relay["CDP relay"]
     Relay -->|"Chromium loopback"| Browser
@@ -40,11 +46,11 @@ flowchart LR
 | --- | --- |
 | Existing proxy | Traefik and Gateway. Gateway binds its public and verify listeners here and verifies the expected Traefik peer. |
 | `workstation` | Runtime, the MCP listener, and the Traefik and Gateway connections to DSH. |
-| `browser` | Chromium, the Provider management listener, and the Traefik and Gateway connections to Selkies. |
+| `browser` | Chromium, the input gate, the Provider management listener, and Traefik and Gateway connections to Selkies. |
 
 The relay shares Chromium's network namespace. Only the relay and Provider mount the CDP socket volume. Gateway forwards DSH and Selkies WebSockets and checks the live session. [Tested topology](roadmap/public-compose.md)
 
-Both subnets are configuration, not constants. `deploy/network.sh` derives the subnet definitions, dynamic `ip_range`, every static address, the Provider health-check destination, and the Runtime certificate SAN from `WORKSTATION_SUBNET` and `BROWSER_SUBNET`. Static addresses sit at `.2`/`.3` while dynamic allocation is confined to the upper half of each subnet, so a container that starts first cannot take a static address — the failure this ordering prevents is Docker answering "Address already in use" when the Runtime claims its own address.
+Both subnets are configurable. `deploy/network.sh` derives the subnet definitions, dynamic `ip_range`, static addresses, health-check destinations, and Runtime certificate SAN from `WORKSTATION_SUBNET` and `BROWSER_SUBNET`. Static endpoints use offsets `.2`–`.4`. Docker assigns dynamic addresses from the upper half so it cannot allocate a static service address while starting containers.
 
 `deploy/network.sh check` runs before the initializer creates anything and refuses on an overlap with a host route or an existing Docker network. It creates and modifies nothing. The default route is excluded by design: it covers every address and Docker's more specific subnet route wins. A state directory whose recorded subnets differ from the requested ones is refused rather than silently reissuing the internal CA, because the Runtime certificate is issued for the derived address; `--reissue` is the deliberate path.
 

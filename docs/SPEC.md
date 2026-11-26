@@ -91,7 +91,7 @@ The approved direction is a self-hosted workstation around the official DSH appl
 | `/mgmt` | Authenticated Gateway console for Runtime status, backups, browser control and account settings. |
 | ForwardAuth | Protect DSH and Selkies. Unauthenticated APIs return 401 and WebSocket upgrades are denied. |
 | Browser control | Internal or authenticated endpoints. Keep management off unauthenticated public routes. |
-| Compose | Orchestrate DSH, Gateway, and Chromium. Reuse an external Traefik on shared networks where applicable. |
+| Compose | Core runs DSH Runtime and Gateway. Full adds Chromium, Provider, the CDP relay and the input gate. Both public deployments reuse an external Traefik. |
 | Networks | Check Docker subnet overlap before deployment. Make the workstation/browser subnets configurable and derive fixed addresses, health-check targets, and certificate SANs from one configuration source. |
 | Images | Publish versioned Runtime, Gateway, Provider, and browser-gate images to GHCR after the release workflow is in place. Pin deployment references by immutable digest. |
 

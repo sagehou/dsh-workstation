@@ -2,14 +2,20 @@
 
 [English](release.md) · 简体中文
 
-本仓库在 GHCR 发布四个**公开**镜像包：`dsh-workstation-runtime`、
-`dsh-workstation-gateway`、`dsh-workstation-provider` 与
-`dsh-workstation-browser-gate`（由 `browser-gate/` 构建）。
+当前源码为 GHCR 公开发布构建四个独立版本化的镜像，包括
+`dsh-workstation-runtime`、`dsh-workstation-gateway`、
+`dsh-workstation-provider` 和 `dsh-workstation-browser-gate`。
 
 部署从不只引用标签。`deploy/public/images.env` 记录每个镜像的 manifest list
 摘要，`deploy/public/images.sh` 把摘要解析成
 `ghcr.io/sagehou/<名称>:<版本>@sha256:...`。摘要缺失即报错，因此该文件没有
 任何路径可以产生浮动标签。
+
+## 当前部署版本
+
+`deploy/public/release-commit` 记录包含已发布摘要的部署提交，目前是 `81feffd`。该版本使用 Runtime 0.2.1、Auth 0.1.1、Provider 0.2.0 和 browser-gate 0.1.0。部署时配套使用该提交的 Compose 与初始化脚本。[发布镜像验证](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+
+Gateway 候选版的源码 CI 使用 Runtime 0.2.2、Gateway 0.1.0 和 Provider 0.2.1，三者仍待发布并记录摘要。browser-gate 0.1.0 已有摘要。[镜像清单](../deploy/public/images.env) · [Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway) · [跟踪 Issue](https://github.com/sagehou/dsh-workstation/issues/33)
 
 ## 保障链条
 
@@ -22,7 +28,7 @@
 | 构建来源随镜像保留 | `provenance: mode=max` 与 `sbom: true` 把证明附着到摘要上，而不是某次 Actions 运行。 |
 | 发布用的标签就是部署读取的标签 | 工作流与初始化脚本的镜像名都来自同一个解析器。 |
 | 无法部署 `latest` | 解析器只接受 `X.Y.Z`，且没有任何工作流产生 `latest` 标签。 |
-| 镜像确实公开 | `record` 作业在不登录的情况下拉取每个已记录摘要。若包被误设为私有，该次运行会失败。 |
+| 镜像确实公开 | `record` 作业匿名拉取本次发布的每个摘要。部署 CI 检查整套发布镜像。 |
 
 ## 一次性配置（仓库管理员）
 
@@ -42,11 +48,9 @@
 
 1. 在 `deploy/public/images.env` 中为本次要变更的镜像提升版本号，并清空其摘要——摘要在发布时填入。各镜像版本独立：Runtime 镜像随 Node 或启动脚本变化，门禁镜像按自己的节奏变化。
 2. 合并该变更。
-3. 在 `main` 上运行 **Publish images**（`image: all`），或创建标签 `v<版本>`（例如 `v0.2.0`）来标记发布点。`all` 只发布摘要为空的版本。
+3. 在 `main` 上运行 **Publish images**（`image: all`），或给发布源码提交创建新的 `v<版本>` 标签。`all` 只发布摘要为空的版本。
 
-   `v*` 标签标记的是**仓库**的发布点，不是共用的镜像版本。四个镜像版本独立，因此 `v0.2.0` 标签可能发布
-   `runtime:0.2.2`、`gateway:0.1.0`、`provider:0.2.1`、`browser-gate:0.1.0`。
-   标签的用处是标记某一组摘要来自哪个源提交，自动生成的发布说明会列出全部四个。
+   各镜像独立版本化。标签标识构建用的源码提交，工作流记录带摘要的镜像引用。
 4. 下载 `published-images` artifact，用 `docker buildx imagetools inspect` 核对摘要，再提交更新后的 `deploy/public/images.env`。
 
 5. 把 `deploy/public/release-commit` 更新为已包含这些摘要的部署提交的完整 SHA，再核对 `release-compose`。该作业从同一提交读取 Compose 配置和探针，匿名拉取其中记录的镜像。
@@ -55,16 +59,18 @@
 
 ## 核对已发布镜像
 
-```bash
-# 解析器将要部署的摘要。
-bash deploy/public/images.sh --field digest runtime
+在所核对版本的部署提交中执行以下命令。
 
-# 仓库为该标签报告的摘要。两者必须完全一致。
-docker buildx imagetools inspect \
-  ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 --format '{{json .Manifest.Digest}}'
+```bash
+resolved="$(bash deploy/public/images.sh runtime)" &&
+  image="${resolved#*=}"
+
+# 仓库为该标签报告的摘要应与记录值一致。
+printf '%s\n' "${image#*@}"
+docker buildx imagetools inspect "${image%@*}" --format '{{json .Manifest.Digest}}'
 
 # 匿名拉取，也就是部署主机的行为。
-docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
+docker pull "$image"
 ```
 
 ## 平台

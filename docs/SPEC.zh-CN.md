@@ -91,7 +91,7 @@
 | `/mgmt` | 经过认证的 Gateway 控制台，统一提供 Runtime 状态、备份、浏览器控制和账户设置。 |
 | ForwardAuth | 保护 DSH 和 Selkies。未认证的 API 返回 401，WebSocket 升级被拒绝。 |
 | 浏览器控制 | 仅供内部或通过认证访问。管理端点不作为免认证公网入口。 |
-| Compose | 编排 DSH、Gateway 和 Chromium，可复用共享网络上的外部 Traefik。 |
+| Compose | 精简版运行 DSH Runtime 和 Gateway。完整版增加 Chromium、Provider、CDP 中继与输入门禁。两种公网部署均复用外部 Traefik。 |
 | 网络 | 部署前检查 Docker 子网冲突。工作台和浏览器子网可配置，固定地址、健康检查目标和证书 SAN 从同一配置源生成。 |
 | 镜像 | 建立发布流程后，将 Runtime、Gateway、Provider 和 browser-gate 镜像发布到 GHCR。部署使用不可变 digest。 |
 

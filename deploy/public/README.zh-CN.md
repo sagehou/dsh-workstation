@@ -2,7 +2,7 @@
 
 [English](README.md) · 简体中文
 
-[网络地址](#网络地址) · [部署](#部署) · [使用浏览器](#使用浏览器) · [维护](#维护) · [备份与恢复](#备份与恢复)
+[网络地址](#网络地址) · [选择部署形态](#选择部署形态) · [部署](#部署) · [使用浏览器](#使用浏览器) · [维护](#维护) · [备份与恢复](#备份与恢复)
 
 ## 部署前准备
 
@@ -19,9 +19,9 @@
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
 | `WORKSTATION_SUBNET` | `172.30.241.0/24` | 内部网络上的 Runtime、Provider 和 Gateway。 |
-| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium 与 Provider 的控制监听地址。 |
+| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium、输入门禁和 Provider 的控制监听地址。 |
 
-固定地址由子网推导：工作站网络上的 `.2` 给 Runtime、浏览器网络上的 `.2` 给 Provider，`.3` 是工作站网络上的 Provider。动态分配限制在每个子网的上半段，因此先启动的容器不可能占用固定地址。
+固定地址由子网推导。Runtime 和 Provider 在工作台网络使用 `.2` 和 `.3`，Provider 和输入门禁在浏览器网络使用 `.2` 和 `.4`。Docker 从子网的上半段分配动态地址，避免先启动的容器占用固定地址。
 
 启动前先核对方案：
 
@@ -39,40 +39,52 @@ bash deploy/network.sh check
 
 ```bash
 WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
-  bash deploy/public/init.sh <域名> <代理网络> <Traefik 容器>
+  bash deploy/public/init.sh workstation.example.net proxy traefik
 ```
 
 Runtime 证书按推导出的地址签发，因此在已有状态目录上用不同子网重跑初始化会被拒绝，而不是静默重签所有服务都信任的内部 CA。`--reissue` 才是有意为之的路径：它替换 CA 与 Runtime 证书，保留其他密钥，并要求重建容器以取得新地址。
+
+## 选择部署形态
+
+| 形态 | 工作台常驻容器 | 服务 |
+| --- | ---: | --- |
+| **精简版（core）** | **2** | `gateway`、`runtime` |
+| **完整版（full，默认）** | **6** | `gateway`、`runtime`、`chromium`、`provider`、`cdp-relay`、`browser-gate` |
+
+两个形态都复用已有 Traefik。把 Traefik 容器计入，总数分别为 3 和 7。`gateway-admin` 和 `maintenance` 只在需要时通过 `docker compose run --rm --no-deps` 执行。
+
+精简版提供 DSH 和 Gateway，设置 `WORKSTATION_BROWSER_MCP=0` 和 `GATEWAY_BROWSER_ENABLED=0`。已登录时访问 `/browser/` 或 `/_auth/browser` 会返回 503。完整版增加共享浏览器。Chromium 的 `shm_size: 1gb` 是共享内存上限，两种形态在 2 GiB 主机上的内存用量仍待实测。[精简版集成验证](../../docs/roadmap/public-compose.zh-CN.md#gateway-候选版验证)
+
+在仓库根目录设置本次部署使用的 `COMPOSE_FILE`，后续所有 Compose 命令沿用该设置。完整版执行以下命令。
+
+```bash
+export COMPOSE_FILE=compose.yml
+```
+
+精简版执行以下命令。
+
+```bash
+export COMPOSE_FILE=compose.yml:deploy/public/compose.core.yml
+```
+
+已有完整版切为精简版时，先用完整版配置执行 `down`，保留命名卷。
 
 ## 部署
 
 在部署主机的同一个终端按顺序执行。
 
-### 1. 检出发布版本并确认固定镜像
+### 1. 选择部署提交
 
-本仓库自建的四镜像以**公开**包发布在 GHCR，因此部署主机不需要 `docker login`，也不需要在主机上保存任何凭据。
-
-`deploy/public/images.env` 记录每个镜像的 manifest list 摘要，`deploy/public/images.sh` 把摘要解析成 `name:version@sha256:...`，摘要缺失时直接失败——这条路径无法产生浮动标签。
+安装已发布镜像时，使用 `deploy/public/release-commit` 记录的部署提交。当前为 `81feffd`，服务名是 `auth`，管理员命令使用一次性服务 `auth-admin`。在已克隆的仓库中检出该提交，确认四个镜像引用均可解析。
 
 ```bash
-gh repo clone sagehou/dsh-workstation && cd dsh-workstation
-release_tag='v0.2.0'
-git switch --detach "$release_tag"
-
-# 打印本次发布部署的引用，每行都必须以 @sha256: 结尾。
-bash deploy/public/images.sh
+git switch --detach 81feffdb5607a28062d03f443d6ff47aeb206665 &&
+  bash deploy/public/images.sh
 ```
 
-如需核实摘要仍指向同一镜像，把它与仓库报告的摘要比对，必须完全一致：
+继续执行该提交中部署指南的第 2 步。[已发布版本的部署指南](https://github.com/sagehou/dsh-workstation/blob/81feffdb5607a28062d03f443d6ff47aeb206665/deploy/public/README.zh-CN.md#2-配置域名和-traefik)
 
-```bash
-docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 \
-  --format '{{json .Manifest.Digest}}'
-```
-
-拉取发生在 Compose 启动时：第 2 步之后 `.env.public` 中每个镜像都已按摘要引用。构建来源与 SBOM 附着在这些摘要上，因此随镜像一起保留，而不依赖某次工作流运行是否还在。
-
-> 只有标签没有摘要属于可变引用，初始化脚本永远不会写入。若确实要从源码临时构建，第 2 步去掉 `--release`，由 Compose 在本地构建——两种模式都是显式选择。
+本页后续步骤适用于 Gateway 源码。若检出版本已记录 Gateway 的发布摘要，先用 `bash deploy/public/images.sh` 确认四个引用，再使用 `--release`。当前候选版可从源码构建，用 `bash deploy/public/images.sh --local` 查看构建标签。[发布状态](../../docs/release.zh-CN.md#当前部署版本)
 
 ### 2. 配置域名和 Traefik
 
@@ -88,19 +100,15 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-`--release` 让初始化脚本解析已发布摘要，并写入 `.env.public` 的 `WORKSTATION_RUNTIME_IMAGE`、`WORKSTATION_GATEWAY_IMAGE`、`WORKSTATION_PROVIDER_IMAGE`、`WORKSTATION_GATE_IMAGE`。不加时，同样的键会写成本地构建标签。两种情况都明确了实际运行的是什么，且重跑初始化会替换这些键，而不是追加第二份。
+`--release` 将四个固定摘要的引用写入 `.env.public`。从源码构建时省略 `--release`，然后在创建管理员前构建镜像。
+
+```bash
+docker compose --env-file .env.public build
+```
 
 #### 已有部署
 
-在此变更之前子网写死在 `compose.yml` 中，因此已有的 `.env.public` 没有 `WORKSTATION_SUBNET` 与 `BROWSER_SUBNET`。默认值就是原来的地址，所以不带覆盖地重跑初始化不会动到现有证书，只会补写推导出的键：
-
-```bash
-WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$域名" "$代理网络" "$Traefik 容器" --release
-docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
-```
-
-不会重签任何证书，也不会用不同地址重建容器。镜像会变化：原先用本地归档加载的部署，会在下一次 `up` 时切换到按摘要固定的 GHCR 引用。若确实要换地址，那是一次迁移：先备份，用 `--reissue` 重跑，重建所有服务，并把 Traefik 重新连接到（重建后的）`dsh-workstation_workstation` 与 `dsh-workstation_browser` 网络。
+沿用原域名、状态目录和子网重跑初始化，保留凭据和证书。已有管理员可跳过创建步骤。[Auth 迁移](#从-auth-迁移到-gateway)
 
 ### 3. 创建管理员
 
@@ -112,46 +120,25 @@ docker compose --env-file .env.public run --rm --no-deps gateway-admin bootstrap
 2. 将显示的 TOTP 密钥添加到验证器，输入当前验证码。
 3. 离线保存显示的恢复码。创建首个账号后，初始化功能关闭。
 
-## 选择部署形态
-
-两种形态共用同一份 `compose.yml`。在第 3 步之前选定一种。
-
-| 形态 | 服务 | 何时使用 |
-| --- | --- | --- |
-| **full**（默认） | `gateway`、`runtime`、`browser-gate`、`chromium`、`cdp-relay`、`provider` | 需要共享浏览器：操作者的 `/browser/` 页面，或 Agent 浏览器工具。 |
-| **core** | `gateway`、`runtime` | 主机承载不了浏览器栈，或 Agent 浏览器控制尚未获批。 |
-
-`core` 是明确的取舍，不是等价替代。它**没有 `/browser/` 页面，也没有 Agent 浏览器工具**。DSH 本身——聊天、会话、终端、插件、文件编辑——不受影响，因为这些由 Runtime 提供，而不是 Chromium。
-
-### 浏览器栈为什么贵
-
-`chromium` 预留 `shm_size: 1gb`（`compose.yml:162`），那是 tmpfs，直接占用宿主机内存。再加上 Chromium 进程树、Selkies、Provider 和输入门禁，浏览器栈在编码视频流时约占 2 GiB 常驻内存和 1–2 个核。2 GiB 主机无法与其他服务一并承载。
-
-### 运行 core
-
-```bash
-docker compose --env-file .env.public \
-  -f compose.yml -f deploy/public/compose.core.yml \
-  up -d --no-build --wait --wait-timeout 420
-```
-
-覆盖文件将浏览器服务放入 `browser` profile。`WORKSTATION_BROWSER_MCP=0` 跳过安装浏览器 Bundle，`GATEWAY_BROWSER_ENABLED=0` 让 `/browser/` 和 `/_auth/browser` 返回 503。
-
-本指南后续每一条 `compose` 命令都要带同一对 `-f`，包括 `down`、`logs` 和 `run`。core 部署之后再执行不带覆盖文件的 `docker compose up`，会试图在承载不了的主机上启动完整栈。
-
-### core 没有验证什么
-
-CI 的 `core-shape` 只证明 `gateway` 与 `runtime` 能启动、浏览器 Bundle 未安装、以及 `/browser/` 经由 core 路径拒绝。它不证明完整栈在你的主机上可用，也不能替代 `full` 的各条 leg。**两种形态都未在 2 GiB 机器上运行过**；上面的内存数字是依据配置限制的估算，不是实测。
-
 ### 4. 启动 Compose 并添加路由
 
-Traefik 对每张工作台网络只需接入一次。把生成的路由文件放进 Traefik 监视的宿主机目录。
+服务启动后将 Traefik 接入工作台网络。每张网络只需接入一次。
 
 ```bash
-docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360 &&
-  docker network connect dsh-workstation_workstation "$traefik" &&
-  docker network connect dsh-workstation_browser "$traefik" &&
-  install -m 0644 .workstation/edge/routes.yml "$traefik_dynamic/.dsh-workstation.tmp" &&
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420 &&
+  docker network connect dsh-workstation_workstation "$traefik"
+```
+
+完整版还需将 Traefik 接入浏览器网络。
+
+```bash
+docker network connect dsh-workstation_browser "$traefik"
+```
+
+把生成的路由文件放进 Traefik 监视的目录，再用 `ps` 核对已启动的服务。
+
+```bash
+install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_dynamic/.dsh-workstation.tmp" &&
   mv "$traefik_dynamic/.dsh-workstation.tmp" "$traefik_dynamic/dsh-workstation.yml" &&
   docker compose --env-file .env.public ps
 ```
@@ -161,7 +148,7 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 1. 打开 `https://<域名>/`。
 2. 使用 `admin`、密码和新的 TOTP 验证码登录。绑定时的验证码已使用。
 3. 在 DSH 的 **Settings → Models** 填入 DeepSeek API Key。
-4. 如需使用 Passkey，在 `/_auth/account` 注册，即可使用独立的 Passkey 登录。
+4. 如需使用独立的 Passkey 登录，在 `/mgmt/account` 添加 Passkey。
 
 ## 使用浏览器
 
@@ -175,7 +162,7 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 | 接管浏览器 | 选择 **接管浏览器**。Provider 停止接收新调用，等待当前操作结束后交还控制。 |
 | 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Provider。 |
 
-Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。其他 DSH 会话的工具调用无法改变这份租约。配置来源白名单后，它会约束这些工具和返回的页面文本。Chromium 仍会处理页面脚本和重定向，且标签页共享 Cookie。请使用可信来源。
+Gateway 候选版中，Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。其他 DSH 会话的工具调用无法改变已有租约。`BROWSER_TOOL_ORIGINS` 为空或指定 `*` 时，工具层允许全部 HTTPS 源。配置来源清单后，它会约束工具调用和返回的页面文本。Chromium 仍会处理页面脚本和重定向，标签页共享 Cookie。[候选版行为](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
 
 连接或标签页丢失时，新建 DSH 会话并重新授权。要继续原来的对话，重启 Runtime、恢复对话，再给新连接授权。新标签页使用同一份 Chromium 配置。
 
@@ -186,8 +173,9 @@ Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、
 不碰浏览器即可检查：
 
 ```sh
-docker compose exec -T provider node --input-type=module -e '
-  const s = require("node:fs").readFileSync("/run/secrets/gate_control", "utf8").trim()
+docker compose --env-file .env.public exec -T provider node --input-type=module -e '
+  import { readFileSync } from "node:fs"
+  const s = readFileSync("/run/secrets/gate_control", "utf8").trim()
   const r = await fetch("http://dsh-workstation-browser-gate:8082/status", {
     headers: { Authorization: "Bearer " + s },
   })
@@ -195,7 +183,7 @@ docker compose exec -T provider node --input-type=module -e '
 '
 ```
 
-只有在你持有权限时 `state` 才是 `OPEN`，交接正在证明释放期间为 `RELEASING`。`POST /handover` 只有在上游确认释放后才返回 `released: true`。[ADR-0005](../adr/0005-release-held-input-at-selkies.zh-CN.md) 记录了顺序依据。
+只有在你持有权限时 `state` 才是 `OPEN`，交接正在确认释放时为 `RELEASING`。`POST /handover` 只有在上游确认释放后才返回 `released: true`。[ADR-0005](../../docs/adr/0005-release-held-input-at-selkies.zh-CN.md)
 
 ## 维护
 
@@ -230,7 +218,7 @@ Provider 会尝试自动重连。如果 Chromium 已就绪而控制页仍显示 
 
 ### DSH 版本
 
-Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把 Workstation Bundle 安装到持久化 Web Profile。Runtime 和 Profile 安装均禁用包生命周期脚本。Bundle 使用已验证的 DSH 版本。
+Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。完整版通过官方 Plugin Manager 将 Workstation 浏览器 Bundle 安装到持久化 Web Profile。Runtime 和 Profile 安装均禁用包生命周期脚本。Bundle 使用已验证的 DSH 版本。
 
 更改 Profile 或版本前备份 DSH_HOME。对公网 Compose 执行维护命令时使用 `--env-file .env.public`。版本回滚只切换 npm 安装，已迁移的数据需要从匹配的备份还原。[Runtime 维护命令](../README.zh-CN.md#升级与回滚)
 
@@ -244,7 +232,7 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把
 
 ### 从 auth 迁移到 Gateway
 
-1. 用 `bash deploy/public/images.sh` 确认目标版本能解析全部四个镜像摘要。停服备份 `auth-data` 卷和 `.workstation/`。用原来的 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，省略 `-v`。
+1. 用 `bash deploy/public/images.sh` 确认目标版本能解析全部四个镜像摘要。停服备份 `auth-data` 卷和 `.workstation/`。用原来的 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，保留命名卷。
 2. 在原部署中切换到目标版本，沿用域名、状态目录、代理网络及 Traefik 选项重跑带 `--release` 的初始化。用新生成的 `routes.yml` 替换 Traefik 工作台路由文件，使其指向 `dsh-workstation-gateway-edge`。
 3. 使用 `up -d --no-build --wait` 启动。Gateway 会用原 `auth-key` 打开原 `auth-data` SQLite 卷。用已有账户测试登录、`/mgmt` 和完整部署的 `/browser/`。
 
@@ -252,16 +240,18 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把
 
 ### 升级与回滚
 
-升级就是更换摘要。先备份，再切换引用并重建受影响的服务；Compose 会在 `up` 时拉取新摘要：
+升级前先备份，再切换到已记录目标摘要的部署提交。Compose 在启动时拉取新摘要。
 
 ```bash
-git switch --detach v0.3.0
-WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
-docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
+# 将 deployment_ref 设为 images.env 已记录目标摘要的部署提交。
+git switch --detach "$deployment_ref" &&
+  bash deploy/public/images.sh &&
+  WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+    bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release &&
+  docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420
 ```
 
-回滚是同样的操作换成旧标签：检出 `v0.2.0`、重跑初始化恢复旧摘要、再次 `up`。由于引用是摘要，旧镜像仍恰好是该标签当时发布的内容——上游标签不可能在你脚下移动。
+按第 4 步安装重新生成的路由。回滚时，用旧部署提交重复此流程。
 
 Runtime 版本回滚是另一件事，不改这些镜像，见 [Runtime 维护](../README.zh-CN.md#升级与回滚)。镜像回滚与数据回滚不同，涉及 DSH_HOME 迁移时必须配一份对应的备份。
 
@@ -282,11 +272,11 @@ docker compose --env-file .env.public stop && (
   # 使用部署自身固定的镜像引用。
   set -a; . ./.env.public; set +a
   docker run --rm --network none --user 0:0 --entrypoint tar \
-    -v dsh-workstation_auth-data:/data:ro "$WORKSTATION_PROVIDER_IMAGE" \
+    -v dsh-workstation_auth-data:/data:ro "$WORKSTATION_RUNTIME_IMAGE" \
     --numeric-owner -C /data -cf - . > auth-data.tar
 )
 ```
 
 停止工作台后，将备份还原到空的 `auth-data` 卷。使用匹配的 `.workstation/secrets/auth-key`，保留归档中的数字 UID/GID 和权限，保留 Passkey 使用的公网域名。Runtime 会重新生成启动 URL。
 
-只有 Traefik 发布端口。桌面在独立标签页打开。原生侧栏与交接时释放已按住输入由 [#1](https://github.com/sagehou/dsh-workstation/issues/1) 追踪。[测试证据](../../docs/roadmap/public-compose.zh-CN.md)
+只有 Traefik 发布端口。共享桌面在独立标签页打开。[测试证据](../../docs/roadmap/public-compose.zh-CN.md)

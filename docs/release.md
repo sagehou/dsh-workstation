@@ -2,15 +2,25 @@
 
 English · [简体中文](release.zh-CN.md)
 
-The repository publishes four **public** GHCR packages:
+The current source builds four images for public release on GHCR.
 `dsh-workstation-runtime`, `dsh-workstation-gateway`,
-`dsh-workstation-provider` and `dsh-workstation-browser-gate` (built from
-`browser-gate/`).
+`dsh-workstation-provider` and `dsh-workstation-browser-gate` are independently versioned.
 
 A deployment never references a tag alone. `deploy/public/images.env` records a
 manifest-list digest per image, and `deploy/public/images.sh` turns those into
 `ghcr.io/sagehou/<name>:<version>@sha256:...` references. A missing digest is an
 error, so there is no code path from that file to a floating tag.
+
+## Current deployment
+
+The `deploy/public/release-commit` file records the commit with the
+published digests, currently `81feffd`. That deployment uses Runtime 0.2.1,
+Auth 0.1.1, Provider 0.2.0 and browser-gate 0.1.0. Use its Compose and initializer
+together. [Published deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+
+The Gateway candidate uses Runtime 0.2.2, Gateway 0.1.0 and Provider 0.2.1 in
+source CI. Their release digests are pending. Browser-gate 0.1.0 already has a
+digest. [Image inventory](../deploy/public/images.env) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service) · [Tracking issue](https://github.com/sagehou/dsh-workstation/issues/33)
 
 ## What guarantees the chain
 
@@ -23,7 +33,7 @@ error, so there is no code path from that file to a floating tag.
 | Provenance travels with the image | `provenance: mode=max` and `sbom: true` attach attestations to the digest, not to the Actions run. |
 | The published tag is the one a deployment reads | The resolver supplies the image name in both the workflow and the initializer. |
 | `latest` cannot be deployed | The resolver only accepts `X.Y.Z`, and no workflow produces a `latest` tag. |
-| The images really are public | The `record` job pulls every recorded digest with no login. A package accidentally left private fails the run. |
+| The images really are public | The `record` job pulls each newly published digest with no login. The deployment CI checks the full set. |
 
 ## One-time setup (repository administrator)
 
@@ -50,16 +60,12 @@ No repository secret is required: the workflow uses the automatic
    in. Versions are independent: the Runtime image changes with Node or the
    launch script, the gate on its own schedule.
 2. Merge that change.
-3. Run **Publish images** from `main` (`image: all`), or create a tag
-   `v<version>` — for example `v0.2.0` — to mark the release point.
+3. Run **Publish images** from `main` (`image: all`), or create a new
+   `v<version>` tag on the release source commit.
    The `all` selection publishes the versions with empty digests.
 
-   A `v*` tag names the **repository's** release point, not a shared image
-   version. The four images are versioned independently, so a tag `v0.2.0` may
-   publish `runtime:0.2.2`, `gateway:0.1.0`, `provider:0.2.1` and
-   `browser-gate:0.1.0`. That is intentional: forcing one number would couple
-   unrelated changes. The tag is useful because it marks which source commit a
-   set of digests came from, and the generated release notes list all four.
+   Each image has its own version. The tag identifies the build source, and the
+   workflow records the image references by digest.
 4. Download the `published-images` artifact, verify the digests against
    `docker buildx imagetools inspect`, and commit the updated
    `deploy/public/images.env`.
@@ -73,16 +79,18 @@ See [the Gateway migration](../deploy/public/README.md#migrate-from-the-auth-ser
 
 ## Verifying a published image
 
-```bash
-# The digest the resolver will deploy.
-bash deploy/public/images.sh --field digest runtime
+Run the checks from the deployment commit for the release you are verifying.
 
-# What the registry reports for that tag. The two must match exactly.
-docker buildx imagetools inspect \
-  ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 --format '{{json .Manifest.Digest}}'
+```bash
+resolved="$(bash deploy/public/images.sh runtime)" &&
+  image="${resolved#*=}"
+
+# The recorded digest and the registry's digest for that tag must match.
+printf '%s\n' "${image#*@}"
+docker buildx imagetools inspect "${image%@*}" --format '{{json .Manifest.Digest}}'
 
 # An anonymous pull, which is what a deployment host does.
-docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
+docker pull "$image"
 ```
 
 ## Platform

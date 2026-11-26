@@ -2,7 +2,7 @@
 
 English · [简体中文](README.zh-CN.md)
 
-[Network addresses](#network-addresses) · [Install](#install) · [Use the browser](#use-the-browser) · [Maintain](#maintain) · [Back up and restore](#back-up-and-restore)
+[Network addresses](#network-addresses) · [Deployment shapes](#choose-a-deployment-shape) · [Install](#install) · [Use the browser](#use-the-browser) · [Maintain](#maintain) · [Back up and restore](#back-up-and-restore)
 
 ## Before you start
 
@@ -21,12 +21,12 @@ refuses to run when the plan conflicts with the host.
 | Setting | Default | Used for |
 | --- | --- | --- |
 | `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime, Provider and Gateway on the internal network. |
-| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium and the Provider's control listener. |
+| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium, the input gate and the Provider's control listener. |
 
-Static addresses are derived from each subnet: `.2` is the Runtime on the
-workstation network and the Provider on the browser network, and `.3` is the
-Provider on the workstation network. Dynamic allocation is confined to the
-upper half, so a container that starts first can never take a static address.
+Static addresses are derived from each subnet. The Runtime uses `.2` and the
+Provider uses `.3` on the workstation network. The Provider and input gate use
+`.2` and `.4` on the browser network. Docker assigns dynamic addresses from the
+upper half so it cannot allocate a static service address while starting containers.
 
 Check the plan against the host before starting anything:
 
@@ -44,7 +44,7 @@ If it fails, pick two unused RFC1918 ranges and pass them to the initializer:
 
 ```bash
 WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
-  bash deploy/public/init.sh <domain> <proxy> <traefik>
+  bash deploy/public/init.sh workstation.example.net proxy traefik
 ```
 
 The Runtime certificate is issued for the derived address, so re-running the
@@ -54,45 +54,47 @@ deliberately; it replaces the CA and the Runtime certificate, keeps the other
 secrets, and requires recreating the containers so they take their new
 addresses.
 
+## Choose a deployment shape
+
+| Shape | Workstation containers | Services |
+| --- | ---: | --- |
+| **core** | **2** | `gateway`, `runtime` |
+| **full** (default) | **6** | `gateway`, `runtime`, `chromium`, `provider`, `cdp-relay`, `browser-gate` |
+
+Both shapes reuse the existing Traefik. Including that container brings the totals to 3 and 7. Run `gateway-admin` and `maintenance` on demand with `docker compose run --rm --no-deps`.
+
+Core serves DSH and Gateway with `WORKSTATION_BROWSER_MCP=0` and `GATEWAY_BROWSER_ENABLED=0`. With a valid session, `/browser/` and `/_auth/browser` return 503. Full adds the shared browser. Chromium's `shm_size: 1gb` sets the shared-memory limit. The memory use of either shape on a 2 GiB host still needs a measurement. [Core integration check](../../docs/roadmap/public-compose.md#gateway-candidate-verification)
+
+Set `COMPOSE_FILE` from the checkout root and keep it for every Compose command in this deployment. Full uses the base file.
+
+```bash
+export COMPOSE_FILE=compose.yml
+```
+
+Core adds the override file.
+
+```bash
+export COMPOSE_FILE=compose.yml:deploy/public/compose.core.yml
+```
+
+When moving an existing full deployment to core, run `down` with the full configuration first and keep the named volumes.
+
 ## Install
 
 Run these steps in order on the deployment host, in the same shell.
 
-### 1. Check out the release and confirm the pinned images
+### 1. Select a deployment commit
 
-The four images this repository builds are published to GHCR as **public**
-packages, so a deployment needs no `docker login` and no credential on the host.
-
-`deploy/public/images.env` records the manifest-list digest for each image.
-`deploy/public/images.sh` resolves those digests into
-`name:version@sha256:...` references and refuses to run if a digest is missing,
-so there is no path from this file to a floating tag.
+For a published install, use the deployment commit recorded in `deploy/public/release-commit`. The current commit is `81feffd`, where the service is `auth` and its one-off administrator command uses `auth-admin`. In your clone, check it out and verify that all four references resolve.
 
 ```bash
-gh repo clone sagehou/dsh-workstation && cd dsh-workstation
-release_tag='v0.2.0'
-git switch --detach "$release_tag"
-
-# Print the references this release deploys. Every line must end in @sha256:.
-bash deploy/public/images.sh
+git switch --detach 81feffdb5607a28062d03f443d6ff47aeb206665 &&
+  bash deploy/public/images.sh
 ```
 
-To satisfy yourself that a digest still names the same image, compare it
-against what the registry reports. The value must match exactly:
+Continue from step 2 in that commit's guide. [Published deployment instructions](https://github.com/sagehou/dsh-workstation/blob/81feffdb5607a28062d03f443d6ff47aeb206665/deploy/public/README.md#2-set-the-domain-and-traefik-values)
 
-```bash
-docker buildx imagetools inspect ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 \
-  --format '{{json .Manifest.Digest}}'
-```
-
-Pulling happens when Compose starts: each image is already referenced by digest
-in `.env.public` after step 2. Provenance and SBOM attestations are attached to
-those digests, so they travel with the image rather than depending on a workflow
-run staying available.
-
-> A tag without a digest is a mutable reference and is never written by the
-> initializer. If you need a one-off build from source, omit `--release` in step
-> 2 and Compose builds locally instead — the two modes are explicit.
+The remaining steps here are for Gateway checkouts. From a checkout with published Gateway digests, run `bash deploy/public/images.sh` to verify all four references before using `--release`. This Gateway candidate has local build references available through `bash deploy/public/images.sh --local`. [Release status](../../docs/release.md#current-deployment)
 
 ### 2. Set the domain and Traefik values
 
@@ -108,32 +110,19 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-`--release` makes the initializer resolve the published digests and write them
-into `.env.public` as `WORKSTATION_RUNTIME_IMAGE`, `WORKSTATION_GATEWAY_IMAGE`,
-`WORKSTATION_PROVIDER_IMAGE` and `WORKSTATION_GATE_IMAGE`. Without it, the same
-keys are written as local build tags. Either way the file names exactly what
-runs, and re-running the initializer replaces the keys rather than appending a
-second copy.
+`--release` writes the four digest-pinned references to `.env.public`. For a
+source build, omit `--release` to select local image names, then build the images
+before bootstrapping the account.
+
+```bash
+docker compose --env-file .env.public build
+```
 
 #### Existing deployment
 
-Before this change the subnets were fixed in `compose.yml`, so an existing
-`.env.public` has no `WORKSTATION_SUBNET` or `BROWSER_SUBNET`. The defaults are
-the same addresses, so re-running the initializer with no overrides keeps the
-existing certificate valid and only records the derived keys:
-
-```bash
-WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
-docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
-```
-
-Nothing is reissued and no container is recreated with a different address. The
-images do change: an existing deployment that loaded a local archive switches to
-the digest-pinned GHCR references on the next `up`. If
-you *do* want different addresses, that is a migration: back up, re-run with
-`--reissue`, recreate every service, and reconnect Traefik to the (recreated)
-`dsh-workstation_workstation` and `dsh-workstation_browser` networks.
+Re-run the initializer with the original domain, state directory and subnets to
+preserve credentials and certificates. Skip account bootstrap for an existing
+administrator. [Auth migration](#migrate-from-the-auth-service)
 
 ### 3. Create the administrator
 
@@ -145,64 +134,25 @@ docker compose --env-file .env.public run --rm --no-deps gateway-admin bootstrap
 2. Add the displayed TOTP key to your authenticator and enter the current code.
 3. Save the displayed recovery codes offline. Bootstrap closes after the first account is created.
 
-## Choose a deployment shape
-
-Two shapes run from the same `compose.yml`. Pick one before step 3.
-
-| Shape | Services | Use it when |
-| --- | --- | --- |
-| **full** (default) | `gateway`, `runtime`, `browser-gate`, `chromium`, `cdp-relay`, `provider` | You need the shared browser: the operator's `/browser/` page, or Agent browser tools. |
-| **core** | `gateway`, `runtime` | The host cannot carry the browser stack, or Agent browser control is not approved yet. |
-
-`core` is a deliberate restriction, not an equivalent substitute. With it you
-have **no `/browser/` page and no Agent browser tools**. DSH itself — chat,
-sessions, terminal, plugins, file editing — is unaffected, because it is served
-by the Runtime, not by Chromium.
-
-### Why the browser stack is expensive
-
-`chromium` reserves `shm_size: 1gb` (`compose.yml:162`), which is tmpfs and comes
-straight out of host memory. Add the Chromium process tree, Selkies, the Provider
-and the input gate and the browser stack is roughly 2 GiB of resident memory and
-one to two cores while a video stream is being encoded. A 2 GiB host cannot run
-it alongside the rest.
-
-### Running core
-
-```bash
-docker compose --env-file .env.public \
-  -f compose.yml -f deploy/public/compose.core.yml \
-  up -d --no-build --wait --wait-timeout 420
-```
-
-The override file assigns every browser service the `browser` profile, so
-Compose does not start them, and sets `WORKSTATION_BROWSER_MCP=0` so the Runtime
-does not install the browser Bundle into the Web Profile. It also sets
-`GATEWAY_BROWSER_ENABLED=0`, which makes `/browser/` and `/_auth/browser` answer
-`503 The browser is not part of this deployment` rather than proxying to an
-address nothing listens on.
-
-Use the same `-f` pair for every later `compose` command in this guide,
-including `down`, `logs` and `run`. A plain `docker compose up` after a core
-deployment will try to start the full stack on a host that cannot hold it.
-
-### What core does not verify
-
-`core-shape` in CI proves only that `gateway` and `runtime` start, that the browser
-Bundle is absent, and that `/browser/` refuses through the core path. It does not
-prove the full stack works on your host, and it is not a substitute for the
-`full` legs. Neither shape has been run on a 2 GiB machine; the memory figures
-above are an estimate from the configured limits, not a measurement.
-
 ### 4. Start Compose and add the routes
 
-Connect Traefik once to each workstation network. The routes file goes in the host directory watched by Traefik.
+Connect Traefik once to the workstation network after the services start.
 
 ```bash
-docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360 &&
-  docker network connect dsh-workstation_workstation "$traefik" &&
-  docker network connect dsh-workstation_browser "$traefik" &&
-  install -m 0644 .workstation/edge/routes.yml "$traefik_dynamic/.dsh-workstation.tmp" &&
+docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420 &&
+  docker network connect dsh-workstation_workstation "$traefik"
+```
+
+For full, also connect Traefik once to the browser network.
+
+```bash
+docker network connect dsh-workstation_browser "$traefik"
+```
+
+Install the routes in the directory Traefik watches. Use `ps` to check the running services.
+
+```bash
+install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_dynamic/.dsh-workstation.tmp" &&
   mv "$traefik_dynamic/.dsh-workstation.tmp" "$traefik_dynamic/dsh-workstation.yml" &&
   docker compose --env-file .env.public ps
 ```
@@ -212,7 +162,7 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 1. Open `https://<domain>/`.
 2. Sign in as `admin` with the password and a fresh TOTP code. The enrollment code has already been used.
 3. Set the DeepSeek API key in DSH **Settings → Models**.
-4. Optionally register a Passkey at `/_auth/account`. You can then use the separate Passkey login.
+4. To use the separate Passkey login, add a Passkey at `/mgmt/account`.
 
 ## Use the browser
 
@@ -226,7 +176,7 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 | Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
 | Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate the Provider. |
 
-The Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. Another DSH session cannot change that lease by calling tools. A configured allowlist limits those tools and the page text they return. Chromium still handles scripts and redirects normally, and tabs share cookies. Use trusted origins.
+In the Gateway candidate, the Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. Another DSH session cannot change an active lease by calling tools. An empty `BROWSER_TOOL_ORIGINS` or `*` permits all HTTPS origins at the tool layer. A configured list limits the tool calls and returned page text. Chromium still handles page scripts and redirects, and tabs share cookies. [Candidate behavior](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
 
 For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
 
@@ -237,8 +187,9 @@ For a lost connection or tab, create a new DSH session and grant it a lease. To 
 Check it without touching the browser:
 
 ```sh
-docker compose exec -T provider node --input-type=module -e '
-  const s = require("node:fs").readFileSync("/run/secrets/gate_control", "utf8").trim()
+docker compose --env-file .env.public exec -T provider node --input-type=module -e '
+  import { readFileSync } from "node:fs"
+  const s = readFileSync("/run/secrets/gate_control", "utf8").trim()
   const r = await fetch("http://dsh-workstation-browser-gate:8082/status", {
     headers: { Authorization: "Bearer " + s },
   })
@@ -246,7 +197,7 @@ docker compose exec -T provider node --input-type=module -e '
 '
 ```
 
-`state` is `OPEN` only while you hold authority, and `RELEASING` while a handover is proving its release. A `POST /handover` returns `released: true` only after the upstream acknowledged the release. [ADR-0005](../adr/0005-release-held-input-at-selkies.md) records the ordering evidence.
+`state` is `OPEN` only while you hold authority, and `RELEASING` while a handover is proving its release. A `POST /handover` returns `released: true` only after the upstream acknowledged the release. [ADR-0005](../../docs/adr/0005-release-held-input-at-selkies.md)
 
 ## Maintain
 
@@ -281,7 +232,7 @@ The Provider tries to reconnect automatically. If the control page still shows `
 
 ### DSH versions
 
-On first start, Runtime installs official DSH `0.2.2-rc.1`. The official Plugin Manager adds the Workstation Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
+On first start, Runtime installs official DSH `0.2.2-rc.1`. In full, the official Plugin Manager adds the Workstation browser Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
 
 Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenance commands against the public Compose with `--env-file .env.public`. A version rollback changes the selected install. Restoring migrated data requires a matching backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
 
@@ -293,7 +244,7 @@ Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenan
 
 ### Migrate from the `auth` service
 
-1. Confirm the destination release resolves all four digests with `bash deploy/public/images.sh`. Back up the stopped `auth-data` volume and `.workstation/`, then run `docker compose --env-file .env.public down` with the old Compose files and the same project name. Omit `-v`.
+1. Confirm the destination release resolves all four digests with `bash deploy/public/images.sh`. Stop the old stack and back up `auth-data` and `.workstation/`. Then run `docker compose --env-file .env.public down` with the old Compose files and the same project name. Keep the volumes.
 2. Switch to the destination release in the same deployment. Run the initializer with the saved domain, state path, external proxy network and Traefik options. Install the regenerated `routes.yml` over Traefik's existing Workstation route file so it points to `dsh-workstation-gateway-edge`.
 3. Start the stack with `up -d --no-build --wait`. `gateway` opens the existing `auth-data` SQLite volume with the saved `auth-key`. Confirm your existing login, `/mgmt`, and `/browser/` in a full deployment.
 
@@ -307,16 +258,16 @@ An upgrade is a change of digests. Back up first, then switch the references and
 recreate the affected services; Compose pulls the new digests on `up`:
 
 ```bash
-git switch --detach v0.3.0
-WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-  bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
-docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
+# Set deployment_ref to the commit whose images.env records the destination digests.
+git switch --detach "$deployment_ref" &&
+  bash deploy/public/images.sh &&
+  WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
+    bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release &&
+  docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420
 ```
 
-A rollback is the same operation with the older tag: check out `v0.2.0`, re-run
-the initializer to restore the older digests, and `up` again. Because the
-references are digests, the earlier images are still exactly what that tag
-published — an upstream tag cannot have moved under you.
+Install the regenerated routes as in step 4. For a rollback, repeat the
+procedure with the older deployment commit.
 
 Runtime version rollback is separate and does not touch these images: see
 [Runtime maintenance](../README.md#upgrade-and-rollback). Image rollback and data
@@ -342,11 +293,11 @@ docker compose --env-file .env.public stop && (
   # Use the image reference the deployment itself is pinned to.
   set -a; . ./.env.public; set +a
   docker run --rm --network none --user 0:0 --entrypoint tar \
-    -v dsh-workstation_auth-data:/data:ro "$WORKSTATION_PROVIDER_IMAGE" \
+    -v dsh-workstation_auth-data:/data:ro "$WORKSTATION_RUNTIME_IMAGE" \
     --numeric-owner -C /data -cf - . > auth-data.tar
 )
 ```
 
 Restore into an empty `auth-data` volume with the stack stopped. Use the matching `.workstation/secrets/auth-key`, preserve numeric owners and modes, and keep the public domain for Passkeys. The Runtime generates fresh launch URLs.
 
-Only Traefik publishes ports. The desktop opens in its own tab while native Sidebar and release of held input during handoff are tracked in [#1](https://github.com/sagehou/dsh-workstation/issues/1). [Test evidence](../../docs/roadmap/public-compose.md)
+Only Traefik publishes ports. The shared desktop opens in its own tab. [Test evidence](../../docs/roadmap/public-compose.md)

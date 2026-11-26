@@ -18,19 +18,25 @@ DSH Workstation 是围绕官方 DSH 应用的自托管部署、安全、浏览�
 | Go Gateway | 提供认证、浏览器控制和运维入口。唯一管理员的数据存入 SQLite WAL。通过 Runtime 执行备份和校验，通过 Provider 管理浏览器控制权。 |
 | 浏览器 Provider | 接收官方 MCP 调用，每次操作验证与会话绑定的租约和代次，通过 CDP 连接 Chromium。只开放明确批准的工具。 |
 | Chromium 和 Selkies | 使用一个 Chromium 进程和一份持久化配置。人工通过 Selkies 操作，Provider 自动化控制同一个浏览器。 |
+| 浏览器输入门禁 | 代理 Selkies 数据 WebSocket，并在 Provider 变更控制权前确认释放已按住的输入。 |
 | Traefik | 路由公网 HTTPS 请求，由 Go Gateway 验证 DSH 和 Selkies 的访问。 |
 | 原生 Sidebar | 延后增强。首版正式入口是已认证的独立浏览器/控制页面。 |
 
 ## 公网 Compose 网络
 
+精简版常驻 `gateway` 和 `runtime`。完整版增加 `chromium`、`provider`、`cdp-relay` 和 `browser-gate`。两种形态都复用工作台 Compose 项目之外的 Traefik。[服务清单](../deploy/public/README.zh-CN.md#选择部署形态)
+
 ```mermaid
 flowchart LR
     Person["单一使用者"] -->|"HTTPS"| Edge["已有 Traefik"]
-    Edge -->|"认证和 WebSocket"| Gateway["Go Gateway"]
+    Edge -->|"ForwardAuth 和 WebSocket"| Gateway["Go Gateway"]
     Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
     Edge -->|"桌面 HTTP"| Browser["Chromium 和 Selkies"]
     Gateway -->|"租约管理"| Provider["浏览器 Provider"]
     Gateway -->|"组件状态和备份"| DSH
+    Gateway -->|"Selkies 数据 WebSocket"| Gate["浏览器输入门禁"]
+    Gate -->|"Selkies 输入和视频"| Browser
+    Provider -->|"确认释放输入"| Gate
     DSH -->|"官方 MCP"| Provider
     Provider -->|"Unix socket"| Relay["CDP 中继"]
     Relay -->|"Chromium 回环"| Browser
@@ -40,11 +46,11 @@ flowchart LR
 | --- | --- |
 | 已有代理网 | Traefik 与 Gateway。Gateway 的公开和校验监听器绑定在这张网，并验证可信 Traefik 对端。 |
 | `workstation` | Runtime、MCP 监听器，以及 Traefik 和 Gateway 连接 DSH 的路径。 |
-| `browser` | Chromium、Provider 管理监听器，以及 Traefik 和 Gateway 连接 Selkies 的路径。 |
+| `browser` | Chromium、输入门禁、Provider 管理监听器，以及 Traefik 和 Gateway 连接 Selkies 的路径。 |
 
 中继与 Chromium 共用网络命名空间。仅中继和 Provider 挂载 CDP socket 卷。Gateway 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[已验证拓扑](roadmap/public-compose.zh-CN.md)
 
-两个子网都是配置项而非常量。`deploy/network.sh` 从 `WORKSTATION_SUBNET` 与 `BROWSER_SUBNET` 推导子网定义、动态 `ip_range`、所有固定地址、Provider 健康检查目标以及 Runtime 证书 SAN。固定地址位于 `.2`/`.3`，动态分配限制在子网的上半段，因此先启动的容器不会占用固定地址——这一顺序避免的正是 Runtime 申请自身地址时 Docker 报「Address already in use」。
+两个子网均可配置。`deploy/network.sh` 从 `WORKSTATION_SUBNET` 与 `BROWSER_SUBNET` 推导子网定义、动态 `ip_range`、固定地址、健康检查目标和 Runtime 证书 SAN。固定端点使用 `.2` 至 `.4`，Docker 从子网的上半段分配动态地址，避免先启动的容器占用固定地址。
 
 `deploy/network.sh check` 在初始化脚本创建任何资源之前运行，遇到与宿主机路由或现有 Docker 网络重叠时拒绝执行，且不创建、不修改任何东西。默认路由被有意排除：它覆盖所有地址，而 Docker 更具体的子网路由优先。若状态目录记录的子网与请求的不一致，会拒绝而不是静默重签内部 CA，因为 Runtime 证书按推导地址签发；`--reissue` 才是有意的路径。
 
