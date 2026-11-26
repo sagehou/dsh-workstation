@@ -3,6 +3,7 @@ package main
 import (
 	_ "embed"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -30,10 +31,16 @@ type page struct {
 	Sessions                                       []session
 	Events                                         []auditEvent
 	Control                                        browserStatus
+	ProviderOK                                     bool
+	Runtime                                        runtimeState
+	Backups                                        []backupEntry
+	Components                                     components
+	Versions                                       availableVersions
 }
 
 var ui = template.Must(template.New("page").Funcs(template.FuncMap{
 	"stamp": func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format("2006-01-02 15:04 UTC") },
+	"mib":   func(bytes int64) float64 { return float64(bytes) / (1024 * 1024) },
 }).Parse(pages))
 
 func (g *gateway) render(w http.ResponseWriter, r *http.Request, p page) {
@@ -43,10 +50,17 @@ func (g *gateway) render(w http.ResponseWriter, r *http.Request, p page) {
 		setCookie(w, csrfCookie, p.CSRF, 0)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Pages are rendered per request from live state; a cached copy would show a
+	// version or backup list that has since changed.
+	w.Header().Set("Cache-Control", "no-store")
 	if p.Status != 0 {
 		w.WriteHeader(p.Status)
 	}
+	// A template error truncates the response mid-page, so the operator sees a
+	// half-rendered view with no explanation. Log it and say so in the page tail:
+	// a silent `return` here hid a broken operations page for several rounds.
 	if err := ui.Execute(w, p); err != nil {
+		slog.Error("template render failed", "view", p.View, "reason", err.Error())
 		return
 	}
 }

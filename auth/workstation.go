@@ -191,12 +191,20 @@ func (g *gateway) openBrowser(w http.ResponseWriter, r *http.Request) {
 }
 
 type peer struct {
-	ID, Label string
-	Tab       bool
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Tab   bool   `json:"tab"`
 }
+// browserStatus mirrors the Provider's `/status` payload. The fields are exported
+// because the template reads them; `Lease` and `InFlight` come from the same
+// response and were missing here, which made the operations page fail to render
+// past the Provider row.
 type browserStatus struct {
-	State, Reason string
-	Peers         []peer
+	State    string `json:"state"`
+	Reason   string `json:"reason"`
+	InFlight bool   `json:"inFlight"`
+	Lease    bool   `json:"lease"`
+	Peers    []peer `json:"peers"`
 }
 
 var providerHTTP = &http.Client{

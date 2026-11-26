@@ -174,6 +174,16 @@ func run() error {
 	if net.ParseIP(g.edge) == nil {
 		return errors.New("invalid AUTH_EDGE_IP")
 	}
+	// A second trusted peer, empty in production. It exists so an operator can
+	// exercise the rendered pages from inside the container with curl, which the
+	// edge-IP check otherwise forbids. Setting it to a real address widens the
+	// trust boundary, so it is documented as a diagnostic-only knob.
+	if extra := env("AUTH_DEBUG_PEER", ""); extra != "" {
+		if net.ParseIP(extra) == nil {
+			return errors.New("invalid AUTH_DEBUG_PEER")
+		}
+		g.debugPeer = extra
+	}
 	if err := g.initRuntime(); err != nil {
 		return err
 	}

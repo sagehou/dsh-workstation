@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf-token" content="{{.CSRF}}">
 <title>{{.Title}} · DSH Workstation</title>
+<!-- build:2026-11-26-mgmt-v2 用这个标记判断页面是否为最新渲染 -->
 <link rel="stylesheet" href="/_auth/style.css">
 {{if or (eq .View "login") (eq .View "account")}}<script src="/_auth/passkey.js" defer></script>{{end}}
 </head>
@@ -38,8 +39,116 @@
 <button>登录</button>
 </form>
 <nav><a href="/_auth/login?next={{.Next}}">返回登录</a>{{if eq .View "totp"}} <a href="/_auth/recovery?next={{.Next}}">使用恢复码</a>{{end}}</nav>
+{{else if eq .View "stepup"}}
+{{template "nav" .}}
+<p>这一步需要重新确认身份。输入验证器当前的 6 位验证码即可，不需要再输密码。</p>
+<form action="/_auth/stepup" method="post">
+{{template "csrf" .CSRF}}
+<input type="hidden" name="next" value="{{.Next}}">
+<label for="stepup-code">动态验证码</label>
+<input id="stepup-code" name="code" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6">
+<button>确认</button>
+</form>
+<p><a href="/mgmt">取消</a></p>
+
+{{else if eq .View "operations"}}
+{{template "nav" .}}
+{{template "mgmt-tabs" .}}
+<h2>组件状态</h2>
+<table>
+<tr><th>组件</th><th>状态</th></tr>
+<tr><td>Runtime</td><td>{{if .Runtime.ReadError}}{{.Runtime.ReadError}}{{else}}活动版本 {{if .Runtime.Active}}{{.Runtime.Active}}{{else}}未选择{{end}}{{if .Runtime.Previous}} · 上一个 {{.Runtime.Previous}}{{end}}{{end}}</td></tr>
+<tr><td>已安装 DSH</td><td>{{if .Runtime.Installed}}{{range $i, $v := .Runtime.Installed}}{{if $i}} · {{end}}{{$v}}{{end}}{{else}}无{{end}}</td></tr>
+<tr><td>Auth</td><td>运行中</td></tr>
+<tr><td>Provider</td><td>{{if .ProviderOK}}{{.Control.State}}{{if .Control.Reason}} · {{.Control.Reason}}{{end}}{{if .Control.Lease}} · 有租约{{end}}{{else}}不可用{{end}}</td></tr>
+<tr><td>浏览器会话</td><td>{{if .Control.Peers}}{{len .Control.Peers}} 个{{else}}无{{end}}</td></tr>
+</table>
+
+<h2>组件</h2>
+{{if .Components.Error}}
+<p role="alert">无法读取组件版本：{{.Components.Error}}</p>
+{{else}}
+<table>
+<tr><th>组件</th><th>版本</th></tr>
+{{range .Components.Rows}}
+<tr><td>{{.Key}}</td><td>{{.Value}}</td></tr>
+{{end}}
+</table>
+{{end}}
+
+<h2>版本维护</h2>
+{{if .Versions.Error}}
+<p role="alert">无法获取可用版本：{{.Versions.Error}}</p>
+{{else}}
+<p>已发布 {{len .Versions.Values}} 个版本，最新：{{range $i, $v := .Versions.Values}}{{if lt $i 3}}{{$v}} {{end}}{{end}}</p>
+{{end}}
+{{if .Recent}}
+<p>升级会先安装到独立目录、跑兼容检查与就绪探针，全部通过才切换指针；失败时活动版本不变。</p>
+<form action="/mgmt/runtime" method="post">
+{{template "csrf" .CSRF}}
+<label for="upgrade-version">目标版本</label>
+<input id="upgrade-version" name="version" required pattern="[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?" placeholder="0.2.2-rc.5" list="version-options" autocomplete="off">
+<datalist id="version-options">
+{{range .Versions.Values}}<option value="{{.}}">{{end}}
+</datalist>
+<button name="action" value="upgrade">升级</button>
+</form>
+<form action="/mgmt/runtime" method="post" onsubmit="return confirm('回滚只切换可执行文件指针，不会回滚数据。继续？')">
+{{template "csrf" .CSRF}}
+<button name="action" value="rollback">回滚指针</button>
+</form>
+<p>回滚指针不等于数据回滚。若 DSH 迁移过 Profile 状态，请用「备份」标签恢复匹配的数据。</p>
+{{else}}
+<p><a href="/_auth/login?next=%2Fmgmt">重新验证身份</a> 后可执行升级与回滚。</p>
+{{end}}
+
+{{else if eq .View "backup"}}
+{{template "nav" .}}
+{{template "mgmt-tabs" .}}
+<h2>备份</h2>
+{{if .Backups}}
+<table>
+<tr><th>备份 ID</th><th>DSH 版本</th><th>大小</th><th>时间</th><th>清单</th></tr>
+{{range .Backups}}
+<tr>
+<td>{{.ID}}</td>
+<td>{{if .Version}}{{.Version}}{{else}}—{{end}}</td>
+<td>{{printf "%.1f MiB" (mib .Bytes)}}</td>
+<td>{{.Modified}}</td>
+<td>{{if .HasManifest}}有{{else}}<strong>缺失</strong>{{end}}</td>
+</tr>
+{{end}}
+</table>
+{{else}}
+<p>还没有备份。</p>
+{{end}}
+<h2>操作</h2>
+{{if .Recent}}
+<form action="/mgmt/runtime" method="post">
+{{template "csrf" .CSRF}}
+<button name="action" value="backup">创建备份</button>
+</form>
+<p>校验不恢复，可安全用于确认归档完好。</p>
+<form action="/mgmt/runtime" method="post">
+{{template "csrf" .CSRF}}
+<label for="verify-id">备份 ID</label>
+<input id="verify-id" name="id" required pattern="[0-9]{8}T[0-9]{6}Z\.[0-9a-f]{12}" placeholder="20261126T041500Z.abcdef123456">
+<button name="action" value="verify">校验</button>
+</form>
+<p><strong>恢复会覆盖当前的 Profile、锁文件与会话。</strong>请先创建备份。</p>
+<form action="/mgmt/runtime" method="post" onsubmit="return confirm('恢复会覆盖当前 Profile、锁文件与会话。已创建备份？')">
+{{template "csrf" .CSRF}}
+<label for="restore-id">备份 ID</label>
+<input id="restore-id" name="id" required pattern="[0-9]{8}T[0-9]{6}Z\.[0-9a-f]{12}">
+<button name="action" value="restore">恢复</button>
+</form>
+{{else}}
+<p><a href="/_auth/login?next=%2Fmgmt%2Fbackup">重新验证身份</a> 后可执行备份与恢复。</p>
+{{end}}
+
 {{else if eq .View "account"}}
 {{template "nav" .}}
+{{template "mgmt-tabs" .}}
 <h2>安全设置</h2>
 {{if .Recent}}
 <button type="button" data-passkey="register" hidden>添加 Passkey</button>
@@ -87,6 +196,7 @@
 </form>
 {{else if eq .View "control"}}
 {{template "nav" .}}
+{{template "mgmt-tabs" .}}
 {{if .Control.State}}<p role="status">状态：{{.Control.State}} · {{.Control.Reason}}</p>{{end}}
 {{if eq .Control.State "DISCONNECTED"}}
 <form action="/_auth/control" method="post">
@@ -119,5 +229,6 @@
 </main>
 </body>
 </html>
+{{define "mgmt-tabs"}}<nav aria-label="管理" class="tabs"><a href="/mgmt"{{if eq .View "operations"}} aria-current="page"{{end}}>概览</a> <a href="/mgmt/browser"{{if eq .View "control"}} aria-current="page"{{end}}>浏览器</a> <a href="/mgmt/account"{{if eq .View "account"}} aria-current="page"{{end}}>账户</a> <a href="/mgmt/backup"{{if eq .View "backup"}} aria-current="page"{{end}}>备份</a></nav>{{end}}
 {{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
-{{define "nav"}}<nav aria-label="工作台"><a href="/_auth/dsh">DSH</a> <a href="/_auth/browser" target="_blank" rel="noopener">打开浏览器</a> <a href="/_auth/control">浏览器控制</a> <a href="/_auth/account">账户</a></nav>{{end}}
+{{define "nav"}}<nav aria-label="工作台"><a href="/_auth/dsh">DSH</a> <a href="/_auth/browser" target="_blank" rel="noopener">打开浏览器</a>{{if ne .View "operations"}}{{if ne .View "control"}}{{if ne .View "account"}}{{if ne .View "backup"}} <a href="/mgmt">控制台</a>{{end}}{{end}}{{end}}{{end}}</nav>{{end}}
