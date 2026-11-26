@@ -62,13 +62,19 @@ jobs:
           matrix='['
           separator=
           for image in $images; do
+            if bash deploy/public/images.sh --field digest "$image" >/dev/null 2>&1; then
+              [[ $REQUESTED == all ]] && continue
+              echo "$image already has a published digest. Bump its version to publish an update." >&2
+              exit 1
+            fi
             version="$(bash deploy/public/images.sh --field version "$image")"
             matrix+="$separator{\"image\":\"$image\",\"version\":\"$version\"}"
             separator=,
           done
           matrix+=']'
+          [[ $matrix != '[]' ]] || { echo 'No unpublished image versions.' >&2; exit 1; }
           printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
-          echo "Publishing: $(echo $images)"
+          echo "Publishing: $matrix"
 
   publish:
     needs: plan
@@ -189,7 +195,10 @@ jobs:
                 { echo 'the runtime image cannot read its own modules as its own user' >&2; exit 1; }
               docker run --rm --entrypoint dsh-runtime "$reference" health >/dev/null 2>&1 || true
               ;;
-            gateway|provider|browser-gate)
+            gateway)
+              docker run --rm --entrypoint sh "$reference" -c 'test -x /usr/local/bin/workstation-gateway'
+              ;;
+            provider|browser-gate)
               docker run --rm --entrypoint sh "$reference" -c 'exit 0' >/dev/null ||
                 { echo "$IMAGE cannot start" >&2; exit 1; }
               ;;

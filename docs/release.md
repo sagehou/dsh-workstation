@@ -52,6 +52,7 @@ No repository secret is required: the workflow uses the automatic
 2. Merge that change.
 3. Run **Publish images** from `main` (`image: all`), or create a tag
    `v<version>` — for example `v0.2.0` — to mark the release point.
+   The `all` selection publishes the versions with empty digests.
 
    A `v*` tag names the **repository's** release point, not a shared image
    version. The four images are versioned independently, so a tag `v0.2.0` may

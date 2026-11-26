@@ -25,9 +25,10 @@ default becomes "allow everything", not "allow nothing".
 
 ### 1. The Agent is the default owner of the browser
 
-A browser tool call takes the lease itself when no live lease is held. The
-operator's control page remains able to grant, take over and revoke, but those
-are no longer a precondition for Agent work.
+`mcp__browser__lease_status` acquires an available lease through `browser-gate`.
+An active lease stays with its DSH session. Action tools require that session's
+current generation before they can renew the lease or send browser input.
+Operators can still grant, take over and revoke from the control page.
 
 `AGENTS.md` says *"Keep Agent browser control disabled until exclusive input
 handoff passes its acceptance criteria."* **This ADR overrides that clause.** The
