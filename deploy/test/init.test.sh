@@ -51,7 +51,7 @@ run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
 (( status == 0 )) || fail "the first init failed: $out"
 [[ -f .env.public ]] || fail 'init did not write .env.public'
 for name in auth-key provider-admin selkies-master selkies-controller selkies-sentinel browser-enroll \
-            runtime-ca.pem runtime.pem runtime-key.pem; do
+            maintenance runtime-ca.pem runtime.pem runtime-key.pem; do
   [[ -s $state/secrets/$name ]] || fail "init did not create secrets/$name"
 done
 grep -Fxq 'WORKSTATION_SUBNET=172.30.241.0/24' .env.public || fail '.env.public lacks the derived workstation subnet'
@@ -80,6 +80,22 @@ run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
 [[ "$(sha256sum "$state/secrets/auth-key" | cut -d' ' -f1)" == "$key_before" ]] ||
   fail 'the repeated init replaced a shared secret'
 pass 'repeated initialization preserves the CA, the certificate and every secret'
+
+rm -- "$state/secrets/maintenance"
+printf 'WORKSTATION_AUTH_IMAGE=dsh-workstation-auth:0.1.1\nAUTH_IDLE=42m\n' >> .env.public
+sed -i '/^WORKSTATION_GATEWAY_IMAGE=/d' .env.public
+sed -i 's/dsh-workstation-gateway/dsh-workstation-auth/g' "$state/edge/routes.yml"
+run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
+  bash deploy/public/init.sh "$domain" proxy traefik
+(( status == 0 )) || fail "the gateway migration failed: $out"
+grep -q '^WORKSTATION_GATEWAY_IMAGE=dsh-workstation-gateway:' .env.public || fail 'the gateway image was not recorded'
+if grep -q '^WORKSTATION_AUTH_IMAGE=' .env.public; then fail 'the old image key survived'; fi
+grep -Fxq 'AUTH_IDLE=42m' .env.public || fail 'the saved session limit was lost'
+grep -Fq 'dsh-workstation-gateway-edge:8081/verify' "$state/edge/routes.yml" || fail 'ForwardAuth still uses the old alias'
+[[ $(stat -c '%s:%a' "$state/secrets/maintenance") == 64:444 ]] || fail 'missing or unreadable maintenance secret'
+[[ "$(sha256sum "$state/secrets/auth-key" | cut -d' ' -f1)" == "$key_before" ]] || fail 'migration replaced the authentication key'
+[[ "$(openssl x509 -in "$state/secrets/runtime-ca.pem" -noout -fingerprint -sha256)" == "$ca_before" ]] || fail 'migration replaced the CA'
+pass 'legacy initialization moves the image and routes to gateway while keeping saved settings and keys'
 
 # --- 3. a changed subnet is refused without --reissue --------------------
 cd "$workdir"
@@ -170,7 +186,7 @@ pass 'without --release the four images are recorded as local build tags'
 # unpublished state is constructed here. Reading the checked-in file would make
 # this case depend on whether a release had run.
 cp -- deploy/public/images.env "$work/images-matrix-backup"
-for name in runtime auth provider browser-gate; do
+for name in runtime gateway provider browser-gate; do
   awk -v name="$name" '$1 == name { printf "%s %s\n", name, $2; next } { print }' \
     deploy/public/images.env > deploy/public/images.env.tmp
   mv deploy/public/images.env.tmp deploy/public/images.env
@@ -184,7 +200,7 @@ grep -Fxq "WORKSTATION_RUNTIME_IMAGE=$(local_tag runtime)" .env.public ||
 pass '--release refuses an unpublished image and leaves the recorded keys intact'
 
 # With digests recorded, every reference is registry-qualified and pinned.
-for name in runtime auth provider browser-gate; do
+for name in runtime gateway provider browser-gate; do
   awk -v name="$name" -v digest="$digest" '
     $1 == name { printf "%s %s %s\n", name, $2, digest; next } { print }
   ' deploy/public/images.env > deploy/public/images.env.tmp
@@ -193,7 +209,7 @@ done
 run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik --release
 (( status == 0 )) || fail "the release init failed: $out"
-for key in WORKSTATION_RUNTIME_IMAGE WORKSTATION_AUTH_IMAGE WORKSTATION_PROVIDER_IMAGE WORKSTATION_GATE_IMAGE; do
+for key in WORKSTATION_RUNTIME_IMAGE WORKSTATION_GATEWAY_IMAGE WORKSTATION_PROVIDER_IMAGE WORKSTATION_GATE_IMAGE; do
   line="$(grep "^$key=" .env.public)"
   [[ $line == *'ghcr.io/sagehou/'*'@'$digest ]] || fail "$key is not a pinned GHCR reference: $line"
   count="$(grep -c "^$key=" .env.public || true)"

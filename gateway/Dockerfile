@@ -9,7 +9,7 @@ ENV GOPROXY=${GOPROXY}
 COPY . .
 
 FROM source AS build
-RUN CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/auth .
+RUN CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/gateway .
 
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 # curl is not used by the service: the healthcheck uses Go's own HTTP client.
@@ -26,7 +26,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g" 
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && install -d -m 0700 -o 1000 -g 1000 /data
-COPY --from=build /out/auth /usr/local/bin/workstation-auth
+COPY --from=build /out/gateway /usr/local/bin/workstation-gateway
 USER 1000:1000
-ENTRYPOINT ["workstation-auth"]
+ENTRYPOINT ["workstation-gateway"]
 CMD ["serve"]

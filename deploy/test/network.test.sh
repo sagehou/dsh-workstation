@@ -167,14 +167,14 @@ grep -q 'process.env.PROVIDER_IP' prototypes/m0/provider/server.mjs ||
   fail 'the provider does not read PROVIDER_IP from its environment'
 grep -q 'process.env.PROVIDER_CONTROL_IP' prototypes/m0/provider/server.mjs ||
   fail 'the provider does not read PROVIDER_CONTROL_IP from its environment'
-# Auth calls the provider's control listener at an address Compose derives.
-if grep -q '"http://172\.30\.[0-9]' auth/workstation.go; then
-  fail 'auth still calls the provider by a literal address'
+# Gateway calls the provider's control listener at an address Compose derives.
+if grep -q '"http://172\.30\.[0-9]' gateway/workstation.go; then
+  fail 'gateway still calls the provider by a literal address'
 fi
-grep -q 'providerControlAddr' auth/workstation.go ||
-  fail 'auth does not read the provider control address from configuration'
-check_binding compose.yml 'AUTH_PROVIDER_CONTROL_ADDR: \$\{BROWSER_PROVIDER_IP' 'give auth the derived provider control address'
-check_binding auth/main.go 'AUTH_PROVIDER_CONTROL_ADDR' 'read the provider control address from its environment'
+grep -q 'providerControlAddr' gateway/workstation.go ||
+  fail 'gateway does not read the provider control address from configuration'
+check_binding compose.yml 'GATEWAY_PROVIDER_CONTROL_ADDR: \$\{BROWSER_PROVIDER_IP' 'give gateway the derived provider control address'
+check_binding gateway/main.go 'gatewayEnv\("PROVIDER_CONTROL_ADDR"' 'read the provider control address from its environment'
 pass 'every consumer takes its address from the derivation'
 
 # A literal address compiled into a shipped image cannot follow a custom subnet.
@@ -194,7 +194,7 @@ while IFS= read -r line; do
     *'controlAddr ='*|*'Host ='*) continue ;;
   esac
   printf '%s\n' "$line" >>"$work/baked"
-done < <(grep -nE "$address_re" prototypes/m0/provider/server.mjs auth/workstation.go 2>/dev/null || true)
+done < <(grep -nE "$address_re" prototypes/m0/provider/server.mjs gateway/workstation.go 2>/dev/null || true)
 if [[ -s $work/baked ]]; then
   cat "$work/baked" >&2
   fail 'a shipped image binds a literal address instead of a configured one'

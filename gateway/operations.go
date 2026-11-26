@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
-	"log/slog"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,14 +13,6 @@ import (
 	"strings"
 	"time"
 )
-
-// The operations page (#32) shows component state that used to be CLI-only.
-//
-// It is deliberately read-only for anything that changes persistent state. An
-// upgrade rewrites DSH_HOME and can invalidate a Profile, and the CLI's
-// `docker compose run --rm maintenance upgrade …` makes that a deliberate act.
-// A button that does the same thing from a web page removes the pause, so the
-// version actions stay on the command line and this page reports what they did.
 
 type runtimeState struct {
 	Active    string   `json:"active"`
@@ -50,11 +42,11 @@ type availableVersions struct {
 }
 
 type backupEntry struct {
-	ID        string `json:"id"`
-	Version   string `json:"version,omitempty"`
-	Bytes     int64  `json:"bytes"`
-	Modified  string `json:"modified"`
-	HasManifest bool `json:"hasManifest"`
+	ID          string `json:"id"`
+	Version     string `json:"version,omitempty"`
+	Bytes       int64  `json:"bytes"`
+	Modified    string `json:"modified"`
+	HasManifest bool   `json:"hasManifest"`
 }
 
 // readRuntimeState reads the Runtime's own selection files rather than shelling
@@ -91,9 +83,7 @@ func readRuntimeState(root string) runtimeState {
 	return state
 }
 
-// readBackups lists the archive/manifest pairs the Runtime wrote. A manifest
-// without an archive, or the reverse, is reported rather than hidden: an
-// incomplete pair is exactly what a restore would fail on.
+// readBackups lists archives newest first and shows whether each has a manifest.
 func readBackups(dir string) []backupEntry {
 	if dir == "" {
 		dir = "/backup"
@@ -103,32 +93,34 @@ func readBackups(dir string) []backupEntry {
 	if err != nil {
 		return out
 	}
-	archives := map[string]bool{}
-	manifests := map[string]bool{}
-	for _, entry := range entries {
-		name := entry.Name()
-		switch {
-		case strings.HasSuffix(name, ".tgz"):
-			archives[strings.TrimSuffix(name, ".tgz")] = true
-		case strings.HasSuffix(name, ".json"):
-			manifests[strings.TrimSuffix(name, ".json")] = true
+	for i := len(entries) - 1; i >= 0; i-- {
+		file := entries[i]
+		base, archive := strings.CutSuffix(file.Name(), ".tgz")
+		id, matches := strings.CutPrefix(base, "dsh-home.")
+		if !archive || !matches || file.IsDir() {
+			continue
 		}
-	}
-	for base := range archives {
-		entry := backupEntry{ID: strings.TrimPrefix(base, "dsh-home."), HasManifest: manifests[base]}
-		if info, err := os.Stat(filepath.Join(dir, base+".tgz")); err == nil {
+		entry := backupEntry{ID: id}
+		if info, err := file.Info(); err == nil {
 			entry.Bytes = info.Size()
 			entry.Modified = info.ModTime().UTC().Format(time.RFC3339)
 		}
 		// The recorded DSH version lives in the manifest; a missing or unreadable
 		// one leaves the field empty rather than failing the whole list.
 		if raw, err := os.ReadFile(filepath.Join(dir, base+".json")); err == nil {
+			entry.HasManifest = true
 			var manifest struct {
+				DSH struct {
+					Active string `json:"active"`
+				} `json:"dsh"`
 				DSHVersion string `json:"dshVersion"`
 				Version    string `json:"version"`
 			}
 			if json.Unmarshal(raw, &manifest) == nil {
-				entry.Version = manifest.DSHVersion
+				entry.Version = manifest.DSH.Active
+				if entry.Version == "" {
+					entry.Version = manifest.DSHVersion
+				}
 				if entry.Version == "" {
 					entry.Version = manifest.Version
 				}
@@ -141,17 +133,15 @@ func readBackups(dir string) []backupEntry {
 
 // operationsPage renders the read-only view. Every field is optional: a missing
 // volume shows as an error string on that card, not as a failed page.
-func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request, s session) {
+func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request) {
 	page := page{
 		View:  "operations",
-		Title: "运维状态",
-		// A destructive action on this page still needs step-up, same as the
-		// credential changes on the account page.
-		Recent: g.stepped(s),
+		Title: "控制台",
 	}
 	page.Runtime = readRuntimeState(os.Getenv("WORKSTATION_DSH_HOME"))
-	page.Backups = readBackups(os.Getenv("WORKSTATION_BACKUP_DIR"))
-	g.fetchInventory(r, &page)
+	inventoryCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	g.fetchInventory(r.WithContext(inventoryCtx), &page)
 	// The Provider status is the one live dependency; without it the browser
 	// cards read as unknown rather than empty.
 	var status browserStatus
@@ -168,8 +158,8 @@ func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request, s sessi
 func (g *gateway) backupPage(w http.ResponseWriter, r *http.Request, s session) {
 	page := page{
 		View:   "backup",
-		Title:  "备份与恢复",
-		Recent: g.stepped(s),
+		Title:  "备份",
+		Recent: stepped(s),
 	}
 	page.Backups = readBackups(os.Getenv("WORKSTATION_BACKUP_DIR"))
 	g.render(w, r, page)
@@ -219,32 +209,23 @@ func (g *gateway) runtimeAction(r *http.Request, action string, args map[string]
 	return out, nil
 }
 
-// runtimeControl runs one maintenance action and returns to the page with the
-// result. Every action requires step-up: these rewrite DSH_HOME or the backup
-// volume, and a stale tab should not be able to start an upgrade.
 func (g *gateway) runtimeControl(w http.ResponseWriter, r *http.Request, s session) {
-	if !g.stepped(s) {
-		// Second factor only: the session already proved the password, and asking
-		// for it again on every management action is what makes operators keep it
-		// in autofill.
-		http.Redirect(w, r, "/_auth/stepup?next=%2Fmgmt", http.StatusSeeOther)
-		return
-	}
 	action := r.PostForm.Get("action")
-	// Logged without form values: the action name is all an operator needs to
-	// tell "the button did nothing" from "the button reached the wrong route".
-	slog.Info("runtime control", "action", action, "stepped", s.Stepped > time.Now().Unix()-300)
 	args := map[string]any{}
 	switch action {
-	case "backup", "rollback", "status", "backups":
-	case "upgrade":
-		args["version"] = r.PostForm.Get("version")
-	case "verify", "restore":
+	case "backup":
+	case "verify":
 		args["id"] = r.PostForm.Get("id")
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)
 		return
 	}
+	if !stepped(s) {
+		http.Redirect(w, r, nextURL("/_auth/stepup", "/mgmt/backup"), http.StatusSeeOther)
+		return
+	}
+	// Large archives can outlast the default page write deadline.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Minute))
 	result, err := g.runtimeAction(r, action, args)
 	if err != nil {
 		g.failure(r, "runtime_"+action+"_denied")
@@ -263,6 +244,11 @@ func (g *gateway) runtimeControl(w http.ResponseWriter, r *http.Request, s sessi
 		return
 	}
 	g.failure(r, "runtime_"+action)
+	if action == "verify" {
+		g.render(w, r, page{View: "backup", Title: "备份", Recent: stepped(s), Notice: "备份校验通过。",
+			Backups: readBackups(os.Getenv("WORKSTATION_BACKUP_DIR"))})
+		return
+	}
 	http.Redirect(w, r, "/mgmt/backup", http.StatusSeeOther)
 }
 
@@ -312,14 +298,7 @@ func (g *gateway) fetchInventory(r *http.Request, page *page) {
 	}
 }
 
-// stepUp re-verifies the second factor only.
-//
-// Sensitive actions need a fresh factor, but demanding the password again is a
-// different requirement: the session already proved the password, and retyping it
-// on every management action trains the operator to keep it in a password manager
-// autofill — the opposite of the intent. A TOTP code is enough to show the person
-// at the keyboard is the one holding the authenticator.
-func (g *gateway) stepUpPage(w http.ResponseWriter, r *http.Request, s session) {
+func (g *gateway) stepUpPage(w http.ResponseWriter, r *http.Request) {
 	g.render(w, r, page{
 		View:  "stepup",
 		Title: "确认操作",
@@ -328,10 +307,11 @@ func (g *gateway) stepUpPage(w http.ResponseWriter, r *http.Request, s session) 
 }
 
 func (g *gateway) stepUp(w http.ResponseWriter, r *http.Request, s session) {
-	next := safePath(r.PostForm.Get("next"))
-	if next == "" {
-		next = "/mgmt"
+	target := r.PostForm.Get("next")
+	if target == "" {
+		target = "/mgmt"
 	}
+	next := safePath(target)
 	account, err := g.account(r.Context())
 	if err != nil {
 		unavailable(w)
@@ -342,39 +322,37 @@ func (g *gateway) stepUp(w http.ResponseWriter, r *http.Request, s session) {
 		unavailable(w)
 		return
 	}
-	// The returned step is not stored: this is a re-authentication, not a login,
-	// so there is no `last_step` to advance. The 30 s window is the only replay
-	// bound, which is why the action still runs immediately.
-	_, ok := matchTOTP(seed, strings.TrimSpace(r.PostForm.Get("code")), time.Now())
-	if !ok {
+	now := time.Now()
+	step, ok := matchTOTP(seed, strings.TrimSpace(r.PostForm.Get("code")), now)
+	denied := func() {
 		g.failure(r, "stepup_failed")
 		g.render(w, r, page{Status: 401, View: "stepup", Title: "确认操作", Next: next,
 			Error: "验证码无效或已使用。"})
+	}
+	if !ok {
+		denied()
 		return
 	}
-	// `stepped` is what the sensitive handlers check; refreshing it is the whole
-	// point of this page.
-	if err := g.change(r.Context(), "stepup", func(tx *sql.Tx) error {
-		return one(tx, r.Context(), "UPDATE sessions SET stepped=? WHERE token=?", time.Now().Unix(), hash(cookie(r, sessionCookie)))
-	}); err != nil {
+	ctx := r.Context()
+	err = g.change(ctx, "stepup", func(tx *sql.Tx) error {
+		if err := one(tx, ctx, "UPDATE account SET last_step=? WHERE id=1 AND enabled=1 AND epoch=? AND last_step<?", step, account.epoch, step); err != nil {
+			return err
+		}
+		return one(tx, ctx, "UPDATE sessions SET stepped=? WHERE id=? AND seen>? AND created>?",
+			now.Unix(), s.ID, now.Unix()-g.idle, now.Unix()-g.absolute)
+	})
+	if errors.Is(err, errDenied) {
+		denied()
+		return
+	}
+	if err != nil {
 		unavailable(w)
 		return
 	}
-	g.failure(r, "stepup")
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-// stepped reports whether this session has passed a second-factor check.
-//
-// A session only exists because a login completed, and that login required TOTP.
-// `stepped` is therefore already non-zero for every session, which makes the
-// check a statement about the session rather than a countdown. The 300 s window
-// it replaced turned a completed verification back into "unverified" while the
-// session was still alive, and the only effect was to interrupt an operator in
-// the middle of maintenance.
-//
-// `stepped` is still refreshed by /_auth/stepup, so a future policy that wants a
-// per-action window has the data; nothing reads it as a deadline today.
-func (g *gateway) stepped(s session) bool {
-	return s.Stepped > 0
+func stepped(s session) bool {
+	now := time.Now().Unix()
+	return s.Stepped <= now && s.Stepped > now-300
 }

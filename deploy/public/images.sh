@@ -6,8 +6,8 @@
 #   bash deploy/public/images.sh runtime             # one image reference
 #   bash deploy/public/images.sh --names             # every image name
 #   bash deploy/public/images.sh --json              # name -> reference as JSON
-#   bash deploy/public/images.sh --field digest auth
-#   bash deploy/public/images.sh --field version auth
+#   bash deploy/public/images.sh --field digest gateway
+#   bash deploy/public/images.sh --field version gateway
 #   bash deploy/public/images.sh --local runtime      # local tag, for building
 #
 # Like traefik-image.sh, this fails closed: an image without a recorded digest is

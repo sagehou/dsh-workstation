@@ -3,7 +3,7 @@ name: dsh-workstation
 x-runtime: &runtime
   # Override with an immutable reference (tag@sha256:...) in the deployed
   # environment file. The value is recorded in every backup manifest.
-  image: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.1}
+  image: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.2}
   build: ./runtime
   init: true
   cap_drop: [ALL]
@@ -15,7 +15,7 @@ x-runtime: &runtime
     - runtime-launch:/run/dsh-runtime
 
 x-provider: &provider
-  image: ${WORKSTATION_PROVIDER_IMAGE:-dsh-workstation-provider:0.2.0}
+  image: ${WORKSTATION_PROVIDER_IMAGE:-dsh-workstation-provider:0.2.1}
   build:
     context: .
     dockerfile: provider/Dockerfile
@@ -25,9 +25,9 @@ x-provider: &provider
   security_opt: ["no-new-privileges:true"]
 
 services:
-  auth:
-    image: ${WORKSTATION_AUTH_IMAGE:-dsh-workstation-auth:0.1.1}
-    build: ./auth
+  gateway:
+    image: ${WORKSTATION_GATEWAY_IMAGE:-dsh-workstation-gateway:0.1.0}
+    build: ./gateway
     init: true
     restart: unless-stopped
     read_only: true
@@ -35,50 +35,51 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
-      AUTH_EDGE_IP: ${WORKSTATION_TRAEFIK_IP:?run deploy/public/init.sh}
-      AUTH_ADDR: dsh-workstation-auth-edge:8080
-      AUTH_VERIFY_ADDR: dsh-workstation-auth-edge:8081
-      # Auth calls the provider's control listener. The address comes from the
+      GATEWAY_EDGE_IP: ${WORKSTATION_TRAEFIK_IP:?run deploy/public/init.sh}
+      GATEWAY_ADDR: dsh-workstation-gateway-edge:8080
+      GATEWAY_VERIFY_ADDR: dsh-workstation-gateway-edge:8081
+      # Gateway calls the provider's control listener. The address comes from the
       # derivation so a custom subnet moves it too.
-      AUTH_PROVIDER_CONTROL_ADDR: ${BROWSER_PROVIDER_IP:-172.30.233.2}:8081
+      GATEWAY_PROVIDER_CONTROL_ADDR: ${BROWSER_PROVIDER_IP:-172.30.233.2}:8081
       # The browser data socket is proxied through the input gate (ADR-0005).
-      AUTH_BROWSER_UPSTREAM: http://dsh-workstation-browser-gate:8082
+      GATEWAY_BROWSER_UPSTREAM: http://dsh-workstation-browser-gate:8082
       # Every other browser WebSocket bypasses the gate.
-      AUTH_BROWSER_DIRECT: http://dsh-workstation-chromium:3000
+      GATEWAY_BROWSER_DIRECT: http://dsh-workstation-chromium:3000
       # Read-only paths for the operations page (#32). Both volumes are mounted
       # read-only above; these names keep the Go code free of hard-coded paths.
       WORKSTATION_DSH_HOME: /dsh-home
       WORKSTATION_BACKUP_DIR: /backup
-      # The Gateway forwards maintenance actions to the Runtime listener (#32).
-      # It never runs dsh-runtime itself.
+      # Backups and validation go through Runtime's private maintenance listener.
       WORKSTATION_MAINTENANCE_ADDR: dsh-workstation-runtime:8099
       WORKSTATION_MAINTENANCE_SECRET: /run/secrets/maintenance
-      AUTH_IDLE: ${AUTH_IDLE:-30m}
-      AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-12h}
-      AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-8}
+      GATEWAY_IDLE: ${GATEWAY_IDLE:-}
+      GATEWAY_ABSOLUTE: ${GATEWAY_ABSOLUTE:-}
+      GATEWAY_MAX_SESSIONS: ${GATEWAY_MAX_SESSIONS:-}
+      # Gateway reads these when the corresponding GATEWAY_* setting is absent.
+      AUTH_IDLE: ${AUTH_IDLE:-}
+      AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-}
+      AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-}
     secrets: [auth_key, m0_controller, m0_admin, runtime_ca, maintenance]
     volumes:
       - auth-data:/data
       - runtime-launch:/run/dsh-runtime:ro
-      # Read-only view of the Runtime's version state for the operations page
-      # (#32). The Gateway never writes here: upgrades stay on the CLI, where the
-      # explicit `docker compose run` is part of the safety story.
+      # Read-only view of versions and backups for the operations page.
       - dsh-home:/dsh-home:ro
       - backups:/backup:ro
     networks:
       proxy:
-        aliases: [dsh-workstation-auth-edge]
+        aliases: [dsh-workstation-gateway-edge]
       workstation: {}
       browser: {}
     healthcheck:
-      test: ["CMD", "workstation-auth", "health"]
+      test: ["CMD", "workstation-gateway", "health"]
       interval: 10s
       timeout: 4s
       retries: 5
 
-  auth-admin:
+  gateway-admin:
     profiles: [maintenance]
-    image: ${WORKSTATION_AUTH_IMAGE:-dsh-workstation-auth:0.1.1}
+    image: ${WORKSTATION_GATEWAY_IMAGE:-dsh-workstation-gateway:0.1.0}
     network_mode: none
     read_only: true
     cap_drop: [ALL]
@@ -102,11 +103,10 @@ services:
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
       WORKSTATION_BROWSER_MCP: "1"
-      # The maintenance listener is the only path that may change the DSH version
-      # from outside this container (#32). Auth calls it with the same secret.
+      # Gateway uses this listener for inventory, backup and archive validation.
       MAINTENANCE_ADDR: 0.0.0.0:8099
       MAINTENANCE_SECRET: /run/secrets/maintenance
-      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.1}
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.2}
       NODE_EXTRA_CA_CERTS: /run/secrets/runtime_ca
     secrets: [runtime_ca, runtime_cert, runtime_key, browser_enroll, maintenance]
     healthcheck:
@@ -126,7 +126,7 @@ services:
     command: ["status"]
     environment:
       # Backups are taken here, so this must be present on maintenance too.
-      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.1}
+      WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.2}
     networks: [workstation]
 
   # The browser input gate (ADR-0005). Selkies evaluates input authority
@@ -296,6 +296,7 @@ secrets:
     file: ${WORKSTATION_STATE:-./.workstation}/secrets/maintenance
 
 volumes:
+  # Keep the volume name so the renamed service opens the existing account and sessions.
   auth-data:
   dsh-home:
   workspace:

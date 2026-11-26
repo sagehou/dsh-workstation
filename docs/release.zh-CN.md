@@ -2,8 +2,8 @@
 
 [English](release.md) · 简体中文
 
-本仓库自建的四镜像以**公开**包发布在 GHCR：`dsh-workstation-runtime`、
-`dsh-workstation-auth`、`dsh-workstation-provider` 与
+本仓库在 GHCR 发布四个**公开**镜像包：`dsh-workstation-runtime`、
+`dsh-workstation-gateway`、`dsh-workstation-provider` 与
 `dsh-workstation-browser-gate`（由 `browser-gate/` 构建）。
 
 部署从不只引用标签。`deploy/public/images.env` 记录每个镜像的 manifest list
@@ -45,12 +45,13 @@
 3. 在 `main` 上运行 **Publish images**（`image: all`），或创建标签 `v<版本>`（例如 `v0.2.0`）来标记发布点。
 
    `v*` 标签标记的是**仓库**的发布点，不是共用的镜像版本。四个镜像版本独立，因此 `v0.2.0` 标签可能发布
-   `runtime:0.2.0`、`auth:0.1.1`、`provider:0.2.0`、`browser-gate:0.1.0`。这是刻意的：强求同一个号码会让无关改动互相牵连。
+   `runtime:0.2.2`、`gateway:0.1.0`、`provider:0.2.1`、`browser-gate:0.1.0`。
    标签的用处是标记某一组摘要来自哪个源提交，自动生成的发布说明会列出全部四个。
 4. 下载 `published-images` artifact，用 `docker buildx imagetools inspect` 核对摘要，再提交更新后的 `deploy/public/images.env`。
 
-第 5 步是刻意的：工作流不能提交，必须由人确认摘要，之后它才成为部署所固定的
-内容。运行摘要中列出了可直接粘贴的引用。
+5. 把 `deploy/public/release-commit` 更新为已包含这些摘要的部署提交的完整 SHA，再核对 `release-compose`。该作业从同一提交读取 Compose 配置和探针，匿名拉取其中记录的镜像。
+
+旧的 `dsh-workstation-auth` 镜像仍供旧部署使用。[Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway)
 
 ## 核对已发布镜像
 
@@ -80,7 +81,7 @@ docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
 
 | 检查 | 证据 |
 | --- | --- |
-| 摘要引用能拉取并运行 | CI 把一次构建发布到本地回环 registry，用**真实解析器**解析出 `localhost:<端口>/name:version@sha256:...`，删除本地标签后重新拉取，并检查镜像 ID。此外 `release-compose` 作业在无凭据条件下拉取四个**真实 GHCR 摘要**，不执行构建，并通过与其他腿相同的整套检查。 |
+| 摘要引用能拉取并运行 | CI 在本地回环 registry 验证解析器。`release-compose` 产物记录本次拉取的发布摘要、对应部署提交和端到端检查结果。 |
 | 升级跟随新摘要 | 以新版本号进行的第二次构建产生不同摘要，解析器随之跟随。 |
 | 回滚恢复到完全相同的旧镜像 | 恢复首个摘要后拉取到的镜像 ID 与最初一致。 |
 | 摘要缺失时失败，而非漂移到标签 | 解析器、其 18 项 shell 检查与初始化脚本全部失败。通过临时让解析器回退到标签验证：三项解析器检查与初始化脚本的 `--release` 检查均失败。 |

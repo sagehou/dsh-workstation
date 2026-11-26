@@ -1,4 +1,4 @@
-module dsh-workstation/auth
+module dsh-workstation/gateway
 
 go 1.27.3
 

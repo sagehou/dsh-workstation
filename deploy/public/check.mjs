@@ -116,6 +116,24 @@ try {
     await writeFile('/ci-state/passkey.json', JSON.stringify(credentials[0]), { mode: 0o600 })
     await context.storageState({ path: '/ci-state/browser.json' })
     console.log('WebAuthn: native browser registration with a resident, user-verified credential')
+
+    await page.goto(root + '/mgmt')
+    await page.getByRole('heading', { name: '控制台', exact: true }).waitFor()
+    await page.getByRole('cell', { name: 'Gateway', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '可用 DSH 版本', exact: true }).waitFor()
+    await page.getByRole('link', { name: '备份', exact: true }).click()
+    await submit(page, '创建备份', '/mgmt/runtime')
+    await page.waitForURL('**/mgmt/backup')
+    const archive = page.getByRole('row').nth(1)
+    const id = await archive.getByRole('cell').first().innerText()
+    assert.match(id, /^[0-9]{8}T[0-9]{6}Z\.[0-9a-f]{12}$/)
+    await archive.getByRole('cell', { name: '0.2.2-rc.1', exact: true }).waitFor()
+    await page.getByLabel('备份 ID').fill(id)
+    await submit(page, '校验备份', '/mgmt/runtime', 200)
+    assert.equal(await page.getByRole('status').innerText(), '备份校验通过。')
+    await page.getByRole('link', { name: '浏览器', exact: true }).click()
+    await page.getByRole('heading', { name: '浏览器控制', exact: true }).waitFor()
+    console.log('Gateway: authenticated management routes, online backup, archive verification and browser controls')
   }
 
   if (phase === 'browser') {

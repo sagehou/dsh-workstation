@@ -18,10 +18,10 @@
 | 产品范围 | 首版严格只有一个本地管理员、一份 DSH_HOME、一个工作区和一份 Chromium 配置。管理员可注册多个 Passkey。 |
 | Runtime | 将指定 DSH 版本安装到持久化存储。版本切换独立于 Runtime 镜像；数据迁移必须有匹配备份。 |
 | 插件和数据 | 使用官方 Profile、Bundle 和 Plugin Manager。容器重建后保留状态、pnpm Store 与锁文件、凭据、会话和独立工作区。 |
-| 公网访问 | 一位使用者通过 HTTPS 登录，可用密码加 TOTP 或 Passkey。Go Auth 提供恢复码、会话管理和 Traefik ForwardAuth。 |
+| 公网访问 | 一位使用者通过 HTTPS 登录，可用密码加 TOTP 或 Passkey。Go Gateway 提供会话管理和 Traefik ForwardAuth。`/mgmt` 统一提供账户、浏览器控制和 Runtime 运维入口。 |
 | 浏览器 | 人工与 Agent 共享 Chromium。Selkies 位于 `/browser/`；首版正式入口是已认证的独立浏览器/控制页面。 |
 | 延后 | DSH 原生 Sidebar 延后到首版上线后，不阻塞部署。[#5](https://github.com/sagehou/dsh-workstation/issues/5) 完整独占交接仍需通过释放已按住输入的验收。[#4](https://github.com/sagehou/dsh-workstation/issues/4) |
-| 镜像 | GitHub Actions 构建 Compose 镜像。Runtime/Auth/Provider 不可变镜像发布到 GHCR 有独立任务追踪。[部署验证](docs/roadmap/public-compose.zh-CN.md) |
+| 镜像 | GHCR 部署按摘要固定各个发布镜像。Gateway 使用独立的镜像名。[Gateway 迁移](deploy/public/README.zh-CN.md#从-auth-迁移到-gateway)[部署验证](docs/roadmap/public-compose.zh-CN.md) |
 
 ## 项目文档
 

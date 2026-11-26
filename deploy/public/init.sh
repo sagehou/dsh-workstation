@@ -117,7 +117,7 @@ SAN
 }
 
 if $fresh; then
-  for name in auth-key provider-admin selkies-master selkies-controller selkies-sentinel browser-enroll gate-control maintenance; do
+  for name in auth-key provider-admin selkies-master selkies-controller selkies-sentinel browser-enroll gate-control; do
     openssl rand -hex 32 | tr -d '\n' > "$state/secrets/$name"
   done
   issue_runtime_pki
@@ -145,12 +145,20 @@ image_keys=()
 for line in "${images[@]}"; do
   case ${line%%=*} in
     runtime) image_keys+=("WORKSTATION_RUNTIME_IMAGE=${line#*=}") ;;
-    auth) image_keys+=("WORKSTATION_AUTH_IMAGE=${line#*=}") ;;
+    gateway) image_keys+=("WORKSTATION_GATEWAY_IMAGE=${line#*=}") ;;
     provider) image_keys+=("WORKSTATION_PROVIDER_IMAGE=${line#*=}") ;;
     browser-gate) image_keys+=("WORKSTATION_GATE_IMAGE=${line#*=}") ;;
     *) echo "Unexpected image in the resolver: ${line%%=*}" >&2; exit 1 ;;
   esac
 done
+
+# Older installations have no maintenance secret. Publish it once without
+# changing the saved keys or certificates, including under repeated init.
+if [[ ! -e $state/secrets/maintenance ]]; then
+  openssl rand -hex 32 | tr -d '\n' > "$staging/maintenance"
+  chmod 0444 "$staging/maintenance"
+  ln -T -- "$staging/maintenance" "$state/secrets/maintenance" || [[ -s $state/secrets/maintenance ]]
+fi
 
 if $fresh; then
   {
@@ -161,7 +169,7 @@ else
   # Rewrite the derived keys from the current configuration instead of carrying
   # the old ones forward: a stale subnet in .env.public would disagree with the
   # certificate the initializer just issued.
-  sed -E '/^(WORKSTATION_(EDGE_UID|EDGE_GID|PROXY_NETWORK|TRAEFIK_IP|SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP|RUNTIME_IMAGE|AUTH_IMAGE|PROVIDER_IMAGE|GATE_IMAGE)|BROWSER_(SUBNET|IP_RANGE|PROVIDER_IP)|ACME_EMAIL)=/d' \
+  sed -E '/^(WORKSTATION_(EDGE_UID|EDGE_GID|PROXY_NETWORK|TRAEFIK_IP|SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP|RUNTIME_IMAGE|AUTH_IMAGE|GATEWAY_IMAGE|PROVIDER_IMAGE|GATE_IMAGE)|BROWSER_(SUBNET|IP_RANGE|PROVIDER_IP)|ACME_EMAIL)=/d' \
     .env.public > "$staging/env"
   printf '%s\n' "$derived" >> "$staging/env"
 fi

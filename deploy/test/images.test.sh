@@ -33,7 +33,7 @@ check_status() {
 }
 
 # Every image is listed exactly once, and the four names match compose.yml.
-check 'lists four images' 'runtime auth provider browser-gate' "$(bash "$resolver" --names | tr '\n' ' ' | sed 's/ $//')"
+check 'lists four images' 'runtime gateway provider browser-gate' "$(bash "$resolver" --names | tr '\n' ' ' | sed 's/ $//')"
 
 # `--local` produces the development tags that compose.yml builds, for the
 # version the matrix currently names. Deriving it keeps this check from breaking
@@ -120,7 +120,7 @@ cp -- "$work_matrix_backup" "$matrix"
 # there for an image the resolver does not publish.
 declare -A expected_keys=(
   [runtime]=WORKSTATION_RUNTIME_IMAGE
-  [auth]=WORKSTATION_AUTH_IMAGE
+  [gateway]=WORKSTATION_GATEWAY_IMAGE
   [provider]=WORKSTATION_PROVIDER_IMAGE
   [browser-gate]=WORKSTATION_GATE_IMAGE
 )

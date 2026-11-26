@@ -20,7 +20,7 @@ refuses to run when the plan conflicts with the host.
 
 | Setting | Default | Used for |
 | --- | --- | --- |
-| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime, Provider and Auth on the internal network. |
+| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime, Provider and Gateway on the internal network. |
 | `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium and the Provider's control listener. |
 
 Static addresses are derived from each subnet: `.2` is the Runtime on the
@@ -109,7 +109,7 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
 ```
 
 `--release` makes the initializer resolve the published digests and write them
-into `.env.public` as `WORKSTATION_RUNTIME_IMAGE`, `WORKSTATION_AUTH_IMAGE`,
+into `.env.public` as `WORKSTATION_RUNTIME_IMAGE`, `WORKSTATION_GATEWAY_IMAGE`,
 `WORKSTATION_PROVIDER_IMAGE` and `WORKSTATION_GATE_IMAGE`. Without it, the same
 keys are written as local build tags. Either way the file names exactly what
 runs, and re-running the initializer replaces the keys rather than appending a
@@ -138,7 +138,7 @@ you *do* want different addresses, that is a migration: back up, re-run with
 ### 3. Create the administrator
 
 ```bash
-docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap admin
+docker compose --env-file .env.public run --rm --no-deps gateway-admin bootstrap admin
 ```
 
 1. Set the password.
@@ -151,8 +151,8 @@ Two shapes run from the same `compose.yml`. Pick one before step 3.
 
 | Shape | Services | Use it when |
 | --- | --- | --- |
-| **full** (default) | `auth`, `runtime`, `browser-gate`, `chromium`, `cdp-relay`, `provider` | You need the shared browser: the operator's `/browser/` page, or Agent browser tools. |
-| **core** | `auth`, `runtime` | The host cannot carry the browser stack, or Agent browser control is not approved yet. |
+| **full** (default) | `gateway`, `runtime`, `browser-gate`, `chromium`, `cdp-relay`, `provider` | You need the shared browser: the operator's `/browser/` page, or Agent browser tools. |
+| **core** | `gateway`, `runtime` | The host cannot carry the browser stack, or Agent browser control is not approved yet. |
 
 `core` is a deliberate restriction, not an equivalent substitute. With it you
 have **no `/browser/` page and no Agent browser tools**. DSH itself — chat,
@@ -178,7 +178,7 @@ docker compose --env-file .env.public \
 The override file assigns every browser service the `browser` profile, so
 Compose does not start them, and sets `WORKSTATION_BROWSER_MCP=0` so the Runtime
 does not install the browser Bundle into the Web Profile. It also sets
-`AUTH_BROWSER_ENABLED=0`, which makes `/browser/` and `/_auth/browser` answer
+`GATEWAY_BROWSER_ENABLED=0`, which makes `/browser/` and `/_auth/browser` answer
 `503 The browser is not part of this deployment` rather than proxying to an
 address nothing listens on.
 
@@ -188,7 +188,7 @@ deployment will try to start the full stack on a host that cannot hold it.
 
 ### What core does not verify
 
-`core-shape` in CI proves only that `auth` and `runtime` start, that the browser
+`core-shape` in CI proves only that `gateway` and `runtime` start, that the browser
 Bundle is absent, and that `/browser/` refuses through the core path. It does not
 prove the full stack works on your host, and it is not a substitute for the
 `full` legs. Neither shape has been run on a 2 GiB machine; the memory figures
@@ -222,11 +222,11 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 | To | Open or choose |
 | --- | --- |
 | Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
-| Let an Agent use a tab | Open `/_auth/control`, select a live DSH session, and grant a lease for up to 120 seconds. The first grant creates a tab, and later grants reuse the tab for that live session. The `browser-gate` service releases any mouse button or key you are still holding before authority moves; if that release cannot be proven, the grant is refused and the browser stays with you. |
+| Let an Agent use a tab | An Agent can acquire an available lease through `lease_status`. You can also grant a lease in `/mgmt/browser` for up to 120 seconds. Before granting control, `browser-gate` confirms it released held input. |
 | Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
-| Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate the Provider. An empty list leaves browsing to the operator. |
+| Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate the Provider. |
 
-The Agent gets the current generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. The allowlist limits those tools and the page text they return. Chromium still handles scripts and redirects normally, and tabs share cookies. Use trusted origins.
+The Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. Another DSH session cannot change that lease by calling tools. A configured allowlist limits those tools and the page text they return. Chromium still handles scripts and redirects normally, and tabs share cookies. Use trusted origins.
 
 For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
 
@@ -250,10 +250,12 @@ docker compose exec -T provider node --input-type=module -e '
 
 ## Maintain
 
+Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME backup, manage the single account, and hand off browser control. Backups and archive checks require verification within the last five minutes. Stop Runtime to upgrade, roll back, restore, or make a quiescent migration backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
+
 ### Traefik
 
 - To retain the two workstation networks across Traefik recreation, declare them as external networks in Traefik's Compose.
-- If Traefik's IP on the proxy network changes, rerun the initializer with the same domain, entrypoint, and resolver. Then run `docker compose --env-file .env.public up -d --no-build auth`.
+- If Traefik's IP on the proxy network changes, rerun the initializer with the same domain, entrypoint, and resolver. Then run `docker compose --env-file .env.public up -d --no-build gateway`.
 
 ### Browser recovery
 
@@ -269,12 +271,12 @@ The Provider tries to reconnect automatically. If the control page still shows `
 
 | Setting in `.env.public` | Default |
 | --- | --- |
-| `AUTH_IDLE` | 30 minutes |
-| `AUTH_ABSOLUTE` | 12 hours |
-| `AUTH_MAX_SESSIONS` | 8 |
+| `GATEWAY_IDLE` | 30 minutes |
+| `GATEWAY_ABSOLUTE` | 12 hours |
+| `GATEWAY_MAX_SESSIONS` | 8 |
 
 - HTTP requests and new WebSocket handshakes refresh the idle timer. Open DSH and Selkies WebSockets check the session every two seconds and close on expiry or revocation.
-- Revoke one or all sessions at `/_auth/account`. For password-based security changes, repeat password and TOTP if the five-minute step-up window has passed.
+- Revoke one or all sessions at `/mgmt/account`. After five minutes, use a fresh TOTP code to authorize sensitive changes.
 - To disable or enable the account from the host, replace `bootstrap admin` in the administrator command with `disable` or `enable`. Both commands invalidate current sessions.
 
 ### DSH versions
@@ -288,6 +290,14 @@ Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenan
 1. Use `down` from the old checkout. Keep the named volumes, `.env.public`, and `.workstation/`.
 2. Load the new images and rerun the initializer with the same domain.
 3. Skip admin bootstrap and start the new Compose.
+
+### Migrate from the `auth` service
+
+1. Confirm the destination release resolves all four digests with `bash deploy/public/images.sh`. Back up the stopped `auth-data` volume and `.workstation/`, then run `docker compose --env-file .env.public down` with the old Compose files and the same project name. Omit `-v`.
+2. Switch to the destination release in the same deployment. Run the initializer with the saved domain, state path, external proxy network and Traefik options. Install the regenerated `routes.yml` over Traefik's existing Workstation route file so it points to `dsh-workstation-gateway-edge`.
+3. Start the stack with `up -d --no-build --wait`. `gateway` opens the existing `auth-data` SQLite volume with the saved `auth-key`. Confirm your existing login, `/mgmt`, and `/browser/` in a full deployment.
+
+`GATEWAY_IDLE`, `GATEWAY_ABSOLUTE`, and `GATEWAY_MAX_SESSIONS` take precedence over their `AUTH_*` predecessors. For rollback, stop the new stack, return to the old checkout, and regenerate the old image references and Traefik routes with that checkout's initializer. The old published `dsh-workstation-auth` image remains available for that release.
 
 If the old hostname left a browser profile lock, confirm that the old Chromium has stopped before removing the `SingletonLock`, `SingletonSocket`, and `SingletonCookie` symlinks in `/config/chromium` on the profile volume. [Chromium profile locking](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
 
@@ -322,9 +332,9 @@ channel. [Workflow](../../.github/workflows/public-compose.yml)
 | Keep | Why |
 | --- | --- |
 | `.workstation/`, backed up separately from SQLite | TOTP encryption key, service credentials, and internal TLS keys. Keep the existing directory when reinstalling. |
-| Named volumes `dsh-home`, `workspace`, `browser-profile`, `auth-data`, and `provider-state` | DSH and browser state, Auth, and Provider state. Stop Compose before taking snapshots and avoid `down -v` on volumes you need. |
+| Named volumes `dsh-home`, `workspace`, `browser-profile`, `auth-data`, and `provider-state` | DSH, Chromium, Gateway SQLite, and Provider state. Stop Compose before taking snapshots. |
 
-For an Auth backup, archive the stopped volume to a private location.
+To back up Gateway's SQLite data, archive the stopped `auth-data` volume to a private location.
 
 ```bash
 docker compose --env-file .env.public stop && (

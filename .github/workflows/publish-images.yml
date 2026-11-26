@@ -16,7 +16,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, runtime, auth, provider, browser-gate]
+        options: [all, runtime, gateway, provider, browser-gate]
 
 permissions:
   contents: read
@@ -127,7 +127,7 @@ jobs:
           printf 'name=%s\n' "$name" >> "$GITHUB_OUTPUT"
           case "$IMAGE" in
             runtime) printf 'context=runtime\n' >> "$GITHUB_OUTPUT"; printf 'file=runtime/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
-            auth) printf 'context=auth\n' >> "$GITHUB_OUTPUT"; printf 'file=auth/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
+            gateway) printf 'context=gateway\n' >> "$GITHUB_OUTPUT"; printf 'file=gateway/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
             # The provider and gate build from the repository root because each
             # copies files from outside its own directory.
             provider) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=provider/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
@@ -189,7 +189,7 @@ jobs:
                 { echo 'the runtime image cannot read its own modules as its own user' >&2; exit 1; }
               docker run --rm --entrypoint dsh-runtime "$reference" health >/dev/null 2>&1 || true
               ;;
-            auth|provider|browser-gate)
+            gateway|provider|browser-gate)
               docker run --rm --entrypoint sh "$reference" -c 'exit 0' >/dev/null ||
                 { echo "$IMAGE cannot start" >&2; exit 1; }
               ;;

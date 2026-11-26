@@ -15,10 +15,10 @@ The first release is single-user: one local administrator, one DSH_HOME, one wor
 | Runtime image | Provides Node.js, pinned pnpm, Git/SSH, CA certificates, and common native build tools. DSH npm installations live in persistent storage and are managed by a dedicated CLI/API. |
 | Runtime manager | Locks mutations, installs each exact release in its own directory, validates it, switches the current pointer atomically, checks startup, and rolls back on failure. Data migrations require a matched backup/restore path. |
 | DSH Profile | Managed by the official CLI and Plugin Manager. Use the pinned release's directory structure and one DSH_HOME filesystem so pnpm links can reach the store. |
-| Go Auth | Handles the single administrator's password, TOTP and WebAuthn, recovery codes, sessions, CSRF, rate limits, audit, and ForwardAuth. Stores state in SQLite WAL. Runtime runs the Agent. |
+| Go Gateway | Hosts authentication, browser controls and the operations console. Stores the single administrator's state in SQLite WAL. Calls the Runtime for backups and archive checks and the Provider for browser control. |
 | Browser Provider | Receives official MCP calls, validates the session-bound lease and generation for every operation, and attaches to Chromium over CDP. Only explicitly approved tools are exposed. |
 | Chromium and Selkies | One Chromium process and one persistent profile. Selkies handles human interaction, and the Provider automates the same browser. |
-| Traefik | Routes the public HTTPS origin and delegates DSH and Selkies authentication to Go Auth. |
+| Traefik | Routes the public HTTPS origin and delegates DSH and Selkies authentication to Go Gateway. |
 | Native Sidebar | Deferred enhancement. The authenticated standalone browser/control page is the supported first-release entry point. |
 
 ## Public Compose networks
@@ -26,10 +26,11 @@ The first release is single-user: one local administrator, one DSH_HOME, one wor
 ```mermaid
 flowchart LR
     Person["Single operator"] -->|"HTTPS"| Edge["Existing Traefik"]
-    Edge -->|"Auth and WebSockets"| Auth["Go Auth"]
+    Edge -->|"Auth and WebSockets"| Gateway["Go Gateway"]
     Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
     Edge -->|"Desktop HTTP"| Browser["Chromium and Selkies"]
-    Auth -->|"Lease management"| Provider["Browser Provider"]
+    Gateway -->|"Lease management"| Provider["Browser Provider"]
+    Gateway -->|"Inventory and backups"| DSH
     DSH -->|"Official MCP"| Provider
     Provider -->|"Unix socket"| Relay["CDP relay"]
     Relay -->|"Chromium loopback"| Browser
@@ -37,11 +38,11 @@ flowchart LR
 
 | Network | Endpoints |
 | --- | --- |
-| Existing proxy | Traefik and Auth. Auth binds its public and verify listeners here and verifies the expected Traefik peer. |
-| `workstation` | Runtime, the MCP listener, and the Traefik and Auth connections to DSH. |
-| `browser` | Chromium, the Provider management listener, and the Traefik and Auth connections to Selkies. |
+| Existing proxy | Traefik and Gateway. Gateway binds its public and verify listeners here and verifies the expected Traefik peer. |
+| `workstation` | Runtime, the MCP listener, and the Traefik and Gateway connections to DSH. |
+| `browser` | Chromium, the Provider management listener, and the Traefik and Gateway connections to Selkies. |
 
-The relay shares Chromium's network namespace. Only the relay and Provider mount the CDP socket volume. Auth forwards DSH and Selkies WebSockets and checks the live session. [Tested topology](roadmap/public-compose.md)
+The relay shares Chromium's network namespace. Only the relay and Provider mount the CDP socket volume. Gateway forwards DSH and Selkies WebSockets and checks the live session. [Tested topology](roadmap/public-compose.md)
 
 Both subnets are configuration, not constants. `deploy/network.sh` derives the subnet definitions, dynamic `ip_range`, every static address, the Provider health-check destination, and the Runtime certificate SAN from `WORKSTATION_SUBNET` and `BROWSER_SUBNET`. Static addresses sit at `.2`/`.3` while dynamic allocation is confined to the upper half of each subnet, so a container that starts first cannot take a static address — the failure this ordering prevents is Docker answering "Address already in use" when the Runtime claims its own address.
 
@@ -54,7 +55,8 @@ Both subnets are configuration, not constants. `deploy/network.sh` derives the s
 | `/` | DSH, protected by ForwardAuth. |
 | `/browser/` | Selkies, protected by the same ForwardAuth. Traefik preserves the prefix. |
 | `/_auth/` | Login and account UI/API. These routes are exempt from their own ForwardAuth. |
-| Internal verification endpoint | Go Auth, which trusts only the configured Traefik peer. |
+| `/mgmt` | Gateway console for the authenticated administrator. Runtime inventory, backup and archive checks, browser control, and account settings. |
+| Internal verification endpoint | Go Gateway, which trusts only the configured Traefik peer. |
 | Provider management | Private browser network only; never a public unauthenticated route. |
 
 Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior against the exact upstream versions.
@@ -66,9 +68,9 @@ Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior 
 | DSH_HOME | Runtime versions, Profile manifests and lockfiles, node_modules, pnpm store, sessions, settings, credentials, and plugin configuration. One persistent volume. |
 | Workspace | Project files in a separate volume or bind mount. |
 | Chromium `/config` | Persistent profile, cookies, extensions, and downloads. |
-| Auth data | Single administrator and session state in SQLite, stored in a separate volume. |
+| Gateway SQLite (`auth-data`) | Single administrator and session state in SQLite, stored in a separate volume. |
 | Provider state | Lease/recovery state required to fail closed across Provider restarts. |
-| Auth secrets | Docker secrets or read-only files. Store and back them up separately from the database. |
+| Authentication secrets | Docker secrets or read-only files. Store and back them up separately from the database. |
 | Deployment configuration | Git, with secrets kept outside the repository. |
 
 ## Authentication and account model
@@ -95,18 +97,19 @@ Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior 
 - Before Profile or plugin dependency changes, create a DSH_HOME backup and record the exact Runtime, DSH, Profile, and plugin versions.
 - Validate candidate startup, Node compatibility, Profile/Bundle compatibility, lockfile consistency, and explicitly approved lifecycle scripts.
 - `dsh-runtime upgrade` is one transaction: install beside the active version, gate, probe a copy, fingerprint, archive plus manifest, then move the pointer. A blocked candidate stays installed and the pointer does not move.
+- Web holds the serving lock in the shared DSH_HOME. An independent maintenance container needs that lock for an upgrade, switch, rollback or restore. Backup takes a separate shared lock and can run while Web is up. Stop Web to take a quiescent snapshot before a migration.
 - Approvals are for exact `package@version` and persist in DSH_HOME, so they also apply to a later rollback. Lifecycle scripts in the DSH release's own tree are reported, not blocking, because that policy is fixed at `--ignore-scripts` and identical for every version.
 - A pointer rollback restores only the selected executable. If data migration occurred, restore the matching DSH_HOME backup and any coupled workspace state. `verify` compares Profile manifests, lockfiles and pnpm-store package versions against the pre-switch fingerprint and names the required action.
 - A DSH_HOME backup excludes `runtime` and `pnpm` because both are reinstallable; it records the selection and Runtime image in a manifest instead, and refuses a restore whose checksum, ownership or DSH version does not match.
-- Backups cover DSH_HOME, workspace, Chromium profile, Auth DB, Provider state, and encryption secrets. Restore tests must prove the administrator can still use TOTP and existing Passkeys.
+- Backups cover DSH_HOME, workspace, Chromium profile, Gateway SQLite database, Provider state, and encryption secrets. Restore tests must prove the administrator can still use TOTP and existing Passkeys.
 
 ## Releases and deployment
 
-- Version Runtime, DSH npm, Auth, Provider, Workstation plugin (when shipped), and Chromium independently.
+- Version Runtime, DSH npm, Gateway, Provider, Workstation plugin (when shipped), and Chromium independently.
 - CI must test the deployed Traefik compatibility range, including the actual target patch version; a passing newer CI version does not establish compatibility with an older deployment.
-- Publish project-owned Runtime, Auth, and Provider images to GHCR using immutable version tags and digests. Keep reproducible build evidence and checksums.
+- Publish project-owned Runtime, Gateway, Provider, and browser-gate images to GHCR using immutable version tags and digests. Keep reproducible build evidence and checksums.
 - Initial support is Linux amd64. Do not claim ARM64 support until images and full-stack tests cover it.
-- Keep the Docker socket out of DSH and Auth. Use least privilege, read-only filesystems where practical, non-root users, health checks, and explicit secret handling.
+- Keep the Docker socket out of DSH and Gateway. Use least privilege, read-only filesystems where practical, non-root users, health checks, and explicit secret handling.
 
 ## Deferred work
 

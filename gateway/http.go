@@ -262,8 +262,8 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if strings.EqualFold(r.Header.Get("Upgrade"),"websocket") {
-		g.websocket(w,r)
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		g.websocket(w, r)
 		return
 	}
 	if r.Method == "POST" {
@@ -377,15 +377,17 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 	case "POST /_auth/control":
 		g.controlAction(w, r)
 	case "GET /mgmt", "GET /_auth/operations":
-		g.operationsPage(w, r, s)
+		g.operationsPage(w, r)
 	case "GET /mgmt/backup":
 		g.backupPage(w, r, s)
 	case "POST /mgmt/runtime":
 		g.runtimeControl(w, r, s)
 	case "GET /_auth/stepup":
-		g.stepUpPage(w, r, s)
+		g.stepUpPage(w, r)
 	case "POST /_auth/stepup":
-		g.stepUp(w, r, s)
+		if g.allow(w, r, "stepup") {
+			g.stepUp(w, r, s)
+		}
 	case "GET /mgmt/browser", "GET /_auth/control":
 		g.controlPage(w, r)
 	case "GET /mgmt/account", "GET /_auth/account":
@@ -394,11 +396,7 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		g.revoke(w, r, s)
 	case "POST /_auth/passkey/register/begin", "POST /_auth/passkey/register/finish", "POST /_auth/passkey/remove",
 		"POST /_auth/recovery/regenerate", "POST /_auth/password/change", "POST /_auth/totp/rotate", "POST /_auth/totp/confirm":
-		// The session was created by a TOTP-verified login, and it dies with the
-		// idle/absolute timeout. Asking for the code again inside that window adds
-		// no protection: whoever holds the cookie already passed the factor, and a
-		// fresh prompt only trains the operator to keep the secret at hand.
-		if !g.stepped(s) {
+		if !stepped(s) {
 			invalid(w)
 			return
 		}

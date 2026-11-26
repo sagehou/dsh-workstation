@@ -2,7 +2,7 @@
 
 [English](AGENTS.md) · 简体中文
 
-围绕**官方 DeepSeek Harness（DSH）npm 包**构建 Docker Compose 工作台。仓库负责 Runtime 镜像、版本管理器、Go Auth、Workstation 插件、部署和测试。
+围绕**官方 DeepSeek Harness（DSH）npm 包**构建 Docker Compose 工作台。仓库负责 Runtime 镜像、版本管理器、Go Gateway、Workstation 插件、部署和测试。
 
 ## 必须遵守的约束
 
@@ -22,11 +22,11 @@
 
 ### 认证和部署
 
-- Go Auth 是独立的 SQLite 服务。需要支持密码验证通过后单独显示 TOTP、Passkey/WebAuthn、恢复码、可配置的空闲和绝对会话时限、撤销、审计，以及 Traefik ForwardAuth。
+- Go Gateway 提供认证、浏览器控制和运维入口，管理员状态存入 SQLite。需要支持密码验证通过后单独显示 TOTP、Passkey/WebAuthn、恢复码、可配置的空闲和绝对会话时限、撤销、审计，以及 Traefik ForwardAuth。
 - 账号必须绑定 TOTP，密码登录必须完成 TOTP。Passkey 可以作为独立的抗钓鱼登录方式。不要同时要求三种因素。
 - 初期只面向一位使用者。多个账号不等于租户隔离。每个租户都需要独立的 DSH 状态、工作区和浏览器配置。
 - 使用 Docker Compose，服务独立版本化。Redis、PostgreSQL、Browserless 和 Authentik 需要明确的需求依据。
-- 密钥不得进入镜像、源码、日志或已提交的 Compose 文件。DSH 和 Auth 不挂载 Docker socket。
+- 密钥不得进入镜像、源码、日志或已提交的 Compose 文件。DSH 和 Gateway 不挂载 Docker socket。
 
 ## 开发流程
 

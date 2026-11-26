@@ -2,7 +2,7 @@
 
 English · [简体中文](AGENTS.zh-CN.md)
 
-Build a Docker Compose workstation around the **official DeepSeek Harness (DSH) npm package**. This repository owns its Runtime image, version manager, Go Auth, Workstation plugin, deployment configuration, and tests.
+Build a Docker Compose workstation around the **official DeepSeek Harness (DSH) npm package**. This repository owns its Runtime image, version manager, Go Gateway, Workstation plugin, deployment configuration, and tests.
 
 ## Non-negotiable constraints
 
@@ -20,13 +20,13 @@ Build a Docker Compose workstation around the **official DeepSeek Harness (DSH) 
 - **Exclusive control requires server-side tool checks and gating at the Selkies input path.** Report any unproven input gate. A front-end toggle cannot satisfy this requirement.
 - Keep CDP off host and public interfaces.
 
-### Auth and deployment
+### Gateway and deployment
 
-- Go Auth is a separate SQLite service. Support password followed by TOTP on a separate screen, Passkeys/WebAuthn, recovery codes, configurable idle and absolute session lifetimes, revocation, audit, and Traefik ForwardAuth.
+- Go Gateway is a separate service. It provides the authentication, browser-control and operations pages and stores administrator state in SQLite. Support password followed by TOTP on a separate screen, Passkeys/WebAuthn, recovery codes, configurable idle and absolute session lifetimes, revocation, audit, and Traefik ForwardAuth.
 - Require TOTP enrollment for accounts and TOTP for password login. Passkey may serve as a separate phishing-resistant login. Do not require three factors together.
 - Deploy for one operator. Multiple accounts do not establish tenant isolation. Each tenant would need separate DSH state, workspace, and browser profile.
 - Deploy with Docker Compose and version services independently. Redis, PostgreSQL, Browserless, and Authentik require a demonstrated need.
-- Keep secrets out of images, source, logs, and committed Compose files. Keep the Docker socket out of DSH and Auth.
+- Keep secrets out of images, source, logs, and committed Compose files. Keep the Docker socket out of DSH and Gateway.
 
 ## Development workflow
 

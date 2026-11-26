@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"html/template"
 	"log/slog"
@@ -23,19 +24,19 @@ type auditEvent struct {
 	Event string
 }
 type page struct {
-	View, Title, CSRF, Next, Error, Key, Challenge string
-	Status                                         int
-	Recent                                         bool
-	Codes                                          []string
-	Keys                                           []namedKey
-	Sessions                                       []session
-	Events                                         []auditEvent
-	Control                                        browserStatus
-	ProviderOK                                     bool
-	Runtime                                        runtimeState
-	Backups                                        []backupEntry
-	Components                                     components
-	Versions                                       availableVersions
+	View, Title, CSRF, Next, Error, Key, Challenge, Notice string
+	Status                                                 int
+	Recent                                                 bool
+	Codes                                                  []string
+	Keys                                                   []namedKey
+	Sessions                                               []session
+	Events                                                 []auditEvent
+	Control                                                browserStatus
+	ProviderOK                                             bool
+	Runtime                                                runtimeState
+	Backups                                                []backupEntry
+	Components                                             components
+	Versions                                               availableVersions
 }
 
 var ui = template.Must(template.New("page").Funcs(template.FuncMap{
@@ -53,19 +54,19 @@ func (g *gateway) render(w http.ResponseWriter, r *http.Request, p page) {
 	// Pages are rendered per request from live state; a cached copy would show a
 	// version or backup list that has since changed.
 	w.Header().Set("Cache-Control", "no-store")
+	var body bytes.Buffer
+	if err := ui.Execute(&body, p); err != nil {
+		slog.Error("template render failed", "view", p.View, "reason", err.Error())
+		unavailable(w)
+		return
+	}
 	if p.Status != 0 {
 		w.WriteHeader(p.Status)
 	}
-	// A template error truncates the response mid-page, so the operator sees a
-	// half-rendered view with no explanation. Log it and say so in the page tail:
-	// a silent `return` here hid a broken operations page for several rounds.
-	if err := ui.Execute(w, p); err != nil {
-		slog.Error("template render failed", "view", p.View, "reason", err.Error())
-		return
-	}
+	_, _ = body.WriteTo(w)
 }
 func (g *gateway) accountPage(w http.ResponseWriter, r *http.Request, s session) {
-	p := page{View: "account", Title: "账户", Recent: s.Stepped > time.Now().Unix()-300}
+	p := page{View: "account", Title: "账户", Recent: stepped(s)}
 	ctx := r.Context()
 	// Each query closes before the next; SQLite uses a single writer connection.
 	load := func(query string, receive func(func(...any) error) error, args ...any) error {

@@ -2,8 +2,8 @@
 
 English · [简体中文](release.zh-CN.md)
 
-The four images this repository builds are published to GHCR as **public**
-packages: `dsh-workstation-runtime`, `dsh-workstation-auth`,
+The repository publishes four **public** GHCR packages:
+`dsh-workstation-runtime`, `dsh-workstation-gateway`,
 `dsh-workstation-provider` and `dsh-workstation-browser-gate` (built from
 `browser-gate/`).
 
@@ -55,7 +55,7 @@ No repository secret is required: the workflow uses the automatic
 
    A `v*` tag names the **repository's** release point, not a shared image
    version. The four images are versioned independently, so a tag `v0.2.0` may
-   publish `runtime:0.2.0`, `auth:0.1.1`, `provider:0.2.0` and
+   publish `runtime:0.2.2`, `gateway:0.1.0`, `provider:0.2.1` and
    `browser-gate:0.1.0`. That is intentional: forcing one number would couple
    unrelated changes. The tag is useful because it marks which source commit a
    set of digests came from, and the generated release notes list all four.
@@ -63,9 +63,12 @@ No repository secret is required: the workflow uses the automatic
    `docker buildx imagetools inspect`, and commit the updated
    `deploy/public/images.env`.
 
-Step 5 is deliberate: the workflow cannot commit, so a person confirms the
-digests before they become what deployments pin. The run summary lists the
-references ready to paste.
+5. Update `deploy/public/release-commit` to the full SHA of the deployment commit
+   with those digests, and check the `release-compose` job. The job uses that
+   commit's Compose and probes and pulls its exact images anonymously.
+
+The old `dsh-workstation-auth` image remains available for the older deployment.
+See [the Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service).
 
 ## Verifying a published image
 
@@ -97,7 +100,7 @@ channel and the install guide no longer uses it.
 
 | Check | Evidence |
 | --- | --- |
-| A digest reference pulls and runs | CI publishes a build to a loopback registry, resolves `localhost:<port>/name:version@sha256:...` through the real resolver, removes the local tags and pulls it back, then inspects the image ID. The `release-compose` job also pulls the four real GHCR digests with no credential, builds nothing, and passes the same stack checks. |
+| A digest reference pulls and runs | CI tests the resolver against a loopback registry. The `release-compose` artifact records the published digests, matching deployment commit and end-to-end result. |
 | Upgrade follows a new digest | A second build under a new version produces a distinct digest, and the resolver follows it. |
 | Rollback restores exactly the earlier image | Restoring the first digest pulls back an image whose ID equals the original pull. |
 | A missing digest fails rather than drifting to a tag | The resolver, its 18 shell checks and the initializer all fail. Verified by temporarily making the resolver fall back to a tag, which made three resolver checks and the `--release` initializer check fail. |

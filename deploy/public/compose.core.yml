@@ -1,4 +1,4 @@
-# Core deployment: DSH and Auth only, without the shared browser.
+# Core deployment: DSH and Gateway only, without the shared browser.
 #
 # Use this on a host that cannot carry the browser stack, or while Agent browser
 # control is not approved yet. It is not an equivalent substitute for the full
@@ -16,7 +16,7 @@
 # behaviour identical to before this file existed.
 #
 # Everything listed here is a service this file must exclude, and nothing else.
-# `runtime` and `auth` are absent on purpose: they have no `depends_on` pointing
+# `runtime` and `gateway` are absent on purpose: they have no `depends_on` pointing
 # at the browser stack, so they start without it. Adding a browser dependency to
 # either one later breaks this file silently, which is why the core CI leg
 # asserts both services become healthy rather than only that `up` succeeded.
@@ -39,11 +39,11 @@ services:
     environment:
       WORKSTATION_BROWSER_MCP: "0"
 
-  # Auth keeps running, but must not proxy /browser/ to an address that nothing
+  # Gateway keeps running, but must not proxy /browser/ to an address that nothing
   # listens on: that surfaces as a stalled WebSocket instead of an answer.
-  auth:
+  gateway:
     environment:
-      AUTH_BROWSER_ENABLED: "0"
+      GATEWAY_BROWSER_ENABLED: "0"
 
   # compose.ci.yml adds `fixture` for the full-stack legs. It belongs to the
   # browser side of the stack, so a core run must not start it either.

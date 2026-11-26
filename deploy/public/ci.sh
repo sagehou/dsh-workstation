@@ -23,7 +23,7 @@ cleanup() {
   if (( $? != 0 )); then
     docker logs --tail=30 "$edge" 2>&1 || true
     if [[ -f .env.public ]]; then
-      compose logs --no-color --tail=25 auth runtime provider cdp-relay || true
+      compose logs --no-color --tail=25 gateway runtime provider cdp-relay || true
     fi
   fi
   docker rm -f "$edge" >/dev/null 2>&1 || true
@@ -77,11 +77,11 @@ case $ci_image_mode in
     # the experiment proves nothing about immutable deployment.
     while IFS='=' read -r name reference; do
       [[ $reference == *'@sha256:'* ]] || { echo "$name is not pinned: $reference" >&2; exit 1; }
-    done < <(for key in RUNTIME AUTH PROVIDER GATE; do
+    done < <(for key in RUNTIME GATEWAY PROVIDER GATE; do
       printf '%s=%s\n' "$key" "$(sed -n "s/^WORKSTATION_${key}_IMAGE=//p" .env.public)"
     done)
     echo "Pulling published digests:"
-    compose pull --quiet auth runtime provider browser-gate
+    compose pull --quiet gateway runtime provider browser-gate
     ;;
   *) echo "Unknown WORKSTATION_CI_IMAGE_MODE: $ci_image_mode" >&2; exit 1 ;;
 esac
@@ -104,7 +104,7 @@ export WORKSTATION_CI_STATE="$state/ci-state"
 
 compose config -q
 if [[ $ci_image_mode == build ]]; then
-  compose build auth runtime provider browser-gate
+  compose build gateway runtime provider browser-gate
 else
   # A local build would mask a broken published image, so assert none of the
   # four is built here.
@@ -133,7 +133,7 @@ docker build --target probe -t workstation-ci-viewer -f prototypes/m0/browser/Do
 node deploy/public/otp.mjs password > "$state/ci-state/password"
 # Keep the bootstrap code valid for the short container startup.
 if (( $(date +%s) % 30 > 20 )); then sleep "$((30 - $(date +%s) % 30 + 1))"; fi
-node deploy/public/otp.mjs bootstrap | compose run --rm -T --no-deps auth-admin bootstrap operator > "$state/ci-state/recovery"
+node deploy/public/otp.mjs bootstrap | compose run --rm -T --no-deps gateway-admin bootstrap operator > "$state/ci-state/recovery"
 viewer_user="$(docker run --rm --entrypoint sh workstation-ci-viewer -c 'printf "%s:%s" "$(id -u)" "$(id -g)"')"
 sudo chown -R "$viewer_user" "$state/ci-state"
 compose up -d --no-build --wait --wait-timeout 360
@@ -142,12 +142,12 @@ docker network connect dsh-workstation_browser "$edge"
 install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
 mv "$edge_dir/.routes.tmp" "$edge_dir/routes.yml"
 
-for service in auth runtime chromium provider cdp-relay browser-gate; do
+for service in gateway runtime chromium provider cdp-relay browser-gate; do
   test -z "$(docker port "$(compose ps -q "$service")")"
 done
 networks="$(docker network ls --filter label=com.docker.compose.project=dsh-workstation --format '{{.Name}}' | sort)"
 test "$networks" = $'dsh-workstation_browser\ndsh-workstation_workstation'
-docker inspect "$edge" "$(compose ps -q auth)" "$(compose ps -q runtime)" \
+docker inspect "$edge" "$(compose ps -q gateway)" "$(compose ps -q runtime)" \
   "$(compose ps -q chromium)" "$(compose ps -q provider)" "$(compose ps -q cdp-relay)" \
   "$(compose ps -q browser-gate)" |
   node --input-type=module -e '
@@ -165,10 +165,10 @@ docker inspect "$edge" "$(compose ps -q auth)" "$(compose ps -q runtime)" \
   '
 network_ip() { docker inspect --format "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1"; }
 browser_ip="$(network_ip "$(compose ps -q chromium)" dsh-workstation_browser)"
-auth_ip="$(network_ip "$(compose ps -q auth)" "$proxy")"
-compose exec -T runtime node - "$browser_ip" "$auth_ip" "$BROWSER_PROVIDER_IP" <<'NET'
+gateway_ip="$(network_ip "$(compose ps -q gateway)" "$proxy")"
+compose exec -T runtime node - "$browser_ip" "$gateway_ip" "$BROWSER_PROVIDER_IP" <<'NET'
 const assert = require('node:assert/strict')
-const [browser, auth, provider] = process.argv.slice(2)
+const [browser, gateway, provider] = process.argv.slice(2)
 ;(async () => {
   for (const url of [
     `http://${browser}:3000/browser/`,
@@ -177,8 +177,8 @@ const [browser, auth, provider] = process.argv.slice(2)
     'http://provider:9223/json/version',
     'http://provider:8081/status',
     `http://${provider}:8081/status`,
-    'http://auth:8081/verify',
-    `http://${auth}:8081/verify`,
+    'http://gateway:8081/verify',
+    `http://${gateway}:8081/verify`,
   ]) {
     await assert.rejects(fetch(url, { signal: AbortSignal.timeout(1200) }), url)
   }
@@ -257,10 +257,10 @@ check() {
     workstation-ci-viewer node /m0/public/check.mjs "$1"
 }
 check gateway
-compose stop auth
+compose stop gateway
 restore_volume=dsh-workstation_ci-auth-restore
 docker volume create "$restore_volume" >/dev/null
-cat > "$state/auth-restore.yml" <<'YAML'
+cat > "$state/gateway-restore.yml" <<'YAML'
 volumes:
   auth-data:
     name: dsh-workstation_ci-auth-restore
@@ -273,8 +273,8 @@ docker run --rm --network none --user 0:0 --entrypoint sh \
     tar -C /source -cf /tmp/auth.tar .
     tar -C /target -xpf /tmp/auth.tar
   '
-compose_files+=(-f "$state/auth-restore.yml")
-compose up -d --no-build --wait --wait-timeout 60 --force-recreate auth
+compose_files+=(-f "$state/gateway-restore.yml")
+compose up -d --no-build --wait --wait-timeout 60 --force-recreate gateway
 check restore
 
 browser_id() {

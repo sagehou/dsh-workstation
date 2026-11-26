@@ -18,7 +18,7 @@
 
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
-| `WORKSTATION_SUBNET` | `172.30.241.0/24` | 内部网络上的 Runtime、Provider 和 Auth。 |
+| `WORKSTATION_SUBNET` | `172.30.241.0/24` | 内部网络上的 Runtime、Provider 和 Gateway。 |
 | `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium 与 Provider 的控制监听地址。 |
 
 固定地址由子网推导：工作站网络上的 `.2` 给 Runtime、浏览器网络上的 `.2` 给 Provider，`.3` 是工作站网络上的 Provider。动态分配限制在每个子网的上半段，因此先启动的容器不可能占用固定地址。
@@ -88,7 +88,7 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-`--release` 让初始化脚本解析已发布摘要，并写入 `.env.public` 的 `WORKSTATION_RUNTIME_IMAGE`、`WORKSTATION_AUTH_IMAGE`、`WORKSTATION_PROVIDER_IMAGE`、`WORKSTATION_GATE_IMAGE`。不加时，同样的键会写成本地构建标签。两种情况都明确了实际运行的是什么，且重跑初始化会替换这些键，而不是追加第二份。
+`--release` 让初始化脚本解析已发布摘要，并写入 `.env.public` 的 `WORKSTATION_RUNTIME_IMAGE`、`WORKSTATION_GATEWAY_IMAGE`、`WORKSTATION_PROVIDER_IMAGE`、`WORKSTATION_GATE_IMAGE`。不加时，同样的键会写成本地构建标签。两种情况都明确了实际运行的是什么，且重跑初始化会替换这些键，而不是追加第二份。
 
 #### 已有部署
 
@@ -105,7 +105,7 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 ### 3. 创建管理员
 
 ```bash
-docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap admin
+docker compose --env-file .env.public run --rm --no-deps gateway-admin bootstrap admin
 ```
 
 1. 设置密码。
@@ -118,8 +118,8 @@ docker compose --env-file .env.public run --rm --no-deps auth-admin bootstrap ad
 
 | 形态 | 服务 | 何时使用 |
 | --- | --- | --- |
-| **full**（默认） | `auth`、`runtime`、`browser-gate`、`chromium`、`cdp-relay`、`provider` | 需要共享浏览器：操作者的 `/browser/` 页面，或 Agent 浏览器工具。 |
-| **core** | `auth`、`runtime` | 主机承载不了浏览器栈，或 Agent 浏览器控制尚未获批。 |
+| **full**（默认） | `gateway`、`runtime`、`browser-gate`、`chromium`、`cdp-relay`、`provider` | 需要共享浏览器：操作者的 `/browser/` 页面，或 Agent 浏览器工具。 |
+| **core** | `gateway`、`runtime` | 主机承载不了浏览器栈，或 Agent 浏览器控制尚未获批。 |
 
 `core` 是明确的取舍，不是等价替代。它**没有 `/browser/` 页面，也没有 Agent 浏览器工具**。DSH 本身——聊天、会话、终端、插件、文件编辑——不受影响，因为这些由 Runtime 提供，而不是 Chromium。
 
@@ -135,13 +135,13 @@ docker compose --env-file .env.public \
   up -d --no-build --wait --wait-timeout 420
 ```
 
-覆盖文件给每个浏览器服务打上 `browser` profile，因此 Compose 不启动它们；同时设置 `WORKSTATION_BROWSER_MCP=0`，使 Runtime 不把浏览器 Bundle 装进 Web Profile。它还设置 `AUTH_BROWSER_ENABLED=0`，让 `/browser/` 与 `/_auth/browser` 返回 `503 The browser is not part of this deployment`，而不是反代到一个无人监听的地址。
+覆盖文件将浏览器服务放入 `browser` profile。`WORKSTATION_BROWSER_MCP=0` 跳过安装浏览器 Bundle，`GATEWAY_BROWSER_ENABLED=0` 让 `/browser/` 和 `/_auth/browser` 返回 503。
 
 本指南后续每一条 `compose` 命令都要带同一对 `-f`，包括 `down`、`logs` 和 `run`。core 部署之后再执行不带覆盖文件的 `docker compose up`，会试图在承载不了的主机上启动完整栈。
 
 ### core 没有验证什么
 
-CI 的 `core-shape` 只证明 `auth` 与 `runtime` 能启动、浏览器 Bundle 未安装、以及 `/browser/` 经由 core 路径拒绝。它不证明完整栈在你的主机上可用，也不能替代 `full` 的各条 leg。**两种形态都未在 2 GiB 机器上运行过**；上面的内存数字是依据配置限制的估算，不是实测。
+CI 的 `core-shape` 只证明 `gateway` 与 `runtime` 能启动、浏览器 Bundle 未安装、以及 `/browser/` 经由 core 路径拒绝。它不证明完整栈在你的主机上可用，也不能替代 `full` 的各条 leg。**两种形态都未在 2 GiB 机器上运行过**；上面的内存数字是依据配置限制的估算，不是实测。
 
 ### 4. 启动 Compose 并添加路由
 
@@ -171,11 +171,11 @@ docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 360
 | 要做什么 | 在哪里操作 |
 | --- | --- |
 | 打开共享 Chromium | 从 `/_auth/browser` 打开同源的 `/browser/`，沿用工作台登录。 |
-| 让 Agent 使用标签页 | 在 `/_auth/control` 选择在线 DSH 会话，授予最长 120 秒的租约。第一次授权会创建标签页，此在线会话后续复用。`browser-gate` 服务会在控制权移交前释放你仍按住的鼠标键和键盘键；若无法证明释放完成，授权会被拒绝，浏览器仍归你控制。 |
+| 让 Agent 使用标签页 | Agent 可以通过 `lease_status` 取得空闲租约，也可以在 `/mgmt/browser` 手动授予最长 120 秒的租约。`browser-gate` 确认已按住的输入释放后，才会移交控制权。 |
 | 接管浏览器 | 选择 **接管浏览器**。Provider 停止接收新调用，等待当前操作结束后交还控制。 |
-| 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Provider。留空时只允许人工浏览。 |
+| 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Provider。 |
 
-Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。白名单约束这些工具和返回的页面文本。Chromium 仍会处理页面脚本和重定向，且标签页共享 Cookie。请使用可信来源。
+Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。其他 DSH 会话的工具调用无法改变这份租约。配置来源白名单后，它会约束这些工具和返回的页面文本。Chromium 仍会处理页面脚本和重定向，且标签页共享 Cookie。请使用可信来源。
 
 连接或标签页丢失时，新建 DSH 会话并重新授权。要继续原来的对话，重启 Runtime、恢复对话，再给新连接授权。新标签页使用同一份 Chromium 配置。
 
@@ -199,10 +199,12 @@ docker compose exec -T provider node --input-type=module -e '
 
 ## 维护
 
+打开 `/mgmt` 查看 Runtime 状态与版本、创建或校验 DSH_HOME 备份、管理账户和交接浏览器。创建备份和校验要求五分钟内验证过身份。升级、回滚、恢复以及迁移前的备份，请在停服后执行。[Runtime 维护](../README.zh-CN.md#升级与回滚)
+
 ### Traefik
 
 - 若需要重建 Traefik，在它自己的 Compose 中把两张工作台网声明为外部网络。
-- 若 Traefik 在代理网上的 IP 变化，以相同域名、HTTPS 入口和 resolver 重跑初始化，然后运行 `docker compose --env-file .env.public up -d --no-build auth` 更新信任地址。
+- 若 Traefik 在代理网上的 IP 变化，以相同域名、HTTPS 入口和 resolver 重跑初始化，然后运行 `docker compose --env-file .env.public up -d --no-build gateway` 更新信任地址。
 
 ### 浏览器恢复
 
@@ -218,12 +220,12 @@ Provider 会尝试自动重连。如果 Chromium 已就绪而控制页仍显示 
 
 | `.env.public` 配置项 | 默认值 |
 | --- | --- |
-| `AUTH_IDLE` | 30 分钟 |
-| `AUTH_ABSOLUTE` | 12 小时 |
-| `AUTH_MAX_SESSIONS` | 8 个 |
+| `GATEWAY_IDLE` | 30 分钟 |
+| `GATEWAY_ABSOLUTE` | 12 小时 |
+| `GATEWAY_MAX_SESSIONS` | 8 个 |
 
 - HTTP 请求和新的 WebSocket 握手会刷新空闲计时。已建立的 DSH 和 Selkies WebSocket 每两秒检查会话，过期或被撤销后关闭。
-- 在 `/_auth/account` 撤销单个或所有会话。密码登录后若超过五分钟，修改敏感设置前需要重新验证密码和 TOTP。
+- 在 `/mgmt/account` 撤销单个或所有会话。超过五分钟后，修改敏感设置前需验证新的 TOTP。
 - 在宿主机停用或启用账号时，把管理员命令中的 `bootstrap admin` 替换为 `disable` 或 `enable`。两者都会使当前会话失效。
 
 ### DSH 版本
@@ -239,6 +241,14 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。官方 Plugin Manager 把
 3. 跳过管理员初始化，启动新 Compose。
 
 旧容器的 hostname 如果留下浏览器配置锁，应先确认旧 Chromium 已停止，再清理配置卷 `/config/chromium` 下的 `SingletonLock`、`SingletonSocket` 和 `SingletonCookie` 符号链接。[Chromium 配置锁实现](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
+
+### 从 auth 迁移到 Gateway
+
+1. 用 `bash deploy/public/images.sh` 确认目标版本能解析全部四个镜像摘要。停服备份 `auth-data` 卷和 `.workstation/`。用原来的 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，省略 `-v`。
+2. 在原部署中切换到目标版本，沿用域名、状态目录、代理网络及 Traefik 选项重跑带 `--release` 的初始化。用新生成的 `routes.yml` 替换 Traefik 工作台路由文件，使其指向 `dsh-workstation-gateway-edge`。
+3. 使用 `up -d --no-build --wait` 启动。Gateway 会用原 `auth-key` 打开原 `auth-data` SQLite 卷。用已有账户测试登录、`/mgmt` 和完整部署的 `/browser/`。
+
+旧 `AUTH_*` 会话设置继续生效，优先读取新的 `GATEWAY_*`。如需回退，先停止新栈，再用原提交的初始化脚本恢复旧镜像引用和路由。原 `dsh-workstation-auth` 镜像留在旧发行版中。
 
 ### 升级与回滚
 
@@ -264,7 +274,7 @@ Public Compose 工作流上传的 Actions artifact 仍保留 90 天，作为 CI 
 | `.workstation/`，与 SQLite 分开备份 | TOTP 加密密钥、服务凭据和内部 TLS 密钥。重新安装时沿用原目录。 |
 | `dsh-home`、`workspace`、`browser-profile`、`auth-data`、`provider-state` 命名卷 | DSH、浏览器、认证和 Provider 状态。停止 Compose 后做快照，保留数据时避免使用 `down -v`。 |
 
-备份 Auth 时，将已停止的卷归档到私有位置。
+备份 Gateway 的 SQLite 数据时，将已停止的 `auth-data` 卷归档到私有位置。
 
 ```bash
 docker compose --env-file .env.public stop && (
