@@ -247,32 +247,45 @@ function record (entry) {
   })
 }
 
+// `connectOverCDP` returns a browser whose contexts are *real* Chrome contexts, not
+// Playwright-created ones: `addInitScript` and `exposeBinding` are only available
+// on a browser Playwright launched itself, and calling them here threw
+// ATTACH_FAILED and took the whole attachment down with it.
+//
+// The CDP equivalents are what octop-browser uses (`recorder.py:172`):
+// Page.addScriptToEvaluateOnNewDocument runs the script before any page script in
+// every new document, and Runtime.addBinding gives the page a function to call.
+// Both are sent through the same CDP session Playwright already owns.
 async function installRecorder (attached) {
   if (!RECORD_ENABLED || RECORDER_SOURCE === '') return
   for (const context of attached.contexts()) {
-    // `addInitScript` is Playwright's equivalent of CDP's
-    // Page.addScriptToEvaluateOnNewDocument: it runs before any page script in
-    // every new document, including iframes, which is what octop-browser uses.
-    await context.addInitScript(RECORDER_SOURCE).catch(error => {
-      console.warn('Recorder init script failed:', error?.message ?? error)
-    })
-    // A binding is how the page reaches back. Playwright exposes it as
-    // `context.exposeBinding`, which installs the Runtime.addBinding the injected
-    // script calls by name.
-    await context.exposeBinding('__workstationRecord', (_source, payload) => {
-      let parsed
-      try { parsed = JSON.parse(payload) } catch { return }
-      record({ source: 'human', receivedAt: Date.now(), ...parsed })
-    }).catch(error => {
-      console.warn('Recorder binding failed:', error?.message ?? error)
-    })
-    // Documents that already exist were loaded before the init script, so the
-    // listener has to be added to them explicitly.
     for (const page of context.pages()) {
-      await page.evaluate(RECORDER_SOURCE).catch(() => {})
+      await installOnPage(page).catch(error => {
+        // One page that refuses must not stop the others, and recording is an aid:
+        // a browser that cannot record is still a browser.
+        console.warn('Recorder install failed for a page:', error?.message ?? error)
+      })
     }
+    // New documents get the script before their own code runs.
+    context.on('page', page => { void installOnPage(page).catch(() => {}) })
   }
   record({ source: 'recorder', event: 'installed', at: Date.now(), file: recordFile })
+}
+
+async function installOnPage (page) {
+  const session = await page.context().newCDPSession(page)
+  await session.send('Runtime.enable')
+  await session.send('Page.enable')
+  await session.send('Runtime.addBinding', { name: '__workstationRecord' })
+  await session.send('Page.addScriptToEvaluateOnNewDocument', { source: RECORDER_SOURCE })
+  // Documents already loaded never saw the init script.
+  await session.send('Runtime.evaluate', { expression: RECORDER_SOURCE, returnByValue: true })
+  session.on('Runtime.bindingCalled', event => {
+    if (event.name !== '__workstationRecord') return
+    let parsed
+    try { parsed = JSON.parse(event.payload) } catch { return }
+    record({ source: 'human', receivedAt: Date.now(), ...parsed })
+  })
 }
 
 const liveBinding = binding => binding && binding.browserId === browserId && !binding.page.isClosed()
