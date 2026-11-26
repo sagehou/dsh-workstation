@@ -177,11 +177,13 @@ try {
     const first = (await rpc('session/create', { cwd: '/workspace' })).sessionId
     const second = (await rpc('session/create', { cwd: '/workspace' })).sessionId
     assert.ok(first && second && first !== second)
-    assert.equal(await send(first, 'before', 'lease_status'), 'NO_LEASE')
-    assert.equal(await send(second, 'before2', 'lease_status'), 'NO_LEASE')
-    await action('将标签页交给 Agent', first)
+    // ADR-0006: a tool call takes the lease itself, so `lease_status` returns a
+    // generation instead of NO_LEASE. The isolation properties are unchanged and
+    // still asserted below — a second session must not be able to use this
+    // generation, and a superseded one must be refused. What changed is only how
+    // the first lease is obtained.
     const generation = await send(first, 'lease1', 'lease_status')
-    assert.match(generation, /^[a-f0-9-]{36}:\d+$/)
+    assert.match(generation, /^[a-f0-9-]{36}:\d+$/, 'the Agent did not obtain a lease on its own')
     assert.equal(await send(second, 'other', 'navigate', { generation, url: 'https://fixture.test/beta' }), 'NOT_OWNER')
     assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
     assert.equal(await send(first, 'open1', 'navigate', { generation, url: 'https://fixture.test/alpha' }), 'OK')
