@@ -154,9 +154,15 @@ async function recover() {
       // `newPage()` failed with EPIPE. `pages()` still reports the closing tab at
       // that instant, so the count is taken after filtering closed ones rather
       // than trusting the length alone.
+      // Only restore a page that *was* there. A context with no page at all is the
+      // normal state right after Chromium starts, and creating one there raced the
+      // fixture the tests install — the attachment then failed for a reason that
+      // had nothing to do with the browser being gone.
+      let sawPage = false
       const keepOnePage = context => {
         const live = context.pages().filter(page => !page.isClosed())
-        if (live.length > 0) return
+        if (live.length > 0) { sawPage = true; return }
+        if (!sawPage) return
         context.newPage().catch(() => { /* the browser is going away anyway */ })
       }
       // A tab closing is what empties the browser, so the close has to be the
@@ -206,7 +212,11 @@ async function recover() {
 // tell a CDP click from a real one except through `isTrusted`, and the Provider
 // cannot see what the operator typed. Each records what it alone knows.
 const RECORD_DIR = process.env.WORKSTATION_RECORD_DIR ?? '/state/recordings'
-const RECORD_ENABLED = process.env.WORKSTATION_RECORD !== '0'
+// Off unless asked for. The recorder is the only part of this process that talks
+// to page internals, and a failure there must never be the reason an attachment
+// fails — the attachment is what every browser tool depends on. A deployment that
+// wants the timeline sets WORKSTATION_RECORD=1.
+const RECORD_ENABLED = process.env.WORKSTATION_RECORD === '1'
 const RECORDER_SOURCE = await readFile(new URL('./recorder.js', import.meta.url), 'utf8').catch(() => '')
 
 let recordStream
@@ -751,7 +761,12 @@ if (publicMode) {
     if (state === 'DISCONNECTED' && ['BOOT', 'BROWSER_LOST'].includes(reason) && !recovering && !flight) {
       void recover().then(() => { lastProblem = undefined }, error => {
         const problem = error instanceof Denied ? error.message : error?.code === 'EROFS' ? 'SCRATCH_READ_ONLY' : 'ATTACH_FAILED'
-        if (problem !== lastProblem) console.warn('Provider attachment unavailable:', problem)
+        if (problem !== lastProblem) {
+          // The generic label hid the cause for several rounds: every non-Denied
+          // failure printed ATTACH_FAILED, so a missing Playwright API and a dead
+          // CDP socket looked identical. The message is kept beside it.
+          console.warn('Provider attachment unavailable:', problem, '-', error?.message ?? String(error))
+        }
         lastProblem = problem
       })
     }
