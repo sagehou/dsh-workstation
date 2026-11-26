@@ -11,17 +11,21 @@ node deploy/check-preview.mjs
 compose exec -T runtime sh -ec 'printf preview > /workspace/.persistence'
 first="$(compose ps -q runtime)"
 image="$(docker inspect --format '{{.Image}}' "$first")"
-# A backup only reads, so it must work while DSH serves — the management page is
-# by definition used then, and refusing it made that page useless. An upgrade
-# rewrites DSH_HOME and must still be refused.
-if ! tool backup; then
-  echo 'A backup was refused while DSH was serving, but it only reads' >&2
-  exit 1
-fi
-if tool upgrade 0.2.2-rc.5; then
-  echo 'An upgrade was allowed while DSH was serving' >&2
-  exit 1
-fi
+# Exercise the lock across the Runtime and the independent maintenance container.
+backup="$(tool backup)"
+id="$(sed -n 's/^Backup id: //p' <<<"$backup")"
+test -n "$id"
+tool check "$id"
+for action in upgrade select rollback restore; do
+  target=0.2.2-rc.5
+  if [[ $action == restore ]]; then target="$id"; fi
+  if output="$(tool "$action" "$target" 2>&1)"; then
+    echo "$action was allowed while DSH was serving" >&2
+    exit 1
+  fi
+  grep -F 'runtime is serving or being modified' <<<"$output"
+done
+tool status | grep -Fx 'Active: 0.2.2-rc.1'
 
 compose stop runtime
 tool install 0.2.2-rc.5
@@ -39,4 +43,4 @@ node deploy/check-preview.mjs
 test "$(compose exec -T runtime cat /workspace/.persistence)" = preview
 test "$(compose ps -q runtime)" != "$first"
 test "$(docker inspect --format '{{.Image}}' "$(compose ps -q runtime)")" = "$image"
-echo 'Preview: read-only maintenance while serving, upgrade refused, version switch, rollback and recreation on one image'
+echo 'Preview: online backup and verification, offline maintenance enforced, version switch, rollback and recreation on one image'
