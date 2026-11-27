@@ -351,7 +351,7 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid recording action", http.StatusBadRequest)
 			return
 		}
-		if err := g.provider(r, "POST", "/record/"+action, strings.NewReader("{}"), nil); err != nil {
+		if err := g.provider(r.Context(), "POST", "/record/"+action, strings.NewReader("{}"), nil); err != nil {
 			g.failure(r, "browser_record_denied")
 			http.Error(w, "recording refused", http.StatusConflict)
 			return
@@ -362,7 +362,7 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		// JSON counterpart of the control page's takeover button, for the sidebar
 		// plugin (#29). CSRF is already enforced by `csrf(r)` above for every POST,
 		// so this cannot be driven from another origin.
-		if err := g.provider(r, "POST", "/takeover", strings.NewReader("{}"), nil); err != nil {
+		if err := g.provider(r.Context(), "POST", "/takeover", strings.NewReader("{}"), nil); err != nil {
 			g.failure(r, "browser_takeover_denied")
 			http.Error(w, "takeover refused", http.StatusConflict)
 			return
@@ -375,7 +375,7 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		// every other /_auth/ route; the Provider credential never leaves this
 		// process.
 		var status browserStatus
-		if err := g.provider(r, "GET", "/status", nil, &status); err != nil {
+		if err := g.provider(r.Context(), "GET", "/status", nil, &status); err != nil {
 			unavailable(w)
 			return
 		}

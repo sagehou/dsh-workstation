@@ -29,6 +29,7 @@
 | 09 | [#26](https://github.com/sagehou/dsh-workstation/issues/26) | 无共享浏览器的精简部署 | 两服务配置与 HTTPS 登录已验证。 |
 | 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent 优先租约、浏览器出口加固及录制 | 自动取得租约已通过源码 Compose 验证。出口和录制仍待验收。 |
 | 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | 运维控制台、Gateway 改名及界面 | 控制台和认证已通过源码 CI。Gateway 镜像仍待发布，目标主机迁移仍待验证。 |
+| 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | 完整部署收敛为三个容器 | Runtime、Gateway 和 Browser。验证 CDP 隔离、浏览器重建及已有登录和租约流程。 |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | DSH 原生 Browser Sidebar | 延后增强；独立页面持续可用，不阻塞首版。 |
 
 ## 发布门槛

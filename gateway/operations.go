@@ -143,7 +143,7 @@ func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	g.fetchInventory(r.WithContext(inventoryCtx), &page)
 	if g.browserEnabled {
-		page.ProviderOK = g.provider(r, "GET", "/status", nil, &page.Control) == nil
+		page.ProviderOK = g.provider(r.Context(), "GET", "/status", nil, &page.Control) == nil
 	}
 	g.render(w, r, page)
 }

@@ -20,13 +20,11 @@ refuses to run when the plan conflicts with the host.
 
 | Setting | Default | Used for |
 | --- | --- | --- |
-| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime, Provider and Gateway on the internal network. |
-| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium, the input gate and the Provider's control listener. |
+| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime and Gateway's authenticated MCP listener. |
+| `BROWSER_SUBNET` | `172.30.233.0/24` | Browser, Gateway and Traefik's connection to Selkies. |
 
-Static addresses are derived from each subnet. The Runtime uses `.2` and the
-Provider uses `.3` on the workstation network. The Provider and input gate use
-`.2` and `.4` on the browser network. Docker assigns dynamic addresses from the
-upper half so it cannot allocate a static service address while starting containers.
+Runtime uses offset `.2` and Gateway MCP uses `.3` on the workstation network.
+Docker assigns dynamic addresses from the upper half of each subnet.
 
 Check the plan against the host before starting anything:
 
@@ -59,11 +57,11 @@ addresses.
 | Shape | Workstation containers | Services |
 | --- | ---: | --- |
 | **core** | **2** | `gateway`, `runtime` |
-| **full** (default) | **6** | `gateway`, `runtime`, `chromium`, `provider`, `cdp-relay`, `browser-gate` |
+| **full** (default) | **3** | `gateway`, `runtime`, `browser` |
 
-Both shapes reuse the existing Traefik. Including that container brings the totals to 3 and 7. Run `gateway-admin` and `maintenance` on demand with `docker compose run --rm --no-deps`.
+Both shapes reuse the existing Traefik. Including that container brings the totals to 3 and 4. Run `gateway-admin` and `maintenance` on demand with `docker compose run --rm --no-deps`.
 
-Core serves DSH and Gateway with `WORKSTATION_BROWSER_MCP=0` and `GATEWAY_BROWSER_ENABLED=0`. With a valid session, `/browser/` and `/_auth/browser` return 503. Full adds the shared browser. Chromium's `shm_size: 1gb` sets the shared-memory limit. The memory use of either shape on a 2 GiB host still needs a measurement. [Core integration check](../../docs/roadmap/public-compose.md#gateway-candidate-verification)
+Core runs DSH and Gateway with its browser workers stopped. With a valid session, `/_auth/browser` and the browser data WebSocket return 503. Full starts Provider and the input gate inside Gateway. Browser runs Chromium, Selkies and the CDP relay. Keep `browser/cdp-relay` from the same checkout with the Compose files so LinuxServer can start it. [Three-service topology](../../docs/roadmap/public-compose.md#three-service-candidate)
 
 Set `COMPOSE_FILE` from the checkout root and keep it for every Compose command in this deployment. Full uses the base file.
 
@@ -94,7 +92,7 @@ git switch --detach 81feffdb5607a28062d03f443d6ff47aeb206665 &&
 
 Continue from step 2 in that commit's guide. [Published deployment instructions](https://github.com/sagehou/dsh-workstation/blob/81feffdb5607a28062d03f443d6ff47aeb206665/deploy/public/README.md#2-set-the-domain-and-traefik-values)
 
-The remaining steps here are for Gateway checkouts. From a checkout with published Gateway digests, run `bash deploy/public/images.sh` to verify all four references before using `--release`. This Gateway candidate has local build references available through `bash deploy/public/images.sh --local`. [Release status](../../docs/release.md#current-deployment)
+The remaining steps here are for Gateway checkouts. From a checkout with published Gateway digests, run `bash deploy/public/images.sh` to verify the Runtime and Gateway references before using `--release`. This Gateway candidate has local build references available through `bash deploy/public/images.sh --local`. [Release status](../../docs/release.md#current-deployment)
 
 ### 2. Set the domain and Traefik values
 
@@ -110,7 +108,7 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-`--release` writes the four digest-pinned references to `.env.public`. For a
+`--release` writes the two digest-pinned references to `.env.public`. For a
 source build, omit `--release` to select local image names, then build the images
 before bootstrapping the account.
 
@@ -166,7 +164,7 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 
 ## Use the browser
 
-> **Release gate:** The standalone browser/control page is the supported first-release UI. Do not enable Agent browser control in a production deployment until [#4](https://github.com/sagehou/dsh-workstation/issues/4) passes the held-input release and exclusive-handoff acceptance tests. Keep broad browsing of untrusted sites disabled until [#11](https://github.com/sagehou/dsh-workstation/issues/11) passes the independent egress-policy tests. `BROWSER_TOOL_ORIGINS` alone is not an egress firewall or complete SSRF protection.
+Full deployment serves the standalone browser/control page. Agent MCP is disabled by default. Enable Agent control in production after exclusive handoff passes acceptance, and enable browsing of untrusted sites after independent egress policy passes. [Handoff #4](https://github.com/sagehou/dsh-workstation/issues/4) · [Egress #11](https://github.com/sagehou/dsh-workstation/issues/11)
 
 
 | To | Open or choose |
@@ -174,9 +172,9 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 | Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
 | Let an Agent use a tab | An Agent can acquire an available lease through `lease_status`. You can also grant a lease in `/mgmt/browser` for up to 120 seconds. Before granting control, `browser-gate` confirms it released held input. |
 | Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
-| Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate the Provider. |
+| Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate Gateway. |
 
-In the Gateway candidate, the Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. Another DSH session cannot change an active lease by calling tools. An empty `BROWSER_TOOL_ORIGINS` or `*` permits all HTTPS origins at the tool layer. A configured list limits the tool calls and returned page text. Chromium still handles page scripts and redirects, and tabs share cookies. [Candidate behavior](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
+When MCP is enabled, the Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. The allowlist constrains tool calls and returned page text. Independent network policy handles browser egress. [Candidate lease behavior](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
 
 For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
 
@@ -187,10 +185,10 @@ For a lost connection or tab, create a new DSH session and grant it a lease. To 
 Check it without touching the browser:
 
 ```sh
-docker compose --env-file .env.public exec -T provider node --input-type=module -e '
+docker compose --env-file .env.public exec -T gateway node --input-type=module -e '
   import { readFileSync } from "node:fs"
   const s = readFileSync("/run/secrets/gate_control", "utf8").trim()
-  const r = await fetch("http://dsh-workstation-browser-gate:8082/status", {
+  const r = await fetch(process.env.GATEWAY_BROWSER_UPSTREAM + "/status", {
     headers: { Authorization: "Bearer " + s },
   })
   console.log(await r.json())
@@ -210,10 +208,10 @@ Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME b
 
 ### Browser recovery
 
-If the Provider cannot confirm that a pending browser operation ended, it rejects new grants to that Chromium process. Recreate Chromium and the relay on the same profile volume and keep the configured hostname.
+If the Provider cannot confirm that a pending browser operation ended, it rejects new grants to that Chromium process. Recreate Browser with the current hostname and profile volume.
 
 ```bash
-docker compose --env-file .env.public up -d --no-build --force-recreate chromium cdp-relay
+docker compose --env-file .env.public up -d --no-build --force-recreate browser
 ```
 
 The Provider tries to reconnect automatically. If the control page still shows `DISCONNECTED` after Chromium is ready, choose **连接浏览器**.
@@ -232,7 +230,7 @@ The Provider tries to reconnect automatically. If the control page still shows `
 
 ### DSH versions
 
-On first start, Runtime installs official DSH `0.2.2-rc.1`. In full, the official Plugin Manager adds the Workstation browser Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
+On first start, Runtime installs official DSH `0.2.2-rc.1`. When Agent MCP is enabled, the official Plugin Manager adds the Workstation browser Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
 
 Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenance commands against the public Compose with `--env-file .env.public`. A version rollback changes the selected install. Restoring migrated data requires a matching backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
 
@@ -244,9 +242,11 @@ Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenan
 
 ### Migrate from the `auth` service
 
-1. Confirm the destination release resolves all four digests with `bash deploy/public/images.sh`. Stop the old stack and back up `auth-data` and `.workstation/`. Then run `docker compose --env-file .env.public down` with the old Compose files and the same project name. Keep the volumes.
+These steps also apply when upgrading from the six-container Gateway candidate.
+
+1. Confirm the destination release resolves both digests with `bash deploy/public/images.sh`. Stop the old stack and back up `auth-data` and `.workstation/`. Then run `docker compose --env-file .env.public down` with the old Compose files and the same project name. Keep the named volumes. This releases the old Provider address before Gateway binds it.
 2. Switch to the destination release in the same deployment. Run the initializer with the saved domain, state path, external proxy network and Traefik options. Install the regenerated `routes.yml` over Traefik's existing Workstation route file so it points to `dsh-workstation-gateway-edge`.
-3. Start the stack with `up -d --no-build --wait`. `gateway` opens the existing `auth-data` SQLite volume with the saved `auth-key`. Confirm your existing login, `/mgmt`, and `/browser/` in a full deployment.
+3. Start the stack with `up -d --no-build --wait`. `gateway` opens the existing `auth-data` SQLite volume with the saved `auth-key`. Browser reuses its hostname and profile volume. Provider reuses its state volume. Confirm your existing login, `/mgmt`, and `/browser/` in a full deployment.
 
 `GATEWAY_IDLE`, `GATEWAY_ABSOLUTE`, and `GATEWAY_MAX_SESSIONS` take precedence over their `AUTH_*` predecessors. For rollback, stop the new stack, return to the old checkout, and regenerate the old image references and Traefik routes with that checkout's initializer. The old published `dsh-workstation-auth` image remains available for that release.
 

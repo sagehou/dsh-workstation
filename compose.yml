@@ -14,37 +14,36 @@ x-runtime: &runtime
     - backups:/backup
     - runtime-launch:/run/dsh-runtime
 
-x-provider: &provider
-  image: ${WORKSTATION_PROVIDER_IMAGE:-dsh-workstation-provider:0.2.1}
-  build:
-    context: .
-    dockerfile: provider/Dockerfile
-  init: true
-  read_only: true
-  cap_drop: [ALL]
-  security_opt: ["no-new-privileges:true"]
-
 services:
   gateway:
     image: ${WORKSTATION_GATEWAY_IMAGE:-dsh-workstation-gateway:0.1.0}
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     init: true
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # The Playwright CDP client creates scratch files when attaching.
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"]
     environment:
       PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       GATEWAY_EDGE_IP: ${WORKSTATION_TRAEFIK_IP:?run deploy/public/init.sh}
       GATEWAY_ADDR: dsh-workstation-gateway-edge:8080
       GATEWAY_VERIFY_ADDR: dsh-workstation-gateway-edge:8081
-      # Gateway calls the provider's control listener. The address comes from the
-      # derivation so a custom subnet moves it too.
-      GATEWAY_PROVIDER_CONTROL_ADDR: ${BROWSER_PROVIDER_IP:-172.30.233.2}:8081
-      # The browser data socket is proxied through the input gate (ADR-0005).
-      GATEWAY_BROWSER_UPSTREAM: http://dsh-workstation-browser-gate:8082
+      GATEWAY_PROVIDER_CONTROL_ADDR: 127.0.0.1:8081
+      GATEWAY_BROWSER_UPSTREAM: http://127.0.0.1:8082
       # Every other browser WebSocket bypasses the gate.
       GATEWAY_BROWSER_DIRECT: http://dsh-workstation-chromium:3000
+      WORKSTATION_PROVIDER: "1"
+      WORKSTATION_BROWSER_MCP: ${WORKSTATION_BROWSER_MCP:-0}
+      PROVIDER_IP: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+      PROVIDER_CONTROL_IP: 127.0.0.1
+      PROVIDER_GATE_URL: http://127.0.0.1:8082
+      GATE_ADDR: 127.0.0.1:8082
+      GATE_CONTROL_SECRET: /run/secrets/gate_control
+      BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
       # Read-only paths for the operations page (#32). Both volumes are mounted
       # read-only above; these names keep the Go code free of hard-coded paths.
       WORKSTATION_DSH_HOME: /dsh-home
@@ -59,23 +58,29 @@ services:
       AUTH_IDLE: ${AUTH_IDLE:-}
       AUTH_ABSOLUTE: ${AUTH_ABSOLUTE:-}
       AUTH_MAX_SESSIONS: ${AUTH_MAX_SESSIONS:-}
-    secrets: [auth_key, m0_controller, m0_admin, runtime_ca, maintenance]
+    secrets: [auth_key, runtime_ca, maintenance, m0_master, m0_controller, m0_sentinel, m0_admin, browser_enroll, gate_control]
     volumes:
       - auth-data:/data
       - runtime-launch:/run/dsh-runtime:ro
       # Read-only view of versions and backups for the operations page.
       - dsh-home:/dsh-home:ro
       - backups:/backup:ro
+      - provider-state:/state
+      - cdp-socket:/run/workstation-cdp:ro
     networks:
       proxy:
         aliases: [dsh-workstation-gateway-edge]
-      workstation: {}
+      workstation:
+        ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
+        # Keep the endpoint in already-installed DSH Profiles.
+        aliases: [provider]
       browser: {}
     healthcheck:
       test: ["CMD", "workstation-gateway", "health"]
       interval: 10s
-      timeout: 4s
+      timeout: 5s
       retries: 5
+      start_period: 60s
 
   gateway-admin:
     profiles: [maintenance]
@@ -102,7 +107,7 @@ services:
       DSH_BIND_IP: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
-      WORKSTATION_BROWSER_MCP: "1"
+      WORKSTATION_BROWSER_MCP: ${WORKSTATION_BROWSER_MCP:-0}
       # Gateway uses this listener for inventory, backup and archive validation.
       MAINTENANCE_ADDR: 0.0.0.0:8099
       MAINTENANCE_SECRET: /run/secrets/maintenance
@@ -129,49 +134,7 @@ services:
       WORKSTATION_RUNTIME_IMAGE: ${WORKSTATION_RUNTIME_IMAGE:-dsh-workstation-runtime:0.2.2}
     networks: [workstation]
 
-  # The browser input gate (ADR-0005). Selkies evaluates input authority
-  # against the live token table on every frame and installs a new table before
-  # it announces the change, so a release sent after a revocation is dropped.
-  # The gate releases held input *before* the Provider flips the table, and is
-  # the only path from the operator's page to the Selkies data socket.
-  browser-gate:
-    image: ${WORKSTATION_GATE_IMAGE:-dsh-workstation-browser-gate:0.1.0}
-    build:
-      context: .
-      dockerfile: browser-gate/Dockerfile
-    init: true
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=8m"]
-    environment:
-      GATE_ADDR: ${BROWSER_GATE_IP:-172.30.233.4}:8082
-      GATE_UPSTREAM: ws://dsh-workstation-chromium:3000/browser/api/websockets
-      GATE_PATH: /browser/api/websockets
-      GATE_CONTROL_SECRET: /run/secrets/gate_control
-    secrets: [gate_control]
-    depends_on:
-      chromium: {condition: service_started, restart: true}
-    networks:
-      browser:
-        ipv4_address: ${BROWSER_GATE_IP:-172.30.233.4}
-        aliases: [dsh-workstation-browser-gate]
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://' + process.env.GATE_ADDR + '/health', {signal: AbortSignal.timeout(2000)})
-            .then(r => { if (r.status !== 204) process.exitCode = 1 })
-            .catch(() => { process.exitCode = 1 })
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
-
-  chromium:
+  browser:
     # Chromium records the hostname in its persistent profile lock.
     hostname: dsh-workstation-chromium
     image: lscr.io/linuxserver/chromium:075b0b99-ls64@sha256:6d2a8da6a45d4083a7287211a619ca29fdb518ebea0ef562c27392ba2f6698d2
@@ -198,63 +161,17 @@ services:
       SELKIES_COMMAND_ENABLED: "false"
     volumes:
       - browser-profile:/config
+      - cdp-socket:/run/workstation-cdp
+      - type: bind
+        source: ./browser/cdp-relay
+        target: /custom-services.d/workstation-cdp
+        read_only: true
+        bind:
+          create_host_path: false
     secrets: [m0_master]
     networks:
       browser:
         aliases: [dsh-workstation-chromium]
-
-  cdp-relay:
-    <<: *provider
-    restart: unless-stopped
-    network_mode: service:chromium
-    depends_on:
-      chromium: {condition: service_started, restart: true}
-    command: ["node", "cdp.mjs", "relay"]
-    volumes:
-      - cdp-socket:/run/workstation-cdp
-
-  provider:
-    <<: *provider
-    restart: unless-stopped
-    # Playwright creates a scratch directory even when attaching over CDP.
-    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"]
-    environment:
-      WORKSTATION_PROVIDER: "1"
-      # The provider binds these; they must equal the addresses Compose assigns
-      # this container, or it fails with EADDRNOTAVAIL on a custom subnet.
-      PROVIDER_IP: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
-      PROVIDER_CONTROL_IP: ${BROWSER_PROVIDER_IP:-172.30.233.2}
-      # Every input handover goes through the gate first (ADR-0005).
-      PROVIDER_GATE_URL: http://dsh-workstation-browser-gate:8082
-      BROWSER_TOOL_ORIGINS: ${BROWSER_TOOL_ORIGINS:-}
-    volumes:
-      - provider-state:/state
-      - cdp-socket:/run/workstation-cdp:ro
-    # Playwright attaches to Chromium; it never downloads or launches a browser.
-    secrets: [m0_master, m0_controller, m0_sentinel, m0_admin, browser_enroll, gate_control]
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://${BROWSER_PROVIDER_IP:-172.30.233.2}:8081/status', {
-            headers: {Authorization: 'Bearer '+require('node:fs').readFileSync('/run/secrets/m0_admin','utf8')},
-            signal: AbortSignal.timeout(2000)
-          }).then(r => r.ok ? r.json() : {}).then(({state}) => {
-            if (!['HUMAN','AGENT','HANDOVER'].includes(state)) process.exitCode = 1
-          }).catch(() => { process.exitCode = 1 })
-      interval: 5s
-      timeout: 3s
-      retries: 18
-      start_period: 30s
-    networks:
-      # Block style, not {key: value}: `${...}` opens a nested YAML flow mapping
-      # and the parser fails on the inner brace.
-      workstation:
-        ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
-      browser:
-        ipv4_address: ${BROWSER_PROVIDER_IP:-172.30.233.2}
 
 networks:
   proxy:

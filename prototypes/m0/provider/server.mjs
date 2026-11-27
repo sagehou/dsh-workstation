@@ -693,14 +693,12 @@ function listen(handler, host, port) {
     })
   }).listen(port, host)
 }
-// The public provider binds the addresses Compose assigns it. They come from
-// deploy/network.sh, so a custom subnet moves them together with the Compose
-// static addresses and the health-check target that probes this listener.
-// A literal here fails with EADDRNOTAVAIL: the container has no such address.
+// Gateway exposes credential-protected MCP only on the workstation network.
+// The prototype uses its own fixture addresses and keeps its MCP listener.
 const providerHost = process.env.PROVIDER_IP ??
   (publicMode ? '172.30.241.3' : '172.30.232.2')
 const controlHost = process.env.PROVIDER_CONTROL_IP ?? '172.30.233.2'
-listen(mcp, providerHost, 8080)
+if (!publicMode || process.env.WORKSTATION_BROWSER_MCP === '1') listen(mcp, providerHost, 8080)
 listen(control, controlHost, 8081)
 
 if (publicMode) {

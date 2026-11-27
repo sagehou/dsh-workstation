@@ -41,6 +41,48 @@ func duration(name, fallback string) int64 {
 	return int64(d / time.Second)
 }
 
+func healthy(verifyAddr string) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get("http://" + verifyAddr + "/health")
+	if err != nil {
+		return err
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return errors.New("gateway not ready")
+	}
+	if gatewayEnv("BROWSER_ENABLED", "1") == "0" {
+		return nil
+	}
+
+	response, err = client.Get(gatewayEnv("BROWSER_UPSTREAM", gateLoopback) + "/health")
+	if err != nil {
+		return errors.New("browser input gate not ready")
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return errors.New("browser input gate not ready")
+	}
+
+	admin, err := readSecret("m0_admin")
+	if err != nil {
+		return errors.New("provider credential unavailable")
+	}
+	g := &gateway{providerAdmin: admin, providerControlAddr: gatewayEnv("PROVIDER_CONTROL_ADDR", providerLoopback)}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var status browserStatus
+	if err := g.provider(ctx, "GET", "/status", nil, &status); err != nil {
+		return errors.New("browser provider not ready")
+	}
+	switch status.State {
+	case "HUMAN", "AGENT", "HANDOVER":
+		return nil
+	default:
+		return errors.New("browser provider not attached")
+	}
+}
+
 func run() error {
 	ctx := context.Background()
 	command := "serve"
@@ -49,16 +91,7 @@ func run() error {
 	}
 	verifyAddr := gatewayEnv("VERIFY_ADDR", "172.30.242.3:8081")
 	if command == "health" {
-		client := &http.Client{Timeout: 2 * time.Second}
-		response, err := client.Get("http://" + verifyAddr + "/health")
-		if err != nil {
-			return err
-		}
-		response.Body.Close()
-		if response.StatusCode != 204 {
-			return errors.New("gateway not ready")
-		}
-		return nil
+		return healthy(verifyAddr)
 	}
 	origin := os.Getenv("PUBLIC_ORIGIN")
 	u, err := url.Parse(origin)
@@ -162,12 +195,10 @@ func run() error {
 		return errors.New("invalid session limits")
 	}
 	g := &gateway{store: s, origin: origin, host: u.Host, edge: gatewayEnv("EDGE_IP", "172.30.242.2"), wa: passkeys,
-		// The provider's control listener. Supplied by Compose from the same
-		// derivation as everything else, so a custom subnet moves it too.
-		providerControlAddr: gatewayEnv("PROVIDER_CONTROL_ADDR", "172.30.233.2:8081"),
+		providerControlAddr: gatewayEnv("PROVIDER_CONTROL_ADDR", providerLoopback),
 		// The Selkies data socket is reached through the input gate so held
 		// input can be released before authority changes hands (ADR-0005).
-		browserUpstream: gatewayEnv("BROWSER_UPSTREAM", "http://dsh-workstation-browser-gate:8082"),
+		browserUpstream: gatewayEnv("BROWSER_UPSTREAM", gateLoopback),
 		browserDirect:   gatewayEnv("BROWSER_DIRECT", "http://dsh-workstation-chromium:3000"),
 		// A core deployment sets this to 0: no Chromium, gate or provider is
 		// running, so /browser/ answers with a clear refusal rather than

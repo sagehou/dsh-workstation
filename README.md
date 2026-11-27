@@ -6,7 +6,7 @@ A self-hosted deployment, security, browser-control, and operations layer around
 
 ## Deploy
 
-Public Compose runs **2 workstation containers in core** and **6 in full**, plus the existing Traefik. The SSH preview runs 3 containers, including its own Traefik.
+The current Compose configuration runs **Runtime + Gateway** in core and **Runtime + Gateway + Browser** in full. Both use the existing Traefik. The SSH preview runs 3 containers, including its own Traefik.
 
 | I want to | Guide |
 | --- | --- |
@@ -24,7 +24,7 @@ Public Compose runs **2 workstation containers in core** and **6 in full**, plus
 | Public access | One operator signs in over HTTPS using password and TOTP or Passkey. Go Gateway provides session management and Traefik ForwardAuth. `/mgmt` opens the console for the administrator, browser control and Runtime maintenance. |
 | Browser | Operator and Agent share Chromium. Selkies runs at `/browser/`; the authenticated standalone browser/control page is the first-release UI. |
 | Deferred | Native DSH Sidebar is post-launch and does not block deployment. [#5](https://github.com/sagehou/dsh-workstation/issues/5) Held input is released at the Selkies boundary on handover and on disconnect, both measured on the real stack; held keys, mid-press expiry, mid-press restart and Provider abnormal exit are covered by tests against a fake upstream only. [#4](https://github.com/sagehou/dsh-workstation/issues/4) |
-| Images | The published deployment still uses `auth`. Gateway and its console are verified in source CI and await publication. [Release status](docs/release.md#current-deployment) · [Deployment evidence](docs/roadmap/public-compose.md) |
+| Images | The published Auth deployment has six workstation containers in full. The three-service Gateway candidate uses a separate source build. [Release status](docs/release.md#current-deployment) · [Deployment evidence](docs/roadmap/public-compose.md) |
 
 ## Project documents
 

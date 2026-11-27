@@ -6,7 +6,7 @@ services:
       DEEPSEEK_API_KEY: ci-mock-model
       DSH_PERMISSION_MODE: danger-full-access
       WORKSTATION_MCP_DIAGNOSTICS: "1"
-  chromium:
+  browser:
     environment:
       CHROME_CLI: --user-data-dir=/config/chromium --remote-debugging-port=9222 --no-first-run --ignore-certificate-errors-spki-list=${CI_FIXTURE_SPKI}
   fixture:

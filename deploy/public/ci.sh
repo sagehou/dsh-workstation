@@ -23,7 +23,7 @@ cleanup() {
   if (( $? != 0 )); then
     docker logs --tail=30 "$edge" 2>&1 || true
     if [[ -f .env.public ]]; then
-      compose logs --no-color --tail=25 gateway runtime provider cdp-relay || true
+      compose logs --no-color --tail=25 gateway runtime browser || true
     fi
   fi
   docker rm -f "$edge" >/dev/null 2>&1 || true
@@ -61,7 +61,7 @@ docker run -d --name "$edge" --network "$proxy" --ip "$WORKSTATION_CI_PROXY_EDGE
   --entrypoints.http.http.redirections.entrypoint.scheme=https \
   --entrypoints.websecure.address=:8443 \
   --providers.file.directory=/dynamic >/dev/null
-# CI mode selects how the four workstation images are obtained.
+# CI mode selects how the Workstation images are obtained.
 #
 #   build   (default) build them from this checkout. Proves the source builds.
 #   release pull the digests recorded in deploy/public/images.env. Proves the
@@ -77,20 +77,14 @@ case $ci_image_mode in
     # the experiment proves nothing about immutable deployment.
     while IFS='=' read -r name reference; do
       [[ $reference == *'@sha256:'* ]] || { echo "$name is not pinned: $reference" >&2; exit 1; }
-    done < <(for key in RUNTIME GATEWAY PROVIDER GATE; do
+    done < <(for key in RUNTIME GATEWAY; do
       printf '%s=%s\n' "$key" "$(sed -n "s/^WORKSTATION_${key}_IMAGE=//p" .env.public)"
     done)
     echo "Pulling published digests:"
-    compose pull --quiet gateway runtime provider browser-gate
+    compose pull --quiet gateway runtime browser
     ;;
   *) echo "Unknown WORKSTATION_CI_IMAGE_MODE: $ci_image_mode" >&2; exit 1 ;;
 esac
-# Read the provider reference *after* the initializer has written .env.public:
-# it is the same reference the stack runs, so a maintenance `docker run` cannot
-# drift from the image under test. In build mode this is the local tag; in
-# release mode it is the published digest.
-provider_image="$(sed -n 's/^WORKSTATION_PROVIDER_IMAGE=//p' .env.public)"
-[[ -n $provider_image ]] || { echo 'the initializer wrote no provider image' >&2; exit 1; }
 mkdir -m 0700 "$state/ci-state" "$state/fixture"
 chmod 0755 "$state/fixture"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 -subj '/CN=fixture.test' \
@@ -99,15 +93,17 @@ chmod 0444 "$state"/fixture/*.pem
 spki() { openssl x509 -in "$1" -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | openssl base64 -A; }
 export CI_EDGE_SPKI="$(spki "$edge_dir/cert.pem")"
 export CI_FIXTURE_SPKI="$(spki "$state/fixture/cert.pem")"
+# Opt in only for the test stack, with the trusted fixture as its origin.
+export WORKSTATION_BROWSER_MCP=1
 export BROWSER_TOOL_ORIGINS=https://fixture.test
 export WORKSTATION_CI_STATE="$state/ci-state"
 
 compose config -q
+services="$(docker compose --env-file .env.public -f compose.yml config --services | sort | paste -sd ' ')"
+[[ $services == 'browser gateway runtime' ]] || { echo "Unexpected full service set: $services" >&2; exit 1; }
 if [[ $ci_image_mode == build ]]; then
-  compose build gateway runtime provider browser-gate
+  compose build gateway runtime
 else
-  # A local build would mask a broken published image, so assert none of the
-  # four is built here.
   echo 'Skipping the image build: this leg runs the published digests.'
 fi
 # A COPY whose destination ends in `/` applies --chmod to the directory as well
@@ -142,14 +138,16 @@ docker network connect dsh-workstation_browser "$edge"
 install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
 mv "$edge_dir/.routes.tmp" "$edge_dir/routes.yml"
 
-for service in gateway runtime chromium provider cdp-relay browser-gate; do
+running="$(compose ps --services --status running | sort | paste -sd ' ')"
+[[ $running == 'browser fixture gateway runtime' ]] || { echo "Unexpected running services: $running" >&2; exit 1; }
+echo "Full stack running: browser, gateway, runtime (+ CI fixture)"
+for service in gateway runtime browser; do
   test -z "$(docker port "$(compose ps -q "$service")")"
 done
 networks="$(docker network ls --filter label=com.docker.compose.project=dsh-workstation --format '{{.Name}}' | sort)"
 test "$networks" = $'dsh-workstation_browser\ndsh-workstation_workstation'
 docker inspect "$edge" "$(compose ps -q gateway)" "$(compose ps -q runtime)" \
-  "$(compose ps -q chromium)" "$(compose ps -q provider)" "$(compose ps -q cdp-relay)" \
-  "$(compose ps -q browser-gate)" |
+  "$(compose ps -q browser)" |
   node --input-type=module -e '
     import assert from "node:assert/strict"
     import { readFileSync } from "node:fs"
@@ -158,17 +156,21 @@ docker inspect "$edge" "$(compose ps -q gateway)" "$(compose ps -q runtime)" \
       container.Mounts.filter(mount => mount.Name === "dsh-workstation_cdp-socket")
         .map(mount => [container.Config.Labels["com.docker.compose.service"], mount.Destination, mount.RW])
     )
-    assert.deepEqual(mounts, [
-      ["provider", "/run/workstation-cdp", false],
-      ["cdp-relay", "/run/workstation-cdp", true]
-    ])
+    assert.equal(mounts.length, 2)
+    assert.deepEqual(Object.fromEntries(mounts.map(([service, path, writable]) => [service, [path, writable]])), {
+      gateway: ["/run/workstation-cdp", false],
+      browser: ["/run/workstation-cdp", true],
+    })
+    const browser = containers.find(container => container.Config.Labels["com.docker.compose.service"] === "browser")
+    assert.deepEqual(Object.keys(browser.NetworkSettings.Networks), ["dsh-workstation_browser"])
   '
 network_ip() { docker inspect --format "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1"; }
-browser_ip="$(network_ip "$(compose ps -q chromium)" dsh-workstation_browser)"
+browser_ip="$(network_ip "$(compose ps -q browser)" dsh-workstation_browser)"
 gateway_ip="$(network_ip "$(compose ps -q gateway)" "$proxy")"
-compose exec -T runtime node - "$browser_ip" "$gateway_ip" "$BROWSER_PROVIDER_IP" <<'NET'
+gateway_browser_ip="$(network_ip "$(compose ps -q gateway)" dsh-workstation_browser)"
+compose exec -T runtime node - "$browser_ip" "$gateway_ip" <<'NET'
 const assert = require('node:assert/strict')
-const [browser, gateway, provider] = process.argv.slice(2)
+const [browser, gateway] = process.argv.slice(2)
 ;(async () => {
   for (const url of [
     `http://${browser}:3000/browser/`,
@@ -176,7 +178,7 @@ const [browser, gateway, provider] = process.argv.slice(2)
     `http://${browser}:9223/json/version`,
     'http://provider:9223/json/version',
     'http://provider:8081/status',
-    `http://${provider}:8081/status`,
+    'http://provider:8082/health',
     'http://gateway:8081/verify',
     `http://${gateway}:8081/verify`,
   ]) {
@@ -191,7 +193,19 @@ const [browser, gateway, provider] = process.argv.slice(2)
   console.log('DSH cannot reach Selkies, CDP, Provider control or ForwardAuth; MCP requires a credential')
 })().catch(error => { console.error('Network isolation check failed:', error.message); process.exitCode = 1 })
 NET
-for address in "$browser_ip" "$WORKSTATION_PROVIDER_IP" "$BROWSER_PROVIDER_IP"; do
+compose exec -T browser python3 - "$gateway_browser_ip" <<'NET'
+import socket
+import sys
+
+for port in (8080, 8081, 8082, 9223):
+    try:
+        connection = socket.create_connection((sys.argv[1], port), timeout=1)
+    except OSError:
+        continue
+    with connection:
+        raise SystemExit(f"Browser reached a private Gateway listener on port {port}")
+NET
+for address in "$browser_ip" "$gateway_ip" "$gateway_browser_ip" "$WORKSTATION_PROVIDER_IP"; do
   for port in 9222 9223; do
     if curl -s --noproxy '*' --connect-timeout 1 --max-time 2 -o /dev/null "http://$address:$port/json/version"; then
       echo 'Host reached a CDP listener' >&2
@@ -199,7 +213,7 @@ for address in "$browser_ip" "$WORKSTATION_PROVIDER_IP" "$BROWSER_PROVIDER_IP"; 
     fi
   done
 done
-echo 'Three Docker networks; CDP socket shared only by the Provider and relay; direct host CDP denied'
+echo 'CDP socket shared only by Browser and Gateway. CDP and control listeners stay private.'
 
 curlhere() { curl -sS --max-time 10 --resolve workstation.test:443:127.0.0.1 --cacert "$edge_dir/cert.pem" "$@"; }
 expect_status() {
@@ -269,7 +283,7 @@ YAML
 # The archive is created only while SQLite is stopped, and stays on the runner.
 docker run --rm --network none --user 0:0 --entrypoint sh \
   -v dsh-workstation_auth-data:/source:ro -v "$restore_volume":/target \
-  "$provider_image" -ec '
+  "$runtime_image" -ec '
     tar -C /source -cf /tmp/auth.tar .
     tar -C /target -xpf /tmp/auth.tar
   '
@@ -278,20 +292,21 @@ compose up -d --no-build --wait --wait-timeout 60 --force-recreate gateway
 check restore
 
 browser_id() {
-  compose exec -T provider node --input-type=module -e '
+  compose exec -T gateway node --input-type=module -e '
     const response = await fetch("http://127.0.0.1:9223/json/version", { signal: AbortSignal.timeout(2000) })
     if (!response.ok) process.exit(1)
     console.log(new URL((await response.json()).webSocketDebuggerUrl).pathname)
   '
 }
 profile_lock() {
-  compose exec -T chromium sh -c 'hostname; readlink /config/chromium/SingletonLock || true'
+  compose exec -T browser sh -c 'hostname; readlink /config/chromium/SingletonLock || true'
 }
 previous="$(browser_id)"
 echo 'Chromium host and profile lock before replacement'
 profile_lock
-compose kill -s SIGKILL cdp-relay
-compose up -d --no-build --force-recreate chromium cdp-relay
+compose exec -T -u 1000:1000 browser touch /config/.ci-profile-witness
+compose kill -s SIGKILL browser
+compose up -d --no-build --force-recreate browser
 current=''
 for attempt in {1..60}; do
   current="$(browser_id 2>/dev/null || true)"
@@ -304,8 +319,9 @@ if [[ -z $current || $current == "$previous" ]]; then
   browser_id >&2 || true
   exit 1
 fi
-compose up -d --no-build --wait --wait-timeout 120 provider
-echo 'Chromium and killed relay recreated; Provider reached a new Chromium instance through the reused socket volume'
+compose exec -T browser test -f /config/.ci-profile-witness
+compose up -d --no-build --wait --wait-timeout 120 gateway
+echo 'Browser recreated. Gateway reached the new Chromium instance through the reused CDP socket volume.'
 check browser
 
 # The exclusive-handoff requirement (#4) at the real Selkies boundary. This is
@@ -314,11 +330,12 @@ check browser
 # release frame the page sent afterwards was dropped along with every other
 # input frame, so the desktop spent the whole lease mid-drag.
 gate_release() {
-  compose exec -T -e PHASE="$1" provider node --input-type=module -e '
+  compose exec -T -e PHASE="$1" gateway node --input-type=module -e '
     import assert from "node:assert/strict"
     import { readFile } from "node:fs/promises"
     const secret = (await readFile("/run/secrets/gate_control", "utf8")).trim()
-    const call = (path, method = "POST") => fetch("http://dsh-workstation-browser-gate:8082" + path, {
+    const gate = process.env.GATEWAY_BROWSER_UPSTREAM
+    const call = (path, method = "POST") => fetch(gate + path, {
       method, headers: { Authorization: "Bearer " + secret }, signal: AbortSignal.timeout(8000),
     })
     if (process.env.PHASE === "status") {
@@ -341,7 +358,7 @@ gate_release() {
     const ok = await call("/handover")
     assert.equal(ok.status, 200, "authenticated handover was refused")
     assert.equal((await ok.json()).released, true, "handover did not report a release")
-    const denied = await fetch("http://dsh-workstation-browser-gate:8082/handover", {
+    const denied = await fetch(gate + "/handover", {
       method: "POST", headers: { Authorization: "Bearer " + "0".repeat(64) },
     })
     assert.equal(denied.status, 401, "the gate accepted an unauthenticated handover")
@@ -351,6 +368,6 @@ gate_release() {
 gate_release status
 gate_release handover
 # The gate must be healthy after the handover it just performed.
-compose up -d --no-build --wait --wait-timeout 60 browser-gate
+compose up -d --no-build --wait --wait-timeout 60 gateway
 check browser
 echo 'Input gate verified: authenticated handover, refusal of unauthenticated, stack healthy after'

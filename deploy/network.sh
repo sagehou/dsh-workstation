@@ -94,7 +94,6 @@ derive_network() {
   printf '%s_IP_RANGE=%s/%s\n' "$label" "$(int2ip "$pool_start")" "$pool_prefix"
   printf '%s_STATIC_2=%s\n' "$label" "$(int2ip $(( network + 2 )))"
   printf '%s_STATIC_3=%s\n' "$label" "$(int2ip $(( network + 3 )))"
-  printf '%s_STATIC_4=%s\n' "$label" "$(int2ip $(( network + 4 )))"
   # Exposed for the overlap check and for callers that print a diagnosis.
   printf '%s_NETWORK_INT=%s\n' "$label" "$network"
   printf '%s_SIZE=%s\n' "$label" "$size"
@@ -120,8 +119,7 @@ ci_clear() {
 }
 
 # Fold the raw derivation into the names Compose and the initializer use.
-# BROWSER_GATE_IP is the browser input gate (ADR-0005), the only path to the
-# Selkies data socket; it is derived here rather than written into Compose.
+# The Gateway MCP listener keeps the previous Provider address.
 # Keep any comment outside the heredoc below: `derive --json` parses its output.
 named() {
   local body
@@ -148,8 +146,6 @@ WORKSTATION_RUNTIME_IP=$WORKSTATION_STATIC_2
 WORKSTATION_PROVIDER_IP=$WORKSTATION_STATIC_3
 BROWSER_SUBNET=$BROWSER_SUBNET
 BROWSER_IP_RANGE=$BROWSER_IP_RANGE
-BROWSER_PROVIDER_IP=$BROWSER_STATIC_2
-BROWSER_GATE_IP=$BROWSER_STATIC_4
 WORKSTATION_ENTRY_SUBNET=$WORKSTATION_ENTRY_SUBNET
 WORKSTATION_ENTRY_IP_RANGE=$ENTRY_IP_RANGE
 WORKSTATION_ENTRY_EDGE_IP=$ENTRY_STATIC_2
@@ -260,8 +256,8 @@ check() {
   local status=0
   printf 'Workstation network %s (dynamic %s)\n' "$WORKSTATION_SUBNET" "$WORKSTATION_IP_RANGE"
   printf 'Browser network     %s (dynamic %s)\n' "$BROWSER_SUBNET" "$BROWSER_IP_RANGE"
-  printf 'Runtime %s, Provider %s/%s\n' \
-    "$WORKSTATION_RUNTIME_IP" "$WORKSTATION_PROVIDER_IP" "$BROWSER_PROVIDER_IP"
+  printf 'Runtime %s, Gateway MCP %s\n' \
+    "$WORKSTATION_RUNTIME_IP" "$WORKSTATION_PROVIDER_IP"
 
   if overlaps "$WORKSTATION_SUBNET" "$BROWSER_SUBNET"; then
     printf 'The workstation and browser subnets overlap\n' >&2

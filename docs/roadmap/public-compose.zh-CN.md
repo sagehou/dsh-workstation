@@ -10,11 +10,11 @@
 | --- | --- |
 | 已有代理网 | Gateway 的公开和校验监听器。Gateway 核对 Traefik 的确切来源 IP。 |
 | `workstation` | DSH 和官方 MCP。Traefik 和 Gateway 在这里连接 DSH。 |
-| `browser` | Chromium、输入门禁和要求凭据的 Provider 管理监听器。Traefik 转发 Selkies HTTP，Gateway 转发 WebSocket。 |
+| `browser` | Browser、Gateway 和 Traefik。Traefik 转发 Selkies HTTP，Gateway 转发 WebSocket。 |
 
-精简版常驻 Gateway 和 Runtime，共两个工作台容器。完整版增加 Chromium、Provider、CDP 中继和输入门禁，共六个。两种形态都复用已有 Traefik。已发布的 Auth 版本容器数相同。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态)
+## 三服务候选版
 
-CDP 中继与 Chromium 共用网络命名空间，通过专用 Unix socket 卷转发回环 CDP。中继写入 socket，Provider 只读挂载。Playwright 从 Provider 自己的回环监听器接入。拓扑无需自定义宿主机防火墙规则。
+完整版运行 `browser`、`gateway` 和 `runtime`，精简版运行 `gateway` 和 `runtime`。Provider 与输入门禁在 Gateway 内运行，LinuxServer 在 Browser 内启动 CDP 中继。中继写入 Unix socket，Gateway 只读挂载。两个清单均用 Compose v2.40.3 的 `config --services` 核对。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](../adr/0007-three-service-deployment.zh-CN.md)
 
 ### 在 GitHub Actions 复现
 
@@ -43,8 +43,10 @@ CONNECT 在两个版本上行为不同，探测按版本记录实际观察值：
 
 ### Gateway 候选版验证
 
+以下结果对应早期六容器 Gateway 候选版 `f57e92d`。
+
 - Go 1.27.3 的 `go test -race -v ./...` 通过。四组 `bash deploy/public/ci.sh` 使用 DSH 0.2.2-rc.1 与 Playwright 1.61.1，验证 HTTPS 登录、Passkey、会话恢复、Gateway 管理页、备份创建与校验和浏览器输入交接。[f57e92d 的 Public Compose](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100)
-- `bash deploy/public/ci-core.sh` 确认仅 Gateway 与 Runtime 在运行，真实 TOTP 登录可进入 DSH，已登录访问 `/browser/` 返回 503。独立的 `release-compose` 作业匿名拉取 `81feffd` 对应的已发布 Auth 镜像。[精简版作业](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [发布镜像作业](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+- `bash deploy/public/ci-core.sh` 确认仅 Gateway 与 Runtime 在运行，真实 TOTP 登录可进入 DSH，已登录的浏览器数据 WebSocket 握手返回 503。独立的 `release-compose` 作业匿名拉取 `81feffd` 对应的已发布 Auth 镜像。[精简版作业](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [发布镜像作业](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 - Chromium 156.0.8078.4 和 Playwright 1.61.1 使用测试数据渲染 Gateway 实际页面，验证桌面和窄屏布局、系统暗色、键盘操作、登录与备份校验反馈。[界面验收记录](https://github.com/sagehou/dsh-workstation/issues/35#issuecomment-7191691647)
 
 集成测试在 GitHub 托管运行器完成，界面实测使用本地测试数据。目标主机的验收仍待完成。[部署验收 Issue](https://github.com/sagehou/dsh-workstation/issues/6)

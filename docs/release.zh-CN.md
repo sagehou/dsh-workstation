@@ -2,9 +2,7 @@
 
 [English](release.md) · 简体中文
 
-当前源码为 GHCR 公开发布构建四个独立版本化的镜像，包括
-`dsh-workstation-runtime`、`dsh-workstation-gateway`、
-`dsh-workstation-provider` 和 `dsh-workstation-browser-gate`。
+当前源码构建 `dsh-workstation-runtime` 和 `dsh-workstation-gateway`，用于 GHCR 公开发布。Provider 和输入门禁随 Gateway 镜像发布。Compose 固定 LinuxServer Chromium 的上游摘要，并在启动时挂载同一提交的 CDP 中继。
 
 部署从不只引用标签。`deploy/public/images.env` 记录每个镜像的 manifest list
 摘要，`deploy/public/images.sh` 把摘要解析成
@@ -15,7 +13,7 @@
 
 `deploy/public/release-commit` 记录包含已发布摘要的部署提交，目前是 `81feffd`。该版本使用 Runtime 0.2.1、Auth 0.1.1、Provider 0.2.0 和 browser-gate 0.1.0。部署时配套使用该提交的 Compose 与初始化脚本。[发布镜像验证](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 
-Gateway 候选版的源码 CI 使用 Runtime 0.2.2、Gateway 0.1.0 和 Provider 0.2.1，三者仍待发布并记录摘要。browser-gate 0.1.0 已有摘要。[镜像清单](../deploy/public/images.env) · [Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway) · [跟踪 Issue](https://github.com/sagehou/dsh-workstation/issues/33)
+三服务候选版构建 Runtime 0.2.2 和 Gateway 0.1.0，两者仍待发布并记录摘要。[镜像清单](../deploy/public/images.env) · [Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway) · [跟踪 Issue](https://github.com/sagehou/dsh-workstation/issues/36)
 
 ## 保障链条
 
@@ -46,7 +44,7 @@ Gateway 候选版的源码 CI 使用 Runtime 0.2.2、Gateway 0.1.0 和 Provider 
 
 ## 发布步骤
 
-1. 在 `deploy/public/images.env` 中为本次要变更的镜像提升版本号，并清空其摘要——摘要在发布时填入。各镜像版本独立：Runtime 镜像随 Node 或启动脚本变化，门禁镜像按自己的节奏变化。
+1. 在 `deploy/public/images.env` 中给有变更的镜像提升版本号并清空摘要，发布后填入摘要。Runtime 与 Gateway 各自版本化。
 2. 合并该变更。
 3. 在 `main` 上运行 **Publish images**（`image: all`），或给发布源码提交创建新的 `v<版本>` 标签。`all` 只发布摘要为空的版本。
 

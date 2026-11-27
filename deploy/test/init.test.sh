@@ -83,13 +83,16 @@ pass 'repeated initialization preserves the CA, the certificate and every secret
 
 rm -- "$state/secrets/maintenance"
 printf 'WORKSTATION_AUTH_IMAGE=dsh-workstation-auth:0.1.1\nAUTH_IDLE=42m\n' >> .env.public
+printf 'WORKSTATION_PROVIDER_IMAGE=old-provider\nWORKSTATION_GATE_IMAGE=old-gate\nBROWSER_PROVIDER_IP=172.30.233.2\nBROWSER_GATE_IP=172.30.233.4\n' >> .env.public
 sed -i '/^WORKSTATION_GATEWAY_IMAGE=/d' .env.public
 sed -i 's/dsh-workstation-gateway/dsh-workstation-auth/g' "$state/edge/routes.yml"
 run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik
 (( status == 0 )) || fail "the gateway migration failed: $out"
 grep -q '^WORKSTATION_GATEWAY_IMAGE=dsh-workstation-gateway:' .env.public || fail 'the gateway image was not recorded'
-if grep -q '^WORKSTATION_AUTH_IMAGE=' .env.public; then fail 'the old image key survived'; fi
+if grep -Eq '^(WORKSTATION_(AUTH|PROVIDER|GATE)_IMAGE|BROWSER_(PROVIDER|GATE)_IP)=' .env.public; then
+  fail 'an obsolete service setting survived migration'
+fi
 grep -Fxq 'AUTH_IDLE=42m' .env.public || fail 'the saved session limit was lost'
 grep -Fq 'dsh-workstation-gateway-edge:8081/verify' "$state/edge/routes.yml" || fail 'ForwardAuth still uses the old alias'
 [[ $(stat -c '%s:%a' "$state/secrets/maintenance") == 64:444 ]] || fail 'missing or unreadable maintenance secret'
@@ -158,7 +161,7 @@ pass 'a conflict fails before the state directory exists'
 
 # --- 6. image references: local by default, digest-pinned with --release ---
 #
-# The two modes write the same four keys, so a deployment cannot end up with a
+# The two modes write the same keys, so a deployment cannot end up with a
 # mixture, and re-running with the other mode must replace them rather than
 # append a second copy that Compose would resolve inconsistently.
 workdir="$(scenario images)"
@@ -174,10 +177,10 @@ run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
 local_tag() { awk -v name="$1" '$1 == name { printf "dsh-workstation-%s:%s", name, $2 }' deploy/public/images.env; }
 grep -Fxq "WORKSTATION_RUNTIME_IMAGE=$(local_tag runtime)" .env.public ||
   fail 'the default mode did not record the local runtime tag'
-grep -Fxq "WORKSTATION_GATE_IMAGE=$(local_tag browser-gate)" .env.public ||
-  fail 'the default mode did not record the local gate tag'
+grep -Fxq "WORKSTATION_GATEWAY_IMAGE=$(local_tag gateway)" .env.public ||
+  fail 'the default mode did not record the local gateway tag'
 grep -q '@sha256:' .env.public && fail 'the default mode wrote a digest reference'
-pass 'without --release the four images are recorded as local build tags'
+pass 'without --release the two images are recorded as local build tags'
 
 # An unpublished image must stop the initializer instead of falling back to a
 # tag: that fallback is the mutable reference this whole mechanism removes.
@@ -186,7 +189,7 @@ pass 'without --release the four images are recorded as local build tags'
 # unpublished state is constructed here. Reading the checked-in file would make
 # this case depend on whether a release had run.
 cp -- deploy/public/images.env "$work/images-matrix-backup"
-for name in runtime gateway provider browser-gate; do
+for name in runtime gateway; do
   awk -v name="$name" '$1 == name { printf "%s %s\n", name, $2; next } { print }' \
     deploy/public/images.env > deploy/public/images.env.tmp
   mv deploy/public/images.env.tmp deploy/public/images.env
@@ -200,7 +203,7 @@ grep -Fxq "WORKSTATION_RUNTIME_IMAGE=$(local_tag runtime)" .env.public ||
 pass '--release refuses an unpublished image and leaves the recorded keys intact'
 
 # With digests recorded, every reference is registry-qualified and pinned.
-for name in runtime gateway provider browser-gate; do
+for name in runtime gateway; do
   awk -v name="$name" -v digest="$digest" '
     $1 == name { printf "%s %s %s\n", name, $2, digest; next } { print }
   ' deploy/public/images.env > deploy/public/images.env.tmp
@@ -209,13 +212,13 @@ done
 run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik --release
 (( status == 0 )) || fail "the release init failed: $out"
-for key in WORKSTATION_RUNTIME_IMAGE WORKSTATION_GATEWAY_IMAGE WORKSTATION_PROVIDER_IMAGE WORKSTATION_GATE_IMAGE; do
+for key in WORKSTATION_RUNTIME_IMAGE WORKSTATION_GATEWAY_IMAGE; do
   line="$(grep "^$key=" .env.public)"
   [[ $line == *'ghcr.io/sagehou/'*'@'$digest ]] || fail "$key is not a pinned GHCR reference: $line"
   count="$(grep -c "^$key=" .env.public || true)"
   [[ $count == 1 ]] || fail ".env.public has $count $key lines after switching modes"
 done
-pass '--release writes four digest-pinned references and replaces the local tags'
+pass '--release writes two digest-pinned references and replaces the local tags'
 
 # Switching back must replace them again, not append.
 run env WORKSTATION_STATE="$images_state" WORKSTATION_TRAEFIK_RESOLVER='' \

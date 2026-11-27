@@ -2,9 +2,7 @@
 
 English · [简体中文](release.zh-CN.md)
 
-The current source builds four images for public release on GHCR.
-`dsh-workstation-runtime`, `dsh-workstation-gateway`,
-`dsh-workstation-provider` and `dsh-workstation-browser-gate` are independently versioned.
+The current source builds `dsh-workstation-runtime` and `dsh-workstation-gateway` for public release on GHCR. Provider and the input gate ship inside Gateway. Compose pins the upstream LinuxServer Chromium image and mounts the checkout's CDP relay at startup.
 
 A deployment never references a tag alone. `deploy/public/images.env` records a
 manifest-list digest per image, and `deploy/public/images.sh` turns those into
@@ -18,9 +16,7 @@ published digests, currently `81feffd`. That deployment uses Runtime 0.2.1,
 Auth 0.1.1, Provider 0.2.0 and browser-gate 0.1.0. Use its Compose and initializer
 together. [Published deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 
-The Gateway candidate uses Runtime 0.2.2, Gateway 0.1.0 and Provider 0.2.1 in
-source CI. Their release digests are pending. Browser-gate 0.1.0 already has a
-digest. [Image inventory](../deploy/public/images.env) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service) · [Tracking issue](https://github.com/sagehou/dsh-workstation/issues/33)
+The three-service candidate builds Runtime 0.2.2 and Gateway 0.1.0. Their release digests are pending. [Image inventory](../deploy/public/images.env) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service) · [Tracking issue](https://github.com/sagehou/dsh-workstation/issues/36)
 
 ## What guarantees the chain
 
@@ -57,8 +53,7 @@ No repository secret is required: the workflow uses the automatic
 
 1. Bump the version for each image you are changing in
    `deploy/public/images.env`. Clear its digest — the release is what fills it
-   in. Versions are independent: the Runtime image changes with Node or the
-   launch script, the gate on its own schedule.
+   in. Runtime and Gateway versions are independent.
 2. Merge that change.
 3. Run **Publish images** from `main` (`image: all`), or create a new
    `v<version>` tag on the release source commit.

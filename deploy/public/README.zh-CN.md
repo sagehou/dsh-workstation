@@ -18,10 +18,10 @@
 
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
-| `WORKSTATION_SUBNET` | `172.30.241.0/24` | 内部网络上的 Runtime、Provider 和 Gateway。 |
-| `BROWSER_SUBNET` | `172.30.233.0/24` | Chromium、输入门禁和 Provider 的控制监听地址。 |
+| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime 和 Gateway 的认证 MCP 监听器。 |
+| `BROWSER_SUBNET` | `172.30.233.0/24` | Browser、Gateway 与 Traefik 到 Selkies 的连接。 |
 
-固定地址由子网推导。Runtime 和 Provider 在工作台网络使用 `.2` 和 `.3`，Provider 和输入门禁在浏览器网络使用 `.2` 和 `.4`。Docker 从子网的上半段分配动态地址，避免先启动的容器占用固定地址。
+Runtime 和 Gateway MCP 在工作台网络上使用 `.2` 和 `.3`。Docker 从两个子网的上半段分配动态地址。
 
 启动前先核对方案：
 
@@ -49,11 +49,11 @@ Runtime 证书按推导出的地址签发，因此在已有状态目录上用不
 | 形态 | 工作台常驻容器 | 服务 |
 | --- | ---: | --- |
 | **精简版（core）** | **2** | `gateway`、`runtime` |
-| **完整版（full，默认）** | **6** | `gateway`、`runtime`、`chromium`、`provider`、`cdp-relay`、`browser-gate` |
+| **完整版（full，默认）** | **3** | `gateway`、`runtime`、`browser` |
 
-两个形态都复用已有 Traefik。把 Traefik 容器计入，总数分别为 3 和 7。`gateway-admin` 和 `maintenance` 只在需要时通过 `docker compose run --rm --no-deps` 执行。
+两个形态都复用已有 Traefik。把 Traefik 容器计入，总数分别为 3 和 4。`gateway-admin` 和 `maintenance` 只在需要时通过 `docker compose run --rm --no-deps` 执行。
 
-精简版提供 DSH 和 Gateway，设置 `WORKSTATION_BROWSER_MCP=0` 和 `GATEWAY_BROWSER_ENABLED=0`。已登录时访问 `/browser/` 或 `/_auth/browser` 会返回 503。完整版增加共享浏览器。Chromium 的 `shm_size: 1gb` 是共享内存上限，两种形态在 2 GiB 主机上的内存用量仍待实测。[精简版集成验证](../../docs/roadmap/public-compose.zh-CN.md#gateway-候选版验证)
+精简版只启动 DSH 和 Gateway，Gateway 的浏览器进程关闭。已登录时访问 `/_auth/browser` 或建立浏览器数据 WebSocket 会返回 503。完整版在 Gateway 内运行 Provider 和输入门禁，Browser 内运行 Chromium、Selkies 和 CDP 中继。请随 Compose 文件保留同一提交中的 `browser/cdp-relay`，供 LinuxServer 启动。[三服务拓扑](../../docs/roadmap/public-compose.zh-CN.md#三服务候选版)
 
 在仓库根目录设置本次部署使用的 `COMPOSE_FILE`，后续所有 Compose 命令沿用该设置。完整版执行以下命令。
 
@@ -84,7 +84,7 @@ git switch --detach 81feffdb5607a28062d03f443d6ff47aeb206665 &&
 
 继续执行该提交中部署指南的第 2 步。[已发布版本的部署指南](https://github.com/sagehou/dsh-workstation/blob/81feffdb5607a28062d03f443d6ff47aeb206665/deploy/public/README.zh-CN.md#2-配置域名和-traefik)
 
-本页后续步骤适用于 Gateway 源码。若检出版本已记录 Gateway 的发布摘要，先用 `bash deploy/public/images.sh` 确认四个引用，再使用 `--release`。当前候选版可从源码构建，用 `bash deploy/public/images.sh --local` 查看构建标签。[发布状态](../../docs/release.zh-CN.md#当前部署版本)
+本页后续步骤适用于 Gateway 源码。若检出版本已记录 Gateway 的发布摘要，先用 `bash deploy/public/images.sh` 确认 Runtime 和 Gateway 的两个引用，再使用 `--release`。当前候选版可从源码构建，用 `bash deploy/public/images.sh --local` 查看构建标签。[发布状态](../../docs/release.zh-CN.md#当前部署版本)
 
 ### 2. 配置域名和 Traefik
 
@@ -100,7 +100,7 @@ WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencryp
   bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-`--release` 将四个固定摘要的引用写入 `.env.public`。从源码构建时省略 `--release`，然后在创建管理员前构建镜像。
+`--release` 将两个固定摘要的引用写入 `.env.public`。从源码构建时省略 `--release`，然后在创建管理员前构建镜像。
 
 ```bash
 docker compose --env-file .env.public build
@@ -152,7 +152,7 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 
 ## 使用浏览器
 
-> **首版发布门槛：** 首版正式浏览器入口是独立浏览器/控制页面。 [#4](https://github.com/sagehou/dsh-workstation/issues/4) 的已按住输入释放和独占交接验收通过前，不得在生产环境开放 Agent 浏览器控制。[#11](https://github.com/sagehou/dsh-workstation/issues/11) 的独立出口策略测试通过前，不得开放 Agent 广泛访问不可信网站。仅配置 `BROWSER_TOOL_ORIGINS` 不构成网络出口防火墙或完整 SSRF 防护。
+完整版提供独立浏览器页面。Agent MCP 默认关闭。生产环境在独占交接通过验收后开放 Agent 控制，在独立出口策略通过验收后开放不可信网站浏览。[交接 #4](https://github.com/sagehou/dsh-workstation/issues/4) · [出口 #11](https://github.com/sagehou/dsh-workstation/issues/11)
 
 
 | 要做什么 | 在哪里操作 |
@@ -160,9 +160,9 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 | 打开共享 Chromium | 从 `/_auth/browser` 打开同源的 `/browser/`，沿用工作台登录。 |
 | 让 Agent 使用标签页 | Agent 可以通过 `lease_status` 取得空闲租约，也可以在 `/mgmt/browser` 手动授予最长 120 秒的租约。`browser-gate` 确认已按住的输入释放后，才会移交控制权。 |
 | 接管浏览器 | 选择 **接管浏览器**。Provider 停止接收新调用，等待当前操作结束后交还控制。 |
-| 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Provider。 |
+| 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Gateway。 |
 
-Gateway 候选版中，Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。其他 DSH 会话的工具调用无法改变已有租约。`BROWSER_TOOL_ORIGINS` 为空或指定 `*` 时，工具层允许全部 HTTPS 源。配置来源清单后，它会约束工具调用和返回的页面文本。Chromium 仍会处理页面脚本和重定向，标签页共享 Cookie。[候选版行为](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
+MCP 启用时，Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。来源清单约束工具调用和返回的页面文本。浏览器网络出口由独立策略控制。[候选版租约行为](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
 
 连接或标签页丢失时，新建 DSH 会话并重新授权。要继续原来的对话，重启 Runtime、恢复对话，再给新连接授权。新标签页使用同一份 Chromium 配置。
 
@@ -173,10 +173,10 @@ Gateway 候选版中，Agent 先用 `mcp__browser__lease_status` 获取代次，
 不碰浏览器即可检查：
 
 ```sh
-docker compose --env-file .env.public exec -T provider node --input-type=module -e '
+docker compose --env-file .env.public exec -T gateway node --input-type=module -e '
   import { readFileSync } from "node:fs"
   const s = readFileSync("/run/secrets/gate_control", "utf8").trim()
-  const r = await fetch("http://dsh-workstation-browser-gate:8082/status", {
+  const r = await fetch(process.env.GATEWAY_BROWSER_UPSTREAM + "/status", {
     headers: { Authorization: "Bearer " + s },
   })
   console.log(await r.json())
@@ -196,10 +196,10 @@ docker compose --env-file .env.public exec -T provider node --input-type=module 
 
 ### 浏览器恢复
 
-如果 Provider 无法确认进行中的浏览器操作已经结束，它会拒绝给该 Chromium 进程再授权。可重建 Chromium 和中继，并保留浏览器配置卷和配置中的 hostname。
+如果 Provider 无法确认进行中的浏览器操作已经结束，它会拒绝给该 Chromium 进程再授权。可重建 Browser，沿用当前 hostname 和浏览器配置卷。
 
 ```bash
-docker compose --env-file .env.public up -d --no-build --force-recreate chromium cdp-relay
+docker compose --env-file .env.public up -d --no-build --force-recreate browser
 ```
 
 Provider 会尝试自动重连。如果 Chromium 已就绪而控制页仍显示 `DISCONNECTED`，选择 **连接浏览器**。
@@ -218,7 +218,7 @@ Provider 会尝试自动重连。如果 Chromium 已就绪而控制页仍显示 
 
 ### DSH 版本
 
-Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。完整版通过官方 Plugin Manager 将 Workstation 浏览器 Bundle 安装到持久化 Web Profile。Runtime 和 Profile 安装均禁用包生命周期脚本。Bundle 使用已验证的 DSH 版本。
+Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。启用 Agent MCP 时，Runtime 通过官方 Plugin Manager 将 Workstation 浏览器 Bundle 安装到持久化 Web Profile。Runtime 和 Profile 安装均禁用包生命周期脚本。Bundle 使用已验证的 DSH 版本。
 
 更改 Profile 或版本前备份 DSH_HOME。对公网 Compose 执行维护命令时使用 `--env-file .env.public`。版本回滚只切换 npm 安装，已迁移的数据需要从匹配的备份还原。[Runtime 维护命令](../README.zh-CN.md#升级与回滚)
 
@@ -232,9 +232,11 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。完整版通过官方 Plu
 
 ### 从 auth 迁移到 Gateway
 
-1. 用 `bash deploy/public/images.sh` 确认目标版本能解析全部四个镜像摘要。停服备份 `auth-data` 卷和 `.workstation/`。用原来的 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，保留命名卷。
+这组步骤也适用于从六容器 Gateway 候选版迁移。
+
+1. 用 `bash deploy/public/images.sh` 确认目标版本能解析两个镜像摘要。停服备份 `auth-data` 卷和 `.workstation/`。用原来的 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，保留命名卷。这会先释放旧 Provider 的固定地址，供 Gateway 使用。
 2. 在原部署中切换到目标版本，沿用域名、状态目录、代理网络及 Traefik 选项重跑带 `--release` 的初始化。用新生成的 `routes.yml` 替换 Traefik 工作台路由文件，使其指向 `dsh-workstation-gateway-edge`。
-3. 使用 `up -d --no-build --wait` 启动。Gateway 会用原 `auth-key` 打开原 `auth-data` SQLite 卷。用已有账户测试登录、`/mgmt` 和完整部署的 `/browser/`。
+3. 使用 `up -d --no-build --wait` 启动。Gateway 会用原 `auth-key` 打开原 `auth-data` SQLite 卷。Browser 复用原 hostname 和配置卷，Provider 复用原状态卷。用已有账户测试登录、`/mgmt` 和完整部署的 `/browser/`。
 
 旧 `AUTH_*` 会话设置继续生效，优先读取新的 `GATEWAY_*`。如需回退，先停止新栈，再用原提交的初始化脚本恢复旧镜像引用和路由。原 `dsh-workstation-auth` 镜像留在旧发行版中。
 

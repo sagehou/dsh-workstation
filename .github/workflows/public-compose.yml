@@ -15,6 +15,7 @@ on:
       - prototypes/m0/provider/*.mjs
       - prototypes/m0/provider/recorder.js
       - .dockerignore
+      - browser/**
       - browser-gate/**
       - compose.yml
       - deploy/public/**
@@ -32,6 +33,7 @@ on:
       - prototypes/m0/provider/*.mjs
       - prototypes/m0/provider/recorder.js
       - .dockerignore
+      - browser/**
       - browser-gate/**
       - compose.yml
       - deploy/public/**
@@ -199,13 +201,13 @@ jobs:
         run: |
           set -o pipefail
           bash deploy/public/ci.sh 2>&1 | tee "evidence/public-compose${EVIDENCE_SUFFIX}.log"
-      - name: Package the four workstation images
+      - name: Package the two workstation images
         run: |
           set -euo pipefail
           # The tags come from the same resolver a deployment uses, so the
           # archive cannot drift from the naming scheme.
           mapfile -t images < <(bash deploy/public/images.sh --local | sed -n 's/^[^=]*=//p')
-          (( ${#images[@]} == 4 )) || { echo 'expected four images' >&2; exit 1; }
+          (( ${#images[@]} == 2 )) || { echo 'expected two images' >&2; exit 1; }
           # This archive is audit evidence, not a distribution channel: releases
           # are pulled from GHCR by digest (see deploy/public/images.env).
           docker save "${images[@]}" |
@@ -373,7 +375,7 @@ jobs:
             fi
             printf '\n## Core deployment shape\n\n'
             if [[ "$CORE" == success ]]; then
-              printf '`deploy/public/compose.core.yml` started `gateway` and `runtime` only, left the browser Bundle uninstalled, and answered `/browser/` with a `503` from the core path. No browser service ran.\n'
+              printf '`deploy/public/compose.core.yml` started `gateway` and `runtime` only, left the browser Bundle uninstalled, and answered the browser data WebSocket with a `503` from the core path. No browser service ran.\n'
             else
               printf 'The `core-shape` leg reported `%s`. The core deployment has **not** been shown to work.\n' "$CORE"
             fi

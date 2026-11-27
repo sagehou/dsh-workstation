@@ -15,7 +15,7 @@ DSH Workstation 是围绕官方 DSH 应用的自托管部署、安全、浏览�
 | Runtime 镜像 | 提供 Node.js、固定版本 pnpm、Git/SSH、CA 证书和常用原生构建工具。DSH npm 安装保存在持久化存储，由专用 CLI/API 管理。 |
 | Runtime 管理器 | 写操作持锁。每个确切版本独立安装，验证后原子切换指针，检查启动，失败则回滚。数据迁移必须有匹配的备份/恢复路径。 |
 | DSH Profile | 由官方 CLI 和 Plugin Manager 管理。沿用固定版本目录结构，将 DSH_HOME 放在同一文件系统，让 pnpm 链接可访问 Store。 |
-| Go Gateway | 提供认证、浏览器控制和运维入口。唯一管理员的数据存入 SQLite WAL。通过 Runtime 执行备份和校验，通过 Provider 管理浏览器控制权。 |
+| Go Gateway | 提供认证、浏览器控制和运维入口。管理员的数据存入 SQLite WAL，通过 Runtime 执行备份和校验。Gateway 容器也运行 Provider 和输入门禁。 |
 | 浏览器 Provider | 接收官方 MCP 调用，每次操作验证与会话绑定的租约和代次，通过 CDP 连接 Chromium。只开放明确批准的工具。 |
 | Chromium 和 Selkies | 使用一个 Chromium 进程和一份持久化配置。人工通过 Selkies 操作，Provider 自动化控制同一个浏览器。 |
 | 浏览器输入门禁 | 代理 Selkies 数据 WebSocket，并在 Provider 变更控制权前确认释放已按住的输入。 |
@@ -24,21 +24,30 @@ DSH Workstation 是围绕官方 DSH 应用的自托管部署、安全、浏览�
 
 ## 公网 Compose 网络
 
-精简版常驻 `gateway` 和 `runtime`。完整版增加 `chromium`、`provider`、`cdp-relay` 和 `browser-gate`。两种形态都复用工作台 Compose 项目之外的 Traefik。[服务清单](../deploy/public/README.zh-CN.md#选择部署形态)
+精简版常驻 `gateway` 和 `runtime`，完整版增加 `browser`。两种形态都复用工作台 Compose 项目之外的 Traefik。[服务清单](../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](adr/0007-three-service-deployment.zh-CN.md)
 
 ```mermaid
 flowchart LR
+    subgraph GatewayContainer["Gateway 容器"]
+        Gateway["Go Gateway"]
+        Provider["浏览器 Provider"]
+        Gate["浏览器输入门禁"]
+    end
+    subgraph BrowserContainer["Browser 容器"]
+        Browser["Chromium 和 Selkies"]
+        Relay["CDP 中继"]
+    end
     Person["单一使用者"] -->|"HTTPS"| Edge["已有 Traefik"]
-    Edge -->|"ForwardAuth 和 WebSocket"| Gateway["Go Gateway"]
+    Edge -->|"ForwardAuth 和 WebSocket"| Gateway
     Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
-    Edge -->|"桌面 HTTP"| Browser["Chromium 和 Selkies"]
-    Gateway -->|"租约管理"| Provider["浏览器 Provider"]
+    Edge -->|"桌面 HTTP"| Browser
+    Gateway -->|"租约管理"| Provider
     Gateway -->|"组件状态和备份"| DSH
-    Gateway -->|"Selkies 数据 WebSocket"| Gate["浏览器输入门禁"]
+    Gateway -->|"Selkies 数据 WebSocket"| Gate
     Gate -->|"Selkies 输入和视频"| Browser
     Provider -->|"确认释放输入"| Gate
     DSH -->|"官方 MCP"| Provider
-    Provider -->|"Unix socket"| Relay["CDP 中继"]
+    Provider -->|"Unix socket"| Relay
     Relay -->|"Chromium 回环"| Browser
 ```
 
@@ -46,11 +55,11 @@ flowchart LR
 | --- | --- |
 | 已有代理网 | Traefik 与 Gateway。Gateway 的公开和校验监听器绑定在这张网，并验证可信 Traefik 对端。 |
 | `workstation` | Runtime、MCP 监听器，以及 Traefik 和 Gateway 连接 DSH 的路径。 |
-| `browser` | Chromium、输入门禁、Provider 管理监听器，以及 Traefik 和 Gateway 连接 Selkies 的路径。 |
+| `browser` | Browser、Traefik 和 Gateway，承载 Selkies 的 HTTP 和 WebSocket。 |
 
-中继与 Chromium 共用网络命名空间。仅中继和 Provider 挂载 CDP socket 卷。Gateway 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[已验证拓扑](roadmap/public-compose.zh-CN.md)
+Browser 写入私有 CDP socket，Gateway 只读挂载。输入门禁和 Provider 管理端口只绑定 Gateway 回环。Gateway 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[拓扑和 CI](roadmap/public-compose.zh-CN.md)
 
-两个子网均可配置。`deploy/network.sh` 从 `WORKSTATION_SUBNET` 与 `BROWSER_SUBNET` 推导子网定义、动态 `ip_range`、固定地址、健康检查目标和 Runtime 证书 SAN。固定端点使用 `.2` 至 `.4`，Docker 从子网的上半段分配动态地址，避免先启动的容器占用固定地址。
+两个子网均可配置。`deploy/network.sh` 推导工作台网络上 Runtime 和 MCP 的 `.2`、`.3` 地址、Runtime 证书 SAN 和子网的上半段动态地址池。浏览器网络上的地址均动态分配。
 
 `deploy/network.sh check` 在初始化脚本创建任何资源之前运行，遇到与宿主机路由或现有 Docker 网络重叠时拒绝执行，且不创建、不修改任何东西。默认路由被有意排除：它覆盖所有地址，而 Docker 更具体的子网路由优先。若状态目录记录的子网与请求的不一致，会拒绝而不是静默重签内部 CA，因为 Runtime 证书按推导地址签发；`--reissue` 才是有意的路径。
 
@@ -63,7 +72,7 @@ flowchart LR
 | `/_auth/` | 登录和账户界面及 API。这些路由不经过自己的 ForwardAuth。 |
 | `/mgmt` | 经过会话认证的 Gateway 控制台，提供 Runtime 状态、备份与校验、浏览器控制和账户设置。 |
 | 内部校验端点 | Go Gateway，只信任配置的 Traefik 对端。 |
-| Provider 管理 | 仅限浏览器私网，绝不作为未认证公网路由。 |
+| Provider 管理 | 仅限 Gateway 回环，通过内部管理员凭据校验。 |
 
 按确切上游版本验证子路径、响应头、CSP、WebSocket 和登录行为。
 
@@ -111,9 +120,9 @@ flowchart LR
 
 ## 发布和部署
 
-- Runtime、DSH npm、Gateway、Provider、Workstation 插件（正式发布时）和 Chromium 分别版本化。
+- Runtime、DSH npm、Gateway、Workstation 插件（正式发布时）和 Chromium 分别版本化。
 - CI 必须覆盖实际部署 Traefik 版本范围，包括目标补丁版本；较新 CI 版本通过不能证明较旧部署版本兼容。
-- 将自有 Runtime、Gateway、Provider 和 browser-gate 镜像发布到 GHCR，使用不可变版本标签和 digest。保留可复现构建证据和校验和。
+- Runtime 和 Gateway 按不可变版本标签及摘要发布到 GHCR。Provider 与输入门禁随 Gateway 发布。保留可复现构建证据和校验和。
 - 首版只支持 Linux amd64。镜像和全栈测试覆盖前不得宣称支持 ARM64。
 - DSH 和 Gateway 不挂载 Docker socket。采用最小权限、可行时只读文件系统、非 root 用户、健康检查和明确的密钥管理。
 

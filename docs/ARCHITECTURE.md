@@ -15,7 +15,7 @@ The first release is single-user: one local administrator, one DSH_HOME, one wor
 | Runtime image | Provides Node.js, pinned pnpm, Git/SSH, CA certificates, and common native build tools. DSH npm installations live in persistent storage and are managed by a dedicated CLI/API. |
 | Runtime manager | Locks mutations, installs each exact release in its own directory, validates it, switches the current pointer atomically, checks startup, and rolls back on failure. Data migrations require a matched backup/restore path. |
 | DSH Profile | Managed by the official CLI and Plugin Manager. Use the pinned release's directory structure and one DSH_HOME filesystem so pnpm links can reach the store. |
-| Go Gateway | Hosts authentication, browser controls and the operations console. Stores the single administrator's state in SQLite WAL. Calls the Runtime for backups and archive checks and the Provider for browser control. |
+| Go Gateway | Hosts authentication, browser controls and the operations console. Stores administrator state in SQLite WAL. Calls Runtime for backups and archive checks. Its container also runs the Provider and input gate. |
 | Browser Provider | Receives official MCP calls, validates the session-bound lease and generation for every operation, and attaches to Chromium over CDP. Only explicitly approved tools are exposed. |
 | Chromium and Selkies | One Chromium process and one persistent profile. Selkies handles human interaction, and the Provider automates the same browser. |
 | Browser input gate | Proxies the Selkies data WebSocket and confirms held input is released before Provider changes control. |
@@ -24,21 +24,30 @@ The first release is single-user: one local administrator, one DSH_HOME, one wor
 
 ## Public Compose networks
 
-Core runs `gateway` and `runtime`. Full adds `chromium`, `provider`, `cdp-relay`, and `browser-gate`. Both reuse Traefik from outside the Workstation Compose project. [Service inventory](../deploy/public/README.md#choose-a-deployment-shape)
+Core runs `gateway` and `runtime`. Full adds `browser`. Both reuse Traefik from outside the Workstation Compose project. [Service inventory](../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](adr/0007-three-service-deployment.md)
 
 ```mermaid
 flowchart LR
+    subgraph GatewayContainer["Gateway container"]
+        Gateway["Go Gateway"]
+        Provider["Browser Provider"]
+        Gate["Browser input gate"]
+    end
+    subgraph BrowserContainer["Browser container"]
+        Browser["Chromium and Selkies"]
+        Relay["CDP relay"]
+    end
     Person["Single operator"] -->|"HTTPS"| Edge["Existing Traefik"]
-    Edge -->|"ForwardAuth and WebSockets"| Gateway["Go Gateway"]
+    Edge -->|"ForwardAuth and WebSockets"| Gateway
     Edge -->|"DSH HTTPS"| DSH["DSH Runtime"]
-    Edge -->|"Desktop HTTP"| Browser["Chromium and Selkies"]
-    Gateway -->|"Lease management"| Provider["Browser Provider"]
+    Edge -->|"Desktop HTTP"| Browser
+    Gateway -->|"Lease management"| Provider
     Gateway -->|"Inventory and backups"| DSH
-    Gateway -->|"Selkies data WebSocket"| Gate["Browser input gate"]
+    Gateway -->|"Selkies data WebSocket"| Gate
     Gate -->|"Selkies input and video"| Browser
     Provider -->|"Confirm input release"| Gate
     DSH -->|"Official MCP"| Provider
-    Provider -->|"Unix socket"| Relay["CDP relay"]
+    Provider -->|"Unix socket"| Relay
     Relay -->|"Chromium loopback"| Browser
 ```
 
@@ -46,11 +55,11 @@ flowchart LR
 | --- | --- |
 | Existing proxy | Traefik and Gateway. Gateway binds its public and verify listeners here and verifies the expected Traefik peer. |
 | `workstation` | Runtime, the MCP listener, and the Traefik and Gateway connections to DSH. |
-| `browser` | Chromium, the input gate, the Provider management listener, and Traefik and Gateway connections to Selkies. |
+| `browser` | Browser, Traefik and Gateway. Selkies HTTP and WebSockets travel here. |
 
-The relay shares Chromium's network namespace. Only the relay and Provider mount the CDP socket volume. Gateway forwards DSH and Selkies WebSockets and checks the live session. [Tested topology](roadmap/public-compose.md)
+Browser writes the private CDP socket and Gateway mounts it read-only. The input gate and Provider control listeners use Gateway loopback. Gateway forwards DSH and Selkies WebSockets and checks the live session. [Topology and CI](roadmap/public-compose.md)
 
-Both subnets are configurable. `deploy/network.sh` derives the subnet definitions, dynamic `ip_range`, static addresses, health-check destinations, and Runtime certificate SAN from `WORKSTATION_SUBNET` and `BROWSER_SUBNET`. Static endpoints use offsets `.2`–`.4`. Docker assigns dynamic addresses from the upper half so it cannot allocate a static service address while starting containers.
+Both subnets are configurable. `deploy/network.sh` derives static Runtime and MCP addresses at offsets `.2` and `.3` on the workstation network, the Runtime certificate SAN, and the upper-half dynamic ranges. Browser-network addresses use dynamic allocation.
 
 `deploy/network.sh check` runs before the initializer creates anything and refuses on an overlap with a host route or an existing Docker network. It creates and modifies nothing. The default route is excluded by design: it covers every address and Docker's more specific subnet route wins. A state directory whose recorded subnets differ from the requested ones is refused rather than silently reissuing the internal CA, because the Runtime certificate is issued for the derived address; `--reissue` is the deliberate path.
 
@@ -63,7 +72,7 @@ Both subnets are configurable. `deploy/network.sh` derives the subnet definition
 | `/_auth/` | Login and account UI/API. These routes are exempt from their own ForwardAuth. |
 | `/mgmt` | Gateway console for the authenticated administrator. Runtime inventory, backup and archive checks, browser control, and account settings. |
 | Internal verification endpoint | Go Gateway, which trusts only the configured Traefik peer. |
-| Provider management | Private browser network only; never a public unauthenticated route. |
+| Provider management | Gateway loopback with the internal administrator credential. |
 
 Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior against the exact upstream versions.
 
@@ -111,9 +120,9 @@ Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior 
 
 ## Releases and deployment
 
-- Version Runtime, DSH npm, Gateway, Provider, Workstation plugin (when shipped), and Chromium independently.
+- Version Runtime, DSH npm, Gateway, Workstation plugin (when shipped), and Chromium independently.
 - CI must test the deployed Traefik compatibility range, including the actual target patch version; a passing newer CI version does not establish compatibility with an older deployment.
-- Publish project-owned Runtime, Gateway, Provider, and browser-gate images to GHCR using immutable version tags and digests. Keep reproducible build evidence and checksums.
+- Publish Runtime and Gateway to GHCR using immutable version tags and digests. Provider and the input gate ship in Gateway. Keep reproducible build evidence and checksums.
 - Initial support is Linux amd64. Do not claim ARM64 support until images and full-stack tests cover it.
 - Keep the Docker socket out of DSH and Gateway. Use least privilege, read-only filesystems where practical, non-root users, health checks, and explicit secret handling.
 

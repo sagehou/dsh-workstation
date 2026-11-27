@@ -10,11 +10,11 @@ The owner approved a single-administrator public Compose release. The authentica
 | --- | --- |
 | Existing proxy | Gateway's public and verification listeners. Gateway checks the exact Traefik source IP. |
 | `workstation` | DSH and official MCP. Traefik and Gateway reach DSH here. |
-| `browser` | Chromium, the input gate, and the credential-protected Provider management listener. Traefik reaches Selkies over HTTP and Gateway forwards the WebSockets. |
+| `browser` | Browser, Gateway and Traefik. Traefik reaches Selkies over HTTP and Gateway forwards its WebSockets. |
 
-Core starts two workstation containers, Gateway and Runtime. Full starts six by adding Chromium, Provider, the CDP relay and the input gate. Both reuse external Traefik. The published Auth deployment uses the same service counts. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape)
+## Three-service candidate
 
-The CDP relay shares Chromium's network namespace. It forwards loopback CDP over a dedicated Unix socket volume. The relay writes the socket, and the Provider mounts the volume read-only. Playwright attaches via the Provider's own loopback listener. The topology requires no custom host firewall rules.
+Full starts `browser`, `gateway` and `runtime`. Core starts `gateway` and `runtime`. Provider and the input gate run inside Gateway, and LinuxServer starts the CDP relay inside Browser. The relay writes the Unix socket and Gateway mounts it read-only. Both shapes were verified with Compose v2.40.3 using `config --services`. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](../adr/0007-three-service-deployment.md)
 
 ### Reproduce on GitHub Actions
 
@@ -43,8 +43,10 @@ CONNECT behaves differently across the matrix, and the probe records the observe
 
 ### Gateway candidate verification
 
+The following results are from the earlier six-container Gateway candidate at `f57e92d`.
+
 - Go 1.27.3 ran `go test -race -v ./...`. All four `bash deploy/public/ci.sh` jobs passed on DSH 0.2.2-rc.1 and Playwright 1.61.1. The probes covered HTTPS sign-in, Passkey, existing-session restore, Gateway management pages, backup creation and verification, and browser input handoff. [Public Compose at f57e92d](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100)
-- `bash deploy/public/ci-core.sh` verified that only Gateway and Runtime were running, that a real TOTP login reached DSH, and that a signed-in request to `/browser/` returned 503. The separate `release-compose` job pulled the published Auth images for `81feffd` anonymously. [Core job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [Published-image job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+- `bash deploy/public/ci-core.sh` verified that only Gateway and Runtime were running, that a real TOTP login reached DSH, and that the signed-in browser data WebSocket returned 503. The separate `release-compose` job pulled the published Auth images for `81feffd` anonymously. [Core job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [Published-image job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 - Gateway pages were rendered with Chromium 156.0.8078.4 and Playwright 1.61.1 using fixture data. Desktop, narrow viewport, system dark mode, keyboard controls, authentication and archive feedback were verified. [Gateway UI evidence](https://github.com/sagehou/dsh-workstation/issues/35#issuecomment-7191691647)
 
 These runs used GitHub-hosted runners or local test fixtures. The deployment-host acceptance remains open. [Deployment issue](https://github.com/sagehou/dsh-workstation/issues/6)

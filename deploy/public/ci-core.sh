@@ -80,22 +80,8 @@ compose build gateway runtime
 # for the given files and profiles.
 run_services="$(compose config --services | sort | tr '\n' ' ')"
 printf 'Services that would start: %s\n' "$run_services"
-# `compose config --services` lists services that are not profiled out, which
-# includes the ones gated behind the `maintenance` profile (gateway-admin,
-# maintenance). Those do not start on `up`; only gateway and runtime do. This
-# assertion is about the *set*, so it checks for absence of the browser stack and
-# presence of the two services rather than an exact string.
-for n in browser-gate chromium cdp-relay provider fixture; do
-  case " $run_services " in
-    *" $n "*) echo "FAIL: $n would start in the core shape" >&2; exit 1 ;;
-  esac
-done
-for n in gateway runtime; do
-  case " $run_services " in
-    *" $n "*) ;;
-    *) echo "FAIL: $n is missing from the core run set" >&2; exit 1 ;;
-  esac
-done
+[[ $run_services == 'gateway runtime ' ]] ||
+  { echo "FAIL: unexpected core service set: $run_services" >&2; exit 1; }
 echo "Core run set excludes the browser stack: $run_services"
 
 if ! compose config --format json | node -e '

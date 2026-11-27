@@ -1,6 +1,17 @@
 **
 !provider/
 !provider/package*.json
+!provider/cdp.mjs
+!gateway/
+gateway/**
+!gateway/Dockerfile
+!gateway/*.go
+!gateway/go.mod
+!gateway/go.sum
+!gateway/pages.html
+!gateway/style.css
+!gateway/*.js
+!gateway/start.sh
 !prototypes/
 !prototypes/m0/
 !prototypes/m0/provider/

@@ -24,7 +24,6 @@ for expected in \
   'WORKSTATION_PROVIDER_IP=172.30.241.3' \
   'BROWSER_SUBNET=172.30.233.0/24' \
   'BROWSER_IP_RANGE=172.30.233.128/25' \
-  'BROWSER_PROVIDER_IP=172.30.233.2' \
   'WORKSTATION_ENTRY_SUBNET=172.30.244.0/24' \
   'WORKSTATION_ENTRY_EDGE_IP=172.30.244.2'; do
   grep -Fxq "$expected" <<<"$out" || fail "missing default $expected in: $out"
@@ -40,7 +39,7 @@ node -e '
   const want = {
     WORKSTATION_SUBNET: "172.30.241.0/24",
     WORKSTATION_RUNTIME_IP: "172.30.241.2",
-    BROWSER_PROVIDER_IP: "172.30.233.2",
+    WORKSTATION_PROVIDER_IP: "172.30.241.3",
   }
   for (const [key, value] of Object.entries(want)) {
     if (values[key] !== value) throw Error(`${key} is ${values[key]}, expected ${value}`)
@@ -53,7 +52,6 @@ run env WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 bash dep
 (( status == 0 )) || fail "custom derive failed: $out"
 grep -Fxq 'WORKSTATION_RUNTIME_IP=10.71.241.2' <<<"$out" || fail 'the runtime IP did not follow the subnet'
 grep -Fxq 'WORKSTATION_PROVIDER_IP=10.71.241.3' <<<"$out" || fail 'the provider IP did not follow the subnet'
-grep -Fxq 'BROWSER_PROVIDER_IP=10.71.233.2' <<<"$out" || fail 'the browser provider IP did not follow the subnet'
 grep -Fxq 'WORKSTATION_IP_RANGE=10.71.241.128/25' <<<"$out" || fail 'the dynamic range did not follow the subnet'
 pass 'a custom subnet moves the static addresses and the dynamic range together'
 
@@ -153,27 +151,26 @@ check_binding() {
   local file=$1 pattern=$2 why=$3
   grep -qE "$pattern" "$file" || fail "$file does not $why"
 }
-check_binding compose.yml 'PROVIDER_IP: \$\{WORKSTATION_PROVIDER_IP' 'bind the provider to the derived workstation address'
-check_binding compose.yml 'PROVIDER_CONTROL_IP: \$\{BROWSER_PROVIDER_IP' 'bind the provider control listener to the derived browser address'
-check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_PROVIDER_IP' 'assign the provider its derived workstation address'
-check_binding compose.yml 'ipv4_address: \$\{BROWSER_PROVIDER_IP' 'assign the provider its derived browser address'
+check_binding compose.yml 'PROVIDER_IP: \$\{WORKSTATION_PROVIDER_IP' 'bind MCP to the derived workstation address'
+check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_PROVIDER_IP' 'assign Gateway its derived workstation address'
 check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_RUNTIME_IP' 'assign the runtime its derived address'
 check_binding compose.yml 'DSH_BIND_IP: \$\{WORKSTATION_RUNTIME_IP' 'bind the runtime to its derived address'
 check_binding compose.yml 'subnet: \$\{WORKSTATION_SUBNET' 'derive the workstation subnet'
 check_binding compose.yml 'subnet: \$\{BROWSER_SUBNET' 'derive the browser subnet'
-check_binding compose.yml 'http://\$\{BROWSER_PROVIDER_IP:-[0-9]' 'probe the derived provider address'
+check_binding compose.yml 'PROVIDER_CONTROL_IP: 127\.0\.0\.1$' 'keep the provider control listener on loopback'
+check_binding compose.yml 'GATE_ADDR: 127\.0\.0\.1:8082$' 'keep the input gate on loopback'
 # The provider reads these from its environment; the code must not carry its own.
 grep -q 'process.env.PROVIDER_IP' prototypes/m0/provider/server.mjs ||
   fail 'the provider does not read PROVIDER_IP from its environment'
 grep -q 'process.env.PROVIDER_CONTROL_IP' prototypes/m0/provider/server.mjs ||
   fail 'the provider does not read PROVIDER_CONTROL_IP from its environment'
-# Gateway calls the provider's control listener at an address Compose derives.
+# Gateway calls the provider's loopback control listener.
 if grep -q '"http://172\.30\.[0-9]' gateway/workstation.go; then
   fail 'gateway still calls the provider by a literal address'
 fi
 grep -q 'providerControlAddr' gateway/workstation.go ||
   fail 'gateway does not read the provider control address from configuration'
-check_binding compose.yml 'GATEWAY_PROVIDER_CONTROL_ADDR: \$\{BROWSER_PROVIDER_IP' 'give gateway the derived provider control address'
+check_binding compose.yml 'GATEWAY_PROVIDER_CONTROL_ADDR: 127\.0\.0\.1:8081$' 'use the loopback control address'
 check_binding gateway/main.go 'gatewayEnv\("PROVIDER_CONTROL_ADDR"' 'read the provider control address from its environment'
 pass 'every consumer takes its address from the derivation'
 
@@ -207,7 +204,7 @@ node --input-type=module -e '
   import { execFileSync } from "node:child_process"
   import { readFileSync } from "node:fs"
   const derived = JSON.parse(execFileSync("bash", ["deploy/network.sh", "derive", "--json"], { encoding: "utf8" }))
-  const pattern = /\$\{(WORKSTATION_(?:SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)|BROWSER_(?:SUBNET|IP_RANGE|PROVIDER_IP|GATE_IP)):-([^}]*)\}/g
+  const pattern = /\$\{(WORKSTATION_(?:SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)|BROWSER_(?:SUBNET|IP_RANGE)):-([^}]*)\}/g
   let checked = 0
   const bad = []
   for (const file of ["compose.yml", "compose.preview.yml"]) {
