@@ -1,34 +1,14 @@
-# Core deployment: DSH and Auth only, without the shared browser.
+# Core deployment: DSH and Gateway only, without the shared browser.
 #
-# Use this on a host that cannot carry the browser stack, or while Agent browser
-# control is not approved yet. It is not an equivalent substitute for the full
-# deployment: with this file the operator has no /browser/ page and no Agent
-# browser tools. See docs/roadmap/development-roadmap.md and issue #26.
+# Use this when the workstation only needs DSH and Gateway. The browser
+# container and the Gateway browser workers are both disabled. See issue #26.
 #
 #   full:  docker compose -f compose.yml --env-file .env.public up -d
 #   core:  docker compose -f compose.yml -f deploy/public/compose.core.yml \
 #            --env-file .env.public up -d
 #
-# The mechanism is `profiles`. A service that has any profile does not start
-# unless that profile is requested, so assigning every browser service the
-# `browser` profile removes it from this file's default set. `compose.yml`
-# itself carries no profiles, which is what keeps the full deployment's
-# behaviour identical to before this file existed.
-#
-# Everything listed here is a service this file must exclude, and nothing else.
-# `runtime` and `auth` are absent on purpose: they have no `depends_on` pointing
-# at the browser stack, so they start without it. Adding a browser dependency to
-# either one later breaks this file silently, which is why the core CI leg
-# asserts both services become healthy rather than only that `up` succeeded.
-
 services:
-  browser-gate:
-    profiles: ["browser"]
-  chromium:
-    profiles: ["browser"]
-  cdp-relay:
-    profiles: ["browser"]
-  provider:
+  browser:
     profiles: ["browser"]
 
   # Without this, the Runtime still installs the Workstation browser Bundle into
@@ -39,11 +19,10 @@ services:
     environment:
       WORKSTATION_BROWSER_MCP: "0"
 
-  # Auth keeps running, but must not proxy /browser/ to an address that nothing
-  # listens on: that surfaces as a stalled WebSocket instead of an answer.
-  auth:
+  gateway:
     environment:
-      AUTH_BROWSER_ENABLED: "0"
+      # Disable both browser workers and the Gateway browser proxy.
+      GATEWAY_BROWSER_ENABLED: "0"
 
   # compose.ci.yml adds `fixture` for the full-stack legs. It belongs to the
   # browser side of the stack, so a core run must not start it either.

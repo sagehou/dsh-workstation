@@ -11,10 +11,21 @@ node deploy/check-preview.mjs
 compose exec -T runtime sh -ec 'printf preview > /workspace/.persistence'
 first="$(compose ps -q runtime)"
 image="$(docker inspect --format '{{.Image}}' "$first")"
-if tool backup; then
-  echo 'Offline maintenance was allowed while DSH was serving' >&2
-  exit 1
-fi
+# Exercise the lock across the Runtime and the independent maintenance container.
+backup="$(tool backup)"
+id="$(sed -n 's/^Backup id: //p' <<<"$backup")"
+test -n "$id"
+tool check "$id"
+for action in upgrade select rollback restore; do
+  target=0.2.2-rc.5
+  if [[ $action == restore ]]; then target="$id"; fi
+  if output="$(tool "$action" "$target" 2>&1)"; then
+    echo "$action was allowed while DSH was serving" >&2
+    exit 1
+  fi
+  grep -F 'runtime is serving or being modified' <<<"$output"
+done
+tool status | grep -Fx 'Active: 0.2.2-rc.1'
 
 compose stop runtime
 tool install 0.2.2-rc.5
@@ -32,4 +43,4 @@ node deploy/check-preview.mjs
 test "$(compose exec -T runtime cat /workspace/.persistence)" = preview
 test "$(compose ps -q runtime)" != "$first"
 test "$(docker inspect --format '{{.Image}}' "$(compose ps -q runtime)")" = "$image"
-echo 'Preview: maintenance lock, version switch, rollback and recreation on one image'
+echo 'Preview: online backup and verification, offline maintenance enforced, version switch, rollback and recreation on one image'

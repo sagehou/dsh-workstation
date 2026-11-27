@@ -2,7 +2,7 @@
 
 English · [简体中文](README.zh-CN.md)
 
-For one trusted user on a trusted host with Docker Engine 28+ and Compose v2. Traefik publishes port 3080 on host loopback. Browser interaction is manual. For a public domain, use the [authenticated HTTPS stack](public/README.md).
+For one trusted user on a trusted host with Docker Engine 28+ and Compose v2. Three services stay running: `runtime`, `chromium`, and Traefik (`edge`). Traefik publishes port 3080 on host loopback. Browser interaction is manual. For a public domain, use the [authenticated HTTPS stack](public/README.md).
 
 ## 1. Load the image and start
 
@@ -139,7 +139,7 @@ preview run --rm --no-deps maintenance restore 20260101T120000Z.a1b2c3d4e5f6
 preview up -d --no-build --wait --wait-timeout 360 runtime
 ```
 
-A restore replaces every top-level entry of DSH_HOME except `runtime` and `pnpm`, so the installed versions, the pnpm store and the audit log survive it. It does not touch the workspace, Chromium profile, or Auth database: restore those from their own backups when the migration affected them.
+A restore replaces every top-level entry of DSH_HOME except `runtime` and `pnpm`, so the installed versions, the pnpm store and the audit log survive it. Restore the workspace, Chromium profile and, for a public deployment, Gateway's SQLite volume from their own backups when affected.
 
 Record the observed outcome in the deployment log. `preview run --rm --no-deps maintenance audit` prints the transaction trail (`start`, `switched`, `verified`, `pointer-rollback`, `restored`, `script-approved`) with no credentials.
 

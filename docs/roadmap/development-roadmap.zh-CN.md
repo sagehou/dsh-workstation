@@ -26,6 +26,11 @@
 | 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8、#9 和 #10。#4 通过前关闭 Agent 浏览器控制；#11 通过前关闭不可信网站浏览。 |
 | 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | 浏览器出口策略和 SSRF 边界 | 开放 Agent 广泛访问不可信网站前完成。 |
 | 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | `main` 分支的 CI 覆盖 | 在相信「合并后的树就是被测试过的树」之前完成；#6 从 main 部署。 |
+| 09 | [#26](https://github.com/sagehou/dsh-workstation/issues/26) | 无共享浏览器的精简部署 | 两服务配置与 HTTPS 登录已验证。 |
+| 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent 优先租约、浏览器出口加固及录制 | 自动取得租约已通过源码 Compose 验证。出口和录制仍待验收。 |
+| 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | 运维控制台、Gateway 改名及界面 | 控制台和认证已通过源码 CI。Gateway 镜像仍待发布，目标主机迁移仍待验证。 |
+| 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | 完整部署收敛为三个容器 | Runtime、Gateway 和 Browser。验证 CDP 隔离、浏览器重建及已有登录和租约流程。 |
+| 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | 共用一张工作台网络 | 直连边界、证书保留及 Agent MCP 启用时的浏览器交接均已通过。[Compose 验证](public-compose.zh-CN.md#共享网络验证) |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | DSH 原生 Browser Sidebar | 延后增强；独立页面持续可用，不阻塞首版。 |
 
 ## 发布门槛
@@ -36,7 +41,7 @@
 - 目标主机 Docker 子网冲突预检和配置通过。
 - 单管理员初始化、密码+TOTP、Passkey、会话撤销和恢复可用。
 - DSH 和独立浏览器页面可经现有 Traefik 域名访问。
-- DSH_HOME、工作区、浏览器配置、Auth DB、Provider 状态和密钥均有经过测试的备份/恢复流程。
+- DSH_HOME、工作区、浏览器配置、Gateway SQLite、Provider 状态和密钥均有经过测试的备份/恢复流程。
 - 不宣称多用户隔离或 ARM64 支持。
 
 ### Gate B — 安全的 Agent 浏览器控制
@@ -91,6 +96,6 @@
 
 [#23 — `main` 分支的 CI 覆盖](https://github.com/sagehou/dsh-workstation/issues/23) 补上了本交接此前略过而非修掉的缺口：在此之前没有任何 workflow 在 `main` 上触发，`?branch=main` 返回 **零** 次运行。每个 PR 都在自己的分支上通过，所以这不是「把坏代码发了出去」，但绿色的 PR 并不证明合并后的树是绿的——squash、冲突解决、或两个各自通过的 PR 交互后失败，都不会被任何运行发现，而真正被部署的正是那个提交。`Public Compose` 与 `M1 private preview` 现在也在 `main` 上运行；`Publish images` 仍限于 `v*` 标签或手动触发，因此 main 推送无法发布任何镜像。M0 的两个 workflow 去掉了 `push` 触发，因为它们监听的 `m0/issue-1` 分支已不存在——它们仍可手动触发，这样 M0 证据依旧可复现，又不会把原型作业塞进每次 main 运行。
 
-下一项是 [#6 — 目标主机部署、HTTPS、备份/恢复与恢复演练](https://github.com/sagehou/dsh-workstation/issues/6)。它的四项依赖（#3、#8、#9、#10）均已完成，除了一台主机之外没有别的阻塞。Agent 浏览器控制在 #4 剩余矩阵实测前保持关闭，不可信站点浏览在 #11 完成前保持关闭。
+已发布的 Auth 版本支持双容器精简部署。目标主机仍需验收 Traefik 兼容性、子网预检、HTTPS 和备份恢复。[部署验收 #6](https://github.com/sagehou/dsh-workstation/issues/6)
 
-首版界面使用独立浏览器页面。Sidebar #5 明确延期。
+Gateway 和新版控制台在 PR #34。候选版允许 Agent 自动取得租约，清单为空时浏览器工具允许所有 HTTPS 源。生产部署按上面的发布门槛验收。首版界面使用独立浏览器页面。[PR #34](https://github.com/sagehou/dsh-workstation/pull/34) · [Compose 验证](public-compose.zh-CN.md#gateway-候选版验证) · [发布状态](../release.zh-CN.md#当前部署版本) · [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md)

@@ -35,7 +35,7 @@ traefik_ip="$(docker inspect --type container --format "{{with index .NetworkSet
   exit 1
 }
 
-# Every address below is derived from the two configured subnets. Nothing is
+# Every workstation address is derived from its configured subnet. Nothing is
 # created before the preflight passes, so a conflict cannot leave a half-built
 # state directory or a new Docker network behind.
 derived="$(bash deploy/network.sh derive)" || exit 1
@@ -55,21 +55,19 @@ if [[ -e $state || -e .env.public ]]; then
   # no longer matches the address Compose assigns, so the mismatch is refused
   # rather than silently reissued. `--reissue` is the deliberate path.
   saved_subnet="$(sed -n 's/^WORKSTATION_SUBNET=//p' .env.public)"
-  saved_browser="$(sed -n 's/^BROWSER_SUBNET=//p' .env.public)"
-  # A state directory created before derivation has no recorded subnets. It
+  # A state directory created before derivation has no recorded subnet. It
   # keeps its certificate and simply gains the derived keys, because the
-  # default subnets are what it was created with.
-  if [[ -n $saved_subnet && -n $saved_browser &&
-        ( $saved_subnet != "$WORKSTATION_SUBNET" || $saved_browser != "$BROWSER_SUBNET" ) ]]; then
+  # default subnet is what it was created with.
+  if [[ -n $saved_subnet && $saved_subnet != "$WORKSTATION_SUBNET" ]]; then
     if ! $reissue; then
       cat >&2 <<EOF
-The saved subnets differ from the requested ones:
+The saved workstation subnet differs from the requested one.
 
-  saved:    workstation $saved_subnet, browser $saved_browser
-  requested: workstation $WORKSTATION_SUBNET, browser $BROWSER_SUBNET
+  saved:     $saved_subnet
+  requested: $WORKSTATION_SUBNET
 
-The Runtime certificate was issued for $WORKSTATION_RUNTIME_IP. Reissuing it
-replaces the internal CA, which every service trusts, so this is deliberate:
+The Runtime certificate is tied to the saved Runtime address. To issue a new
+certificate for $WORKSTATION_RUNTIME_IP and replace the internal CA, run:
 
   bash deploy/public/init.sh <domain> <proxy> <traefik> --reissue
 
@@ -125,8 +123,8 @@ elif [[ ${reissue_runtime_pki:-false} == true ]]; then
   issue_runtime_pki
 fi
 
-# Resolve the four self-built images once, before anything is written. In
-# release mode a missing digest is fatal: silently falling back to a local tag
+# Resolve the two self-built images once. In release mode a missing digest is
+# fatal: silently falling back to a local tag
 # is exactly the mutable reference #10 exists to remove.
 # Capture, then split: a failing process substitution inside `while` does not
 # fail the loop, so the resolver's status has to be checked directly.
@@ -137,20 +135,26 @@ else
 fi
 images=()
 while IFS= read -r line; do images+=("$line"); done <<< "$images_text"
-(( ${#images[@]} == 4 )) || {
-  echo "Expected four images from the resolver, got ${#images[@]}." >&2
+(( ${#images[@]} == 2 )) || {
+  echo "Expected two images from the resolver, got ${#images[@]}." >&2
   exit 1
 }
 image_keys=()
 for line in "${images[@]}"; do
   case ${line%%=*} in
     runtime) image_keys+=("WORKSTATION_RUNTIME_IMAGE=${line#*=}") ;;
-    auth) image_keys+=("WORKSTATION_AUTH_IMAGE=${line#*=}") ;;
-    provider) image_keys+=("WORKSTATION_PROVIDER_IMAGE=${line#*=}") ;;
-    browser-gate) image_keys+=("WORKSTATION_GATE_IMAGE=${line#*=}") ;;
+    gateway) image_keys+=("WORKSTATION_GATEWAY_IMAGE=${line#*=}") ;;
     *) echo "Unexpected image in the resolver: ${line%%=*}" >&2; exit 1 ;;
   esac
 done
+
+# Older installations have no maintenance secret. Publish it once without
+# changing the saved keys or certificates, including under repeated init.
+if [[ ! -e $state/secrets/maintenance ]]; then
+  openssl rand -hex 32 | tr -d '\n' > "$staging/maintenance"
+  chmod 0444 "$staging/maintenance"
+  ln -T -- "$staging/maintenance" "$state/secrets/maintenance" || [[ -s $state/secrets/maintenance ]]
+fi
 
 if $fresh; then
   {
@@ -161,7 +165,7 @@ else
   # Rewrite the derived keys from the current configuration instead of carrying
   # the old ones forward: a stale subnet in .env.public would disagree with the
   # certificate the initializer just issued.
-  sed -E '/^(WORKSTATION_(EDGE_UID|EDGE_GID|PROXY_NETWORK|TRAEFIK_IP|SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP|RUNTIME_IMAGE|AUTH_IMAGE|PROVIDER_IMAGE|GATE_IMAGE)|BROWSER_(SUBNET|IP_RANGE|PROVIDER_IP)|ACME_EMAIL)=/d' \
+  sed -E '/^(WORKSTATION_(EDGE_UID|EDGE_GID|PROXY_NETWORK|TRAEFIK_IP|SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP|RUNTIME_IMAGE|AUTH_IMAGE|GATEWAY_IMAGE|PROVIDER_IMAGE|GATE_IMAGE)|BROWSER_(SUBNET|IP_RANGE|PROVIDER_IP|GATE_IP)|ACME_EMAIL)=/d' \
     .env.public > "$staging/env"
   printf '%s\n' "$derived" >> "$staging/env"
 fi

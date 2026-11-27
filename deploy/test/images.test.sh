@@ -32,8 +32,8 @@ check_status() {
   if [[ $actual == "$expected" ]]; then pass "$label"; else fail "$label: expected exit $expected, got $actual"; fi
 }
 
-# Every image is listed exactly once, and the four names match compose.yml.
-check 'lists four images' 'runtime auth provider browser-gate' "$(bash "$resolver" --names | tr '\n' ' ' | sed 's/ $//')"
+# Every project-owned image is listed exactly once.
+check 'lists two images' 'runtime gateway' "$(bash "$resolver" --names | tr '\n' ' ' | sed 's/ $//')"
 
 # `--local` produces the development tags that compose.yml builds, for the
 # version the matrix currently names. Deriving it keeps this check from breaking
@@ -108,10 +108,10 @@ set -e
 check_status 'unknown image name is refused' 1 "$status"
 
 # Restore the tracked matrix first: the cases above deliberately rewrite it, and
-# the check below is about compose.yml against the real four images.
+# the check below compares compose.yml against the real images.
 cp -- "$work_matrix_backup" "$matrix"
 
-# --- compose.yml must consume exactly these four keys ---
+# --- compose.yml must consume exactly these keys ---
 #
 # The resolver and the Compose file are the two halves of one contract. If a key
 # is renamed on one side only, the deployment silently falls back to the local
@@ -120,9 +120,7 @@ cp -- "$work_matrix_backup" "$matrix"
 # there for an image the resolver does not publish.
 declare -A expected_keys=(
   [runtime]=WORKSTATION_RUNTIME_IMAGE
-  [auth]=WORKSTATION_AUTH_IMAGE
-  [provider]=WORKSTATION_PROVIDER_IMAGE
-  [browser-gate]=WORKSTATION_GATE_IMAGE
+  [gateway]=WORKSTATION_GATEWAY_IMAGE
 )
 compose=compose.yml
 [[ -f $compose ]] || fail 'compose.yml is missing'

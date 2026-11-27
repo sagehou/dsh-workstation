@@ -91,6 +91,11 @@ try {
     await page.waitForURL('**/_auth/login?*')
     await page.getByLabel('用户名').fill('operator')
     await page.getByLabel('密码', { exact: true }).fill(password())
+    const reveal = page.getByRole('button', { name: '显示密码' })
+    await reveal.click()
+    assert.equal(await page.locator('#password').getAttribute('type'), 'text')
+    await reveal.click()
+    assert.equal(await page.locator('#password').getAttribute('type'), 'password')
     await submit(page, '验证密码', '/_auth/password')
     await page.waitForURL('**/_auth/totp?*')
     assert.equal(await page.locator('[name=password]').count(), 0)
@@ -116,6 +121,29 @@ try {
     await writeFile('/ci-state/passkey.json', JSON.stringify(credentials[0]), { mode: 0o600 })
     await context.storageState({ path: '/ci-state/browser.json' })
     console.log('WebAuthn: native browser registration with a resident, user-verified credential')
+
+    await page.goto(root + '/mgmt')
+    await page.getByRole('heading', { name: '控制台', exact: true }).waitFor()
+    await page.getByRole('rowheader', { name: 'Gateway', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '可用 DSH 版本', exact: true }).waitFor()
+    await page.getByRole('link', { name: '备份', exact: true }).click()
+    await submit(page, '创建备份', '/mgmt/runtime')
+    await page.waitForURL('**/mgmt/backup')
+    const archive = page.getByRole('row').nth(1)
+    const id = await archive.getByRole('cell').first().innerText()
+    assert.match(id, /^[0-9]{8}T[0-9]{6}Z\.[0-9a-f]{12}$/)
+    await archive.getByRole('cell', { name: '0.2.2-rc.1', exact: true }).waitFor()
+    await page.getByLabel('备份 ID').selectOption(id)
+    await submit(page, '校验备份', '/mgmt/runtime', 200)
+    assert.equal(await page.getByRole('status').innerText(), '备份校验通过。')
+    const wideViewport = page.viewportSize()
+    await page.setViewportSize({ width: 390, height: 844 })
+    assert.equal(await page.locator('nav [aria-current="page"]').innerText(), '备份')
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'backup page overflows on mobile')
+    await page.setViewportSize(wideViewport)
+    await page.getByRole('link', { name: '浏览器', exact: true }).click()
+    await page.getByRole('heading', { name: '浏览器控制', exact: true }).waitFor()
+    console.log('Gateway: authenticated management routes, online backup, archive verification and browser controls')
   }
 
   if (phase === 'browser') {
@@ -177,18 +205,16 @@ try {
     const first = (await rpc('session/create', { cwd: '/workspace' })).sessionId
     const second = (await rpc('session/create', { cwd: '/workspace' })).sessionId
     assert.ok(first && second && first !== second)
-    assert.equal(await send(first, 'before', 'lease_status'), 'NO_LEASE')
-    assert.equal(await send(second, 'before2', 'lease_status'), 'NO_LEASE')
-    await action('将标签页交给 Agent', first)
+    assert.equal(await send(first, 'without', 'navigate', { generation: 'expired', url: 'https://fixture.test/alpha' }), 'NO_LEASE')
     const generation = await send(first, 'lease1', 'lease_status')
-    assert.match(generation, /^[a-f0-9-]{36}:\d+$/)
-    assert.equal(await send(second, 'other', 'navigate', { generation, url: 'https://fixture.test/beta' }), 'NOT_OWNER')
-    assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
+    assert.match(generation, /^[a-f0-9-]{36}:\d+$/, 'the Agent did not obtain a lease on its own')
     assert.equal(await send(first, 'open1', 'navigate', { generation, url: 'https://fixture.test/alpha' }), 'OK')
+    assert.equal(await send(second, 'other', 'navigate', { generation, url: 'https://fixture.test/beta' }), 'NOT_OWNER')
+    assert.equal(await send(second, 'lease-blocked', 'lease_status'), 'NOT_OWNER')
+    assert.equal(await send(first, 'blocked', 'navigate', { generation, url: 'http://127.0.0.1:9223/json/version' }), 'ORIGIN_NOT_ALLOWED')
     assert.equal(await send(first, 'read1', 'read', { generation }), 'WTAB_ALPHA')
 
-    // #4 on the real Selkies instance: a human presses and holds a pointer
-    // button on the live desktop, then hands the tab to the Agent.
+    // A human holds a pointer button on the live desktop during automatic acquisition.
     //
     // The desk below is the operator's own Selkies session reached through the
     // input gate, authorised by the real token table. The press is a real
@@ -210,7 +236,7 @@ try {
     await desk.evaluate(protocol => {
       // Speak the data protocol directly, which is how the page drives the
       // desktop and what makes a client-side toggle irrelevant here.
-      const ws = new WebSocket('wss://' + location.host + '/browser/api/websockets', ['selkies', protocol])
+      const ws = new WebSocket('wss://' + location.host + '/browser/api/websockets/', ['selkies', protocol])
       window.ciDesk = { ws, mk: null }
       ws.addEventListener('open', () => ws.send('SETTINGS,' + JSON.stringify({
         displayId: 'primary', tabId: 'ci-hold', encoder: 'jpeg',
@@ -230,14 +256,7 @@ try {
     await desk.evaluate(() => window.ciDesk.ws.send('m,320,240,1,0'))
     await wait(700)
 
-    // Hand the tab over while the button is still down. The Provider refuses
-    // the lease when its handover fails, so reaching AGENT here already means
-    // the gate proved a release on this socket.
-    //
-    // `first` already has a bound tab from the earlier lease, and the control
-    // page marks that in the option label -- picking the bare session id would
-    // time out rather than hand anything over.
-    await action('将标签页交给 Agent', first + ' · 已绑定')
+    // The Provider grants the lease only after the gate confirms release.
     const heldGeneration = await send(first, 'lease-held', 'lease_status')
     assert.match(heldGeneration, /^[a-f0-9-]{36}:\d+$/,
       'the grant was refused over a socket holding a button, so no release was proven')
@@ -250,7 +269,7 @@ try {
     // prove nothing at all.
     assert.ok(downs >= 1, 'the press never reached the Agent tab, so this proves nothing: ' + held)
     assert.ok(ups >= downs, 'the desktop was left mid-press by the handover: ' + held)
-    console.log('Held pointer: a button pressed and held on the real desktop was released at the Selkies boundary before the Agent took the tab')
+    console.log('Held pointer: automatic acquisition released the real Selkies press before the Agent took the tab')
     await desk.close()
 
     // The other direction: a client that disappears while still holding the

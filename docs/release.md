@@ -2,15 +2,21 @@
 
 English · [简体中文](release.zh-CN.md)
 
-The four images this repository builds are published to GHCR as **public**
-packages: `dsh-workstation-runtime`, `dsh-workstation-auth`,
-`dsh-workstation-provider` and `dsh-workstation-browser-gate` (built from
-`browser-gate/`).
+The current source builds `dsh-workstation-runtime` and `dsh-workstation-gateway` for public release on GHCR. Provider and the input gate ship inside Gateway. Compose pins the upstream LinuxServer Chromium image and mounts the checkout's CDP relay and Selkies access script at startup.
 
 A deployment never references a tag alone. `deploy/public/images.env` records a
 manifest-list digest per image, and `deploy/public/images.sh` turns those into
 `ghcr.io/sagehou/<name>:<version>@sha256:...` references. A missing digest is an
 error, so there is no code path from that file to a floating tag.
+
+## Current deployment
+
+The `deploy/public/release-commit` file records the commit with the
+published digests, currently `81feffd`. That deployment uses Runtime 0.2.1,
+Auth 0.1.1, Provider 0.2.0 and browser-gate 0.1.0. Use its Compose and initializer
+together. [Published deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+
+The three-service candidate builds Runtime 0.2.2 and Gateway 0.1.0. Their release digests are pending. [Image inventory](../deploy/public/images.env) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service) · [Tracking issue](https://github.com/sagehou/dsh-workstation/issues/36)
 
 ## What guarantees the chain
 
@@ -23,7 +29,7 @@ error, so there is no code path from that file to a floating tag.
 | Provenance travels with the image | `provenance: mode=max` and `sbom: true` attach attestations to the digest, not to the Actions run. |
 | The published tag is the one a deployment reads | The resolver supplies the image name in both the workflow and the initializer. |
 | `latest` cannot be deployed | The resolver only accepts `X.Y.Z`, and no workflow produces a `latest` tag. |
-| The images really are public | The `record` job pulls every recorded digest with no login. A package accidentally left private fails the run. |
+| The images really are public | The `record` job pulls each newly published digest with no login. The deployment CI checks the full set. |
 
 ## One-time setup (repository administrator)
 
@@ -47,38 +53,39 @@ No repository secret is required: the workflow uses the automatic
 
 1. Bump the version for each image you are changing in
    `deploy/public/images.env`. Clear its digest — the release is what fills it
-   in. Versions are independent: the Runtime image changes with Node or the
-   launch script, the gate on its own schedule.
+   in. Runtime and Gateway versions are independent.
 2. Merge that change.
-3. Run **Publish images** from `main` (`image: all`), or create a tag
-   `v<version>` — for example `v0.2.0` — to mark the release point.
+3. Run **Publish images** from `main` (`image: all`), or create a new
+   `v<version>` tag on the release source commit.
+   The `all` selection publishes the versions with empty digests.
 
-   A `v*` tag names the **repository's** release point, not a shared image
-   version. The four images are versioned independently, so a tag `v0.2.0` may
-   publish `runtime:0.2.0`, `auth:0.1.1`, `provider:0.2.0` and
-   `browser-gate:0.1.0`. That is intentional: forcing one number would couple
-   unrelated changes. The tag is useful because it marks which source commit a
-   set of digests came from, and the generated release notes list all four.
+   Each image has its own version. The tag identifies the build source, and the
+   workflow records the image references by digest.
 4. Download the `published-images` artifact, verify the digests against
    `docker buildx imagetools inspect`, and commit the updated
    `deploy/public/images.env`.
 
-Step 5 is deliberate: the workflow cannot commit, so a person confirms the
-digests before they become what deployments pin. The run summary lists the
-references ready to paste.
+5. Update `deploy/public/release-commit` to the full SHA of the deployment commit
+   with those digests, and check the `release-compose` job. The job uses that
+   commit's Compose and probes and pulls its exact images anonymously.
+
+The old `dsh-workstation-auth` image remains available for the older deployment.
+See [the Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service).
 
 ## Verifying a published image
 
-```bash
-# The digest the resolver will deploy.
-bash deploy/public/images.sh --field digest runtime
+Run the checks from the deployment commit for the release you are verifying.
 
-# What the registry reports for that tag. The two must match exactly.
-docker buildx imagetools inspect \
-  ghcr.io/sagehou/dsh-workstation-runtime:0.2.1 --format '{{json .Manifest.Digest}}'
+```bash
+resolved="$(bash deploy/public/images.sh runtime)" &&
+  image="${resolved#*=}"
+
+# The recorded digest and the registry's digest for that tag must match.
+printf '%s\n' "${image#*@}"
+docker buildx imagetools inspect "${image%@*}" --format '{{json .Manifest.Digest}}'
 
 # An anonymous pull, which is what a deployment host does.
-docker pull ghcr.io/sagehou/dsh-workstation-runtime:0.2.1@sha256:...
+docker pull "$image"
 ```
 
 ## Platform
@@ -97,7 +104,7 @@ channel and the install guide no longer uses it.
 
 | Check | Evidence |
 | --- | --- |
-| A digest reference pulls and runs | CI publishes a build to a loopback registry, resolves `localhost:<port>/name:version@sha256:...` through the real resolver, removes the local tags and pulls it back, then inspects the image ID. The `release-compose` job also pulls the four real GHCR digests with no credential, builds nothing, and passes the same stack checks. |
+| A digest reference pulls and runs | CI tests the resolver against a loopback registry. The `release-compose` artifact records the published digests, matching deployment commit and end-to-end result. |
 | Upgrade follows a new digest | A second build under a new version produces a distinct digest, and the resolver follows it. |
 | Rollback restores exactly the earlier image | Restoring the first digest pulls back an image whose ID equals the original pull. |
 | A missing digest fails rather than drifting to a tag | The resolver, its 18 shell checks and the initializer all fail. Verified by temporarily making the resolver fall back to a tag, which made three resolver checks and the `--release` initializer check fail. |

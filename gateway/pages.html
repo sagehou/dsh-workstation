@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRF}}">
+  <title>{{.Title}} · DSH Workstation</title>
+  <link rel="stylesheet" href="/_auth/style.css">
+  {{if or (eq .View "login") (eq .View "account")}}
+  <script src="/_auth/passkey.js" defer></script>
+  <script src="/_auth/ui.js" defer></script>
+  {{end}}
+</head>
+{{$signIn := or (eq .View "login") (eq .View "totp") (eq .View "recovery")}}
+<body class="{{if $signIn}}auth-page{{else}}workspace{{end}}">
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  {{if $signIn}}
+  <header class="auth-brand">
+    {{template "brand"}}
+    <div class="auth-art" aria-hidden="true">
+      <span class="art-shadow"></span>
+      <span class="art-layer"></span>
+      <span class="art-layer"></span>
+      <span class="art-layer"></span>
+    </div>
+  </header>
+  {{else}}
+  {{template "rail" .}}
+  {{end}}
+  <main id="main" tabindex="-1" class="{{if $signIn}}auth-main{{else}}workspace-main{{end}}">
+    <div class="{{if $signIn}}auth-inner{{else}}workspace-inner{{end}}">
+      <header class="page-heading">
+        <h1>{{.Title}}</h1>
+        {{if and (eq .View "control") .BrowserEnabled}}
+        <a href="/_auth/browser" target="_blank" rel="noopener" class="button primary">打开浏览器 <span class="arrow" aria-hidden="true">↗</span></a>
+        {{else if eq .View "codes"}}
+        <details class="hint">
+          <summary aria-label="保存恢复码提示"><span aria-hidden="true">i</span></summary>
+          <p class="hint-bubble">恢复码只显示这一次。</p>
+        </details>
+        {{end}}
+      </header>
+      {{template "feedback" .}}
+      {{if $signIn}}{{template "sign-in" .}}
+      {{else if eq .View "operations"}}{{template "overview" .}}
+      {{else if eq .View "backup"}}{{template "backup" .}}
+      {{else if eq .View "control"}}{{template "browser" .}}
+      {{else if eq .View "account"}}{{template "account" .}}
+      {{else}}{{template "account-task" .}}
+      {{end}}
+    </div>
+  </main>
+</body>
+</html>
+
+{{define "brand"}}
+<span class="brand"><span class="brand-mark" aria-hidden="true"></span><span>DSH Workstation</span></span>
+{{end}}
+
+{{define "rail"}}
+<header class="rail">
+  {{template "brand"}}
+  <nav class="rail-nav" aria-label="控制台">
+    <a href="/mgmt"{{if eq .View "operations"}} aria-current="page"{{end}}><span class="icon icon-overview" aria-hidden="true"></span>概览</a>
+    {{if .BrowserEnabled}}<a href="/mgmt/browser"{{if eq .View "control"}} aria-current="page"{{end}}><span class="icon icon-browser" aria-hidden="true"></span>浏览器</a>{{end}}
+    <a href="/mgmt/backup"{{if eq .View "backup"}} aria-current="page"{{end}}><span class="icon icon-backup" aria-hidden="true"></span>备份</a>
+    <a href="/mgmt/account"{{if eq .View "account"}} aria-current="page"{{end}}><span class="icon icon-account" aria-hidden="true"></span>账户</a>
+  </nav>
+  <a class="rail-exit" href="/_auth/dsh">打开 DSH <span class="arrow" aria-hidden="true">↗</span></a>
+</header>
+{{end}}
+
+{{define "feedback"}}
+{{if .Error}}
+<div class="feedback error" role="alert">
+  <span>{{.Error}}</span>
+  {{if .ErrorDetail}}
+  <details class="hint">
+    <summary aria-label="查看错误详情"><span aria-hidden="true">i</span></summary>
+    <pre class="hint-bubble">{{.ErrorDetail}}</pre>
+  </details>
+  {{end}}
+</div>
+{{end}}
+{{if .Notice}}<p class="feedback success" role="status">{{.Notice}}</p>{{end}}
+{{end}}
+
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
+
+{{define "sign-in"}}
+{{if eq .View "login"}}
+<form class="form-stack" action="/_auth/password" method="post">
+  {{template "csrf" .CSRF}}
+  <input type="hidden" name="next" value="{{.Next}}">
+  <div class="field">
+    <label for="username">用户名</label>
+    <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" enterkeyhint="next" required maxlength="64">
+  </div>
+  <div class="field">
+    <label for="password">密码</label>
+    <div class="field-with-action">
+      <input type="password" id="password" name="password" autocomplete="current-password" required maxlength="256">
+      <button data-reveal type="button" aria-controls="password" aria-pressed="false" hidden>显示密码</button>
+    </div>
+  </div>
+  <button class="button primary" type="submit">验证密码</button>
+</form>
+<button class="button passkey-button" type="button" data-passkey="login" data-next="{{.Next}}" hidden>用 Passkey 登录</button>
+<p id="passkey-status" class="feedback error" role="status" hidden></p>
+{{else}}
+<form class="form-stack" action="/_auth/{{.View}}" method="post">
+  {{template "csrf" .CSRF}}
+  <input type="hidden" name="next" value="{{.Next}}">
+  <div class="field">
+    {{if eq .View "totp"}}
+    <label for="code">动态验证码</label>
+    <input class="otp" id="code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+    {{else}}
+    <label for="code">恢复码</label>
+    <input class="mono" id="code" name="code" autocapitalize="none" spellcheck="false" maxlength="24" required>
+    {{end}}
+  </div>
+  <button class="button primary" type="submit">登录</button>
+</form>
+<nav class="auth-actions" aria-label="登录方式">
+  <a href="/_auth/login?next={{.Next}}">返回登录</a>
+  {{if eq .View "totp"}}<a href="/_auth/recovery?next={{.Next}}">使用恢复码</a>{{end}}
+</nav>
+{{end}}
+{{end}}
+
+{{define "overview"}}
+<div class="dashboard">
+  <section class="panel runtime-card" aria-labelledby="runtime-title">
+    <span class="runtime-art" aria-hidden="true"></span>
+    <div class="runtime-content">
+      <h2 id="runtime-title">活动 DSH 版本</h2>
+      {{if .Runtime.Active}}<p class="active-version">{{.Runtime.Active}}</p>
+      {{else if .Runtime.ReadError}}<p class="active-version no-version">状态不可用</p>
+      {{else}}<p class="active-version no-version">未选择</p>{{end}}
+      {{if .Runtime.ReadError}}
+      <p class="runtime-detail" role="alert">无法读取 Runtime 状态。</p>
+      {{else}}
+      <dl class="runtime-meta">
+        <div><dt>已安装</dt><dd>{{len .Runtime.Installed}} 个版本</dd></div>
+        {{if .Runtime.Previous}}<div><dt>上一个版本</dt><dd><code>{{.Runtime.Previous}}</code></dd></div>{{end}}
+      </dl>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="panel browser-card" aria-labelledby="browser-title">
+    <div class="panel-heading">
+      <h2 id="browser-title">浏览器控制</h2>
+      {{if .BrowserEnabled}}<a class="icon-link" href="/mgmt/browser" aria-label="管理浏览器"><span aria-hidden="true">↗</span></a>{{end}}
+    </div>
+    <dl class="browser-metrics">
+      <div><dt>控制权</dt><dd>{{if .ProviderOK}}{{template "browser-state" .Control.State}}{{else if .BrowserEnabled}}<span class="status muted">状态不可用</span>{{else}}<span class="status muted">未启用</span>{{end}}</dd></div>
+      <div><dt>活动 DSH 会话</dt><dd class="metric">{{if .ProviderOK}}{{len .Control.Peers}}{{else}}—{{end}}</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel components-card" aria-labelledby="components-title">
+    <div class="panel-heading"><h2 id="components-title">组件版本</h2></div>
+    <table class="data-table component-table" aria-labelledby="components-title">
+      <thead><tr><th scope="col">组件</th><th scope="col">状态与版本</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Gateway</th><td><span class="status success">运行中</span></td></tr>
+        {{range .Components.Rows}}
+        {{if ne .Key "dsh-active"}}<tr><th scope="row">{{componentLabel .Key}}</th><td><code>{{.Value}}</code></td></tr>{{end}}
+        {{end}}
+      </tbody>
+    </table>
+    {{if .Components.Error}}<p class="panel-message feedback error" role="alert">无法读取 Runtime 组件版本。</p>{{end}}
+  </section>
+
+  <section class="panel versions-card" aria-labelledby="versions-title">
+    <div class="panel-heading">
+      <h2 id="versions-title">可用 DSH 版本</h2>
+      <details class="hint">
+        <summary aria-label="版本维护提示"><span aria-hidden="true">i</span></summary>
+        <p class="hint-bubble">升级和回滚在停服后通过 Runtime 命令执行。</p>
+      </details>
+    </div>
+    {{if .Versions.Values}}
+    <ul class="data-list version-list" role="list">
+      {{range $i, $v := .Versions.Values}}
+      {{if lt $i 4}}
+      <li><code>{{$v}}</code>{{if eq $v $.Runtime.Active}}<span class="status success">使用中</span>{{else if eq $i 0}}<span class="status info">最新发布</span>{{end}}</li>
+      {{end}}
+      {{end}}
+    </ul>
+    {{else}}
+    <div class="panel-body version-empty">
+      {{if .Versions.Error}}<p role="alert">无法获取已发布版本。</p>{{else}}<p>暂无版本信息。</p>{{end}}
+      <a class="button" href="/mgmt">刷新版本</a>
+    </div>
+    {{end}}
+    {{if .Runtime.Installed}}
+    <div class="installed-versions">
+      <h3>已安装版本</h3>
+      <ul class="chips" role="list">
+        {{range .Runtime.Installed}}<li><code>{{.}}</code></li>{{end}}
+      </ul>
+    </div>
+    {{end}}
+  </section>
+</div>
+{{end}}
+
+{{define "backup-action"}}
+{{if .Recent}}
+<form action="/mgmt/runtime" method="post" aria-labelledby="create-backup">
+  {{template "csrf" .CSRF}}
+  <button class="button primary" id="create-backup" type="submit" name="action" value="backup">创建备份</button>
+</form>
+{{else}}
+<a class="button primary" href="/_auth/stepup?next=%2Fmgmt%2Fbackup">重新验证身份</a>
+{{end}}
+{{end}}
+
+{{define "backup"}}
+{{if .Backups}}
+<section class="panel" aria-labelledby="archives-title">
+  <div class="panel-heading">
+    <div class="heading-label">
+      <h2 id="archives-title">备份归档</h2>
+      <details class="hint">
+        <summary aria-label="备份恢复提示"><span aria-hidden="true">i</span></summary>
+        <p class="hint-bubble">恢复在停服后通过 Runtime 命令执行。</p>
+      </details>
+    </div>
+    {{template "backup-action" .}}
+  </div>
+  <div class="table-scroll" role="region" aria-label="备份归档表" tabindex="0">
+    <table class="data-table archive-table" aria-labelledby="archives-title">
+      <thead><tr><th scope="col">备份 ID</th><th scope="col">DSH 版本</th><th scope="col">大小</th><th scope="col">归档时间</th><th scope="col">清单</th></tr></thead>
+      <tbody>
+        {{range .Backups}}
+        <tr>
+          <td><code>{{.ID}}</code></td>
+          <td>{{if .Version}}<code>{{.Version}}</code>{{else}}—{{end}}</td>
+          <td class="nowrap">{{fileSize .Bytes}}</td>
+          <td class="nowrap">{{if .Modified}}<time datetime="{{.Modified}}">{{archiveTime .Modified}}</time>{{else}}—{{end}}</td>
+          <td>{{if .HasManifest}}<span class="status success">已保存</span>{{else}}<span class="status warning">缺失</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{if .Recent}}
+  <form class="verify-form" action="/mgmt/runtime" method="post" aria-labelledby="verify-backup">
+    {{template "csrf" .CSRF}}
+    <div class="field">
+      <label for="verify-id">备份 ID</label>
+      <select class="mono" id="verify-id" name="id" required>
+        <option value="">选择备份归档</option>
+        {{range .Backups}}<option value="{{.ID}}"{{if eq .ID $.BackupID}} selected{{end}}>{{.ID}}</option>{{end}}
+      </select>
+    </div>
+    <button class="button" id="verify-backup" type="submit" name="action" value="verify">校验备份</button>
+  </form>
+  {{end}}
+</section>
+{{else}}
+<section class="panel empty">
+  <span class="empty-mark" aria-hidden="true"><span class="icon icon-backup"></span></span>
+  <p>还没有备份。</p>
+  {{template "backup-action" .}}
+</section>
+{{end}}
+{{end}}
+
+{{define "browser-state"}}
+{{if eq . "HUMAN"}}<span class="status success">操作者控制</span>
+{{else if eq . "AGENT"}}<span class="status info">Agent 控制</span>
+{{else if eq . "HANDOVER"}}<span class="status warning">正在交接</span>
+{{else if eq . "DISCONNECTED"}}<span class="status warning">未连接</span>
+{{else if eq . "PAUSED"}}<span class="status muted">已暂停</span>
+{{else}}<span class="status muted">状态不可用</span>{{end}}
+{{end}}
+
+{{define "browser"}}
+{{if not .BrowserEnabled}}
+<section class="panel empty">
+  <span class="empty-mark" aria-hidden="true"><span class="icon icon-browser"></span></span>
+  <p>当前部署未启用共享浏览器。</p>
+  <a class="button" href="/mgmt">返回概览</a>
+</section>
+{{else if .ProviderOK}}
+<div class="control-grid">
+  <section class="panel control-status" aria-labelledby="control-title">
+    <div class="panel-heading">
+      <h2 id="control-title">控制权</h2>
+      {{if .Control.Reason}}
+      <details class="hint">
+        <summary aria-label="浏览器状态详情"><span aria-hidden="true">i</span></summary>
+        <p class="hint-bubble"><code>{{.Control.Reason}}</code></p>
+      </details>
+      {{end}}
+    </div>
+    <div class="panel-body">
+      <p class="control-state">{{template "browser-state" .Control.State}}</p>
+      <dl class="control-metrics">
+        <div><dt>活动 DSH 会话</dt><dd>{{len .Control.Peers}}</dd></div>
+        {{if .Control.InFlight}}<div><dt>当前操作</dt><dd>执行中</dd></div>{{end}}
+      </dl>
+      {{if or (eq .Control.State "DISCONNECTED") (eq .Control.State "AGENT")}}
+      <form action="/_auth/control" method="post">
+        {{template "csrf" .CSRF}}
+        {{if eq .Control.State "DISCONNECTED"}}
+        <button class="button primary" type="submit" name="action" value="recover">连接浏览器</button>
+        {{else}}
+        <button class="button primary" type="submit" name="action" value="takeover">接管浏览器</button>
+        {{end}}
+      </form>
+      {{else if ne .Control.State "HUMAN"}}<a class="button" href="/mgmt/browser">刷新状态</a>
+      {{end}}
+    </div>
+  </section>
+  {{if eq .Control.State "HUMAN"}}
+  {{if .Control.Peers}}
+  <section class="panel" aria-labelledby="grant-title">
+    <div class="panel-heading">
+      <h2 id="grant-title">移交控制权</h2>
+      <details class="hint">
+        <summary aria-label="交接提示"><span aria-hidden="true">i</span></summary>
+        <p class="hint-bubble">交接前先松开鼠标和按键。</p>
+      </details>
+    </div>
+    <form class="form-stack panel-body" action="/_auth/control" method="post" aria-labelledby="grant-title">
+      {{template "csrf" .CSRF}}
+      <div class="field">
+        <label for="peer">DSH 会话</label>
+        <select name="peer" id="peer" required>
+          <option value="">选择会话</option>
+          {{range .Control.Peers}}<option value="{{.ID}}">{{.Label}}{{if .Tab}} · 已绑定{{end}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field narrow-field">
+        <label for="seconds">授权时长（秒）</label>
+        <input type="number" name="seconds" id="seconds" value="120" min="10" max="120" required>
+      </div>
+      <button class="button primary" type="submit" name="action" value="grant">将标签页交给 Agent</button>
+    </form>
+  </section>
+  {{else}}
+  <section class="panel empty">
+    <span class="empty-mark" aria-hidden="true"><span class="icon icon-browser"></span></span>
+    <p>还没有活动的 DSH 会话。</p>
+    <a class="button" href="/_auth/dsh">打开 DSH</a>
+  </section>
+  {{end}}
+  {{end}}
+</div>
+{{else}}
+<section class="panel panel-body">
+  <a class="button" href="/mgmt/browser">刷新状态</a>
+</section>
+{{end}}
+{{end}}
+
+{{define "passkey-register"}}<button class="button" type="button" data-passkey="register" hidden>添加 Passkey</button>{{end}}
+
+{{define "account"}}
+<div class="account-grid">
+  <section class="panel" aria-labelledby="security-title">
+    <div class="panel-heading"><h2 id="security-title">安全设置</h2></div>
+    {{if .Recent}}
+    <div class="settings-group">
+      <div class="settings-heading"><h3>Passkey</h3>{{if .Keys}}{{template "passkey-register"}}{{end}}</div>
+      {{if .Keys}}
+      <ul class="data-list" role="list">
+        {{range .Keys}}
+        <li>
+          <form class="line-item" action="/_auth/passkey/remove" method="post">
+            {{template "csrf" $.CSRF}}<input type="hidden" name="id" value="{{.ID}}">
+            <span>{{.Label}}</span><button class="button danger" type="submit">移除此 Passkey</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}<div class="passkey-empty"><p class="subtle">还没有注册 Passkey。</p>{{template "passkey-register"}}</div>{{end}}
+      <p id="passkey-status" class="feedback error" role="status" hidden></p>
+    </div>
+    <div class="settings-group settings-line">
+      <h3>动态验证器</h3>
+      <form action="/_auth/totp/rotate" method="post">{{template "csrf" .CSRF}}<button class="button" type="submit">更换动态验证器</button></form>
+    </div>
+    <div class="settings-group settings-line">
+      <div class="heading-label">
+        <h3>恢复码</h3>
+        <details class="hint">
+          <summary aria-label="恢复码提示"><span aria-hidden="true">i</span></summary>
+          <p class="hint-bubble">生成后旧恢复码失效。</p>
+        </details>
+      </div>
+      <form action="/_auth/recovery/regenerate" method="post">{{template "csrf" .CSRF}}<button class="button" type="submit">重新生成恢复码</button></form>
+    </div>
+    <form class="form-stack settings-group" action="/_auth/password/change" method="post" aria-labelledby="change-password">
+      {{template "csrf" .CSRF}}
+      <div class="field">
+        <label for="new-password">新密码</label>
+        <div class="field-with-action">
+          <input id="new-password" type="password" name="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+          <button data-reveal type="button" aria-controls="new-password" aria-pressed="false" hidden>显示密码</button>
+        </div>
+      </div>
+      <button class="button" id="change-password" type="submit">修改密码</button>
+    </form>
+    {{else}}
+    <div class="panel-body"><a class="button primary" href="/_auth/stepup?next=%2Fmgmt%2Faccount">重新验证身份</a></div>
+    {{end}}
+  </section>
+
+  <div class="stack">
+    <section class="panel" aria-labelledby="sessions-title">
+      <div class="panel-heading"><h2 id="sessions-title">登录会话</h2></div>
+      {{if .Sessions}}
+      <ul class="data-list account-list" role="list">
+        {{range .Sessions}}
+        <li>
+          <form class="line-item" action="/_auth/sessions/revoke" method="post">
+            {{template "csrf" $.CSRF}}<input type="hidden" name="id" value="{{.ID}}">
+            <div class="session-label">
+              <span>{{if .Current}}当前会话{{else}}其他会话{{end}}</span>
+              <time class="subtle" datetime="{{isoTime .Seen}}">{{stamp .Seen}}</time>
+            </div>
+            <button class="button" type="submit">撤销此会话</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      <form class="panel-body" action="/_auth/sessions/revoke-all" method="post">
+        {{template "csrf" .CSRF}}<button class="button danger" type="submit">退出所有会话</button>
+      </form>
+      {{else}}
+      <div class="panel-body empty"><p>还没有活动会话。</p><a class="button" href="/_auth/login">重新登录</a></div>
+      {{end}}
+    </section>
+
+    <section class="panel" aria-labelledby="activity-title">
+      <div class="panel-heading"><h2 id="activity-title">最近活动</h2></div>
+      {{if .Events}}
+      <ul class="data-list account-list" role="list">
+        {{range .Events}}<li class="activity-row"><span>{{auditLabel .Event}}</span><time class="subtle" datetime="{{isoTime .At}}">{{stamp .At}}</time></li>{{end}}
+      </ul>
+      {{else}}
+      <div class="panel-body empty"><p>还没有账户活动。</p><a class="button" href="/mgmt/account">刷新活动</a></div>
+      {{end}}
+    </section>
+  </div>
+</div>
+{{end}}
+
+{{define "account-task"}}
+<section class="panel task-panel">
+  {{if eq .View "stepup"}}
+  <form class="form-stack" action="/_auth/stepup" method="post">
+    {{template "csrf" .CSRF}}
+    <input type="hidden" name="next" value="{{.Next}}">
+    <div class="field">
+      <label for="stepup-code">动态验证码</label>
+      <input class="otp" id="stepup-code" name="code" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6">
+    </div>
+    <div class="task-actions"><button class="button primary" type="submit">验证动态验证码</button><a class="button" href="{{.Next}}">取消</a></div>
+  </form>
+  {{else if eq .View "codes"}}
+  <ul class="code-list" role="list">{{range .Codes}}<li><code>{{.}}</code></li>{{end}}</ul>
+  <a class="button primary" href="/mgmt/account">返回账户</a>
+  {{else if eq .View "rotate"}}
+  <dl class="key-display"><dt>验证器密钥</dt><dd><code>{{.Key}}</code></dd></dl>
+  <form class="form-stack" action="/_auth/totp/confirm" method="post">
+    {{template "csrf" .CSRF}}<input type="hidden" name="challenge" value="{{.Challenge}}">
+    <div class="field">
+      <label for="code">新验证器的动态验证码</label>
+      <input class="otp" id="code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+    </div>
+    <div class="task-actions"><button class="button primary" type="submit">确认更换</button><a class="button" href="/mgmt/account">取消</a></div>
+  </form>
+  {{end}}
+</section>
+{{end}}

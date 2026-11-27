@@ -87,12 +87,13 @@
 | --- | --- |
 | `https://<host>/` | DSH 和共享会话 Cookie。 |
 | `/browser/` | 使用 LinuxServer 支持的 Selkies 子路径配置。只有上游明确要求时才移除前缀。 |
-| `/_auth/` | 认证界面和 API。认证以及校验端点不经过自己的 ForwardAuth。 |
+| `/_auth/` | Gateway 的认证界面和 API。受保护的路由由 Gateway 自行检查会话。 |
+| `/mgmt` | 经过认证的 Gateway 控制台，统一提供 Runtime 状态、备份、浏览器控制和账户设置。 |
 | ForwardAuth | 保护 DSH 和 Selkies。未认证的 API 返回 401，WebSocket 升级被拒绝。 |
 | 浏览器控制 | 仅供内部或通过认证访问。管理端点不作为免认证公网入口。 |
-| Compose | 编排 DSH、Auth 和 Chromium，可复用共享网络上的外部 Traefik。 |
-| 网络 | 部署前检查 Docker 子网冲突。工作台和浏览器子网可配置，固定地址、健康检查目标和证书 SAN 从同一配置源生成。 |
-| 镜像 | 建立发布流程后，将 Runtime、Auth 和 Provider 镜像发布到 GHCR。部署使用不可变 digest。 |
+| Compose | 精简版运行 Runtime 和 Gateway，完整版增加 Browser。Gateway 运行 Provider 和输入门禁，Browser 运行 Chromium、Selkies 与私有 CDP 中继。两种形态都复用外部 Traefik。 |
+| 网络 | Runtime、Gateway 和 Browser 共用一张可配置的工作台网络。Traefik 加入该网络，并沿用现有代理网与 Gateway 通信及执行 ForwardAuth。固定地址和 Runtime 证书 SAN 从 `WORKSTATION_SUBNET` 推导。部署前检查子网冲突。 |
+| 镜像 | Runtime 和 Gateway 发布至 GHCR，部署使用不可变摘要。LinuxServer Chromium 镜像按上游摘要固定。 |
 
 ## 界面和运维
 
@@ -102,7 +103,7 @@
 | Runtime | 显示当前、已安装和可用版本，以及兼容性、日志、备份和健康状态。 |
 | 插件 | 显示已安装插件、来源、版本、兼容性、依赖和脚本批准。通过官方 Plugin Manager 安装、启用、停用、更新和删除。展示日志，并区分安装、激活、兼容性和健康状态。 |
 | 账户 | 管理唯一管理员的密码、Passkey、TOTP、恢复码、会话和审计。不提供用户管理。敏感操作前重新验证身份。 |
-| 发布 | Runtime 镜像、DSH npm、Auth 镜像、Workstation Provider 和 Chromium 分别版本化。固定发布标签及摘要。 |
+| 发布 | Runtime 镜像、DSH npm、Gateway 镜像和 Chromium 分别版本化。Provider 和输入门禁随 Gateway 发布。 |
 | 备份 | 迁移或依赖操作前备份 DSH_HOME。备份覆盖 DSH_HOME、工作区、Chromium 配置、认证数据库、Provider 状态和加密密钥。恢复测试需证明 TOTP 和已注册的 Passkey 仍可用。 |
 | 健康和恢复 | 检查实际就绪。记录并验证升级、匹配数据恢复和回滚。 |
 

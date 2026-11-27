@@ -26,6 +26,11 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3, #8, #9, and #10. Agent browser control stays disabled until #4; untrusted-site browsing stays disabled until #11. |
 | 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | Browser egress policy and SSRF boundary | Required before enabling broad Agent browsing of untrusted sites. |
 | 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | CI coverage on `main` | Before trusting that the merged tree is the tested tree; #6 deploys from main. |
+| 09 | [#26](https://github.com/sagehou/dsh-workstation/issues/26) | Core deployment without the shared browser | Two-service Compose configuration and HTTPS login verified. |
+| 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent-first lease, browser egress hardening and recording | Automatic acquisition passed source Compose. Egress and recording acceptance remain open. |
+| 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | Operations console, Gateway rename and UI | Console and authentication verified in source CI. Gateway image publication and migration on the deployment host remain open. |
+| 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | Three-service full deployment | Runtime, Gateway and Browser. Verify CDP isolation, browser recreation and existing login and lease flows. |
+| 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | Shared workstation network | Direct-access boundaries, certificate preservation and browser handoff with Agent MCP enabled passed. [Compose evidence](public-compose.md#shared-network-verification) |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | Native DSH Browser Sidebar | Deferred enhancement; standalone page remains supported. Does not block first release. |
 
 ## Release gates
@@ -36,7 +41,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 - Docker subnet preflight/configuration passes on the deployment host.
 - Single-admin bootstrap, password+TOTP, Passkey, session revocation, and recovery work.
 - DSH and the standalone browser page work through the existing Traefik origin.
-- DSH_HOME, workspace, browser profile, Auth DB, Provider state, and secrets have a tested backup/restore procedure.
+- DSH_HOME, workspace, browser profile, Gateway SQLite, Provider state, and secrets have a tested backup/restore procedure.
 - No claim of multi-user isolation or ARM64 support.
 
 ### Gate B — safe Agent browser control
@@ -91,6 +96,6 @@ There is no approval gate, and none is claimed: one operator is also the only pe
 
 [#23 — CI coverage on `main`](https://github.com/sagehou/dsh-workstation/issues/23) closes a gap this handoff previously left out rather than fixed: until now no workflow triggered on `main`, so `?branch=main` returned **zero** runs. Every PR passed on its own branch, which is why this was not a shipped-broken-code problem, but a green pull request does not prove the merged tree is green — a squash, a conflict resolution, or two individually passing PRs can still interact badly, and nothing would have noticed on the commit that is actually deployed. `Public Compose` and `M1 private preview` now also run on `main`; `Publish images` stays restricted to a `v*` tag or a manual dispatch, so a main push cannot publish. The M0 workflows lose their `push` trigger, because the `m0/issue-1` branch they watched no longer exists — they remain available by manual dispatch so the M0 evidence stays reproducible without putting prototype jobs on every main run.
 
-Next is [#6 — target-host deployment, HTTPS, backup/restore and recovery drill](https://github.com/sagehou/dsh-workstation/issues/6). Its four dependencies (#3, #8, #9, #10) are complete, so nothing but a host blocks it. Agent browser control stays disabled until #4's remaining matrix is measured, and untrusted-site browsing stays disabled until #11.
+The published Auth stack supports the two-container core deployment. Target-host Traefik compatibility, subnet preflight, HTTPS and backup/restore still need acceptance. [Deployment issue #6](https://github.com/sagehou/dsh-workstation/issues/6)
 
-The standalone browser page remains the first-release interface. Sidebar work (#5) is explicitly deferred.
+Gateway and the redesigned console are in PR #34. Its candidate browser uses automatic lease acquisition and permits all HTTPS tool origins when the allowlist is empty. The production checks above apply. The standalone browser page remains the first-release interface. [PR #34](https://github.com/sagehou/dsh-workstation/pull/34) · [Compose evidence](public-compose.md#gateway-candidate-verification) · [Release status](../release.md#current-deployment) · [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md)

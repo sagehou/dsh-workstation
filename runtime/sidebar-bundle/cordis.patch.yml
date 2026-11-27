@@ -1,0 +1,3 @@
+- insert:
+    - id: workstation-sidebar
+      name: ./index.mjs

@@ -87,12 +87,13 @@ The approved direction is a self-hosted workstation around the official DSH appl
 | --- | --- |
 | `https://<host>/` | DSH and one shared session cookie. |
 | `/browser/` | Selkies with LinuxServer's supported subfolder configuration. Preserve the prefix unless upstream explicitly requires stripping it. |
-| `/_auth/` | Auth UI and API. Auth and the verification endpoint are exempt from their own ForwardAuth. |
+| `/_auth/` | Gateway authentication UI and API. The Gateway checks access to the protected routes itself. |
+| `/mgmt` | Authenticated Gateway console for Runtime status, backups, browser control and account settings. |
 | ForwardAuth | Protect DSH and Selkies. Unauthenticated APIs return 401 and WebSocket upgrades are denied. |
 | Browser control | Internal or authenticated endpoints. Keep management off unauthenticated public routes. |
-| Compose | Orchestrate DSH, Auth, and Chromium. Reuse an external Traefik on shared networks where applicable. |
-| Networks | Check Docker subnet overlap before deployment. Make the workstation/browser subnets configurable and derive fixed addresses, health-check targets, and certificate SANs from one configuration source. |
-| Images | Publish versioned Runtime, Auth, and Provider images to GHCR after the release workflow is in place. Pin deployment references by immutable digest. |
+| Compose | Core runs Runtime and Gateway. Full adds Browser. Gateway hosts Provider and the input gate. Browser hosts Chromium, Selkies, and the private CDP relay. Both reuse an external Traefik. |
+| Networks | Runtime, Gateway and Browser share one configurable workstation subnet. Traefik connects to it and keeps its existing proxy network for Gateway and ForwardAuth. Derive fixed addresses and the Runtime certificate SAN from `WORKSTATION_SUBNET` and check for overlaps before deployment. |
+| Images | Publish Runtime and Gateway to GHCR by immutable digest. Pin the upstream LinuxServer Chromium image by digest. |
 
 ## User interface and operations
 
@@ -102,8 +103,8 @@ The approved direction is a self-hosted workstation around the official DSH appl
 | Runtime | Show active, installed, and available versions, compatibility, logs, backup status, and health. |
 | Plugins | Show installed packages, source, version, compatibility, dependencies, and script approval. Use the official Plugin Manager to install, enable, disable, update, and remove. Show logs and distinguish installation, activation, compatibility, and health. |
 | Account | Manage the single administrator's password, Passkeys, TOTP, recovery codes, sessions, and audit. No user administration. Require step-up for sensitive changes. |
-| Releases | Version the Runtime image, DSH npm, Auth image, Workstation Provider, and Chromium independently. Pin release tags and digests. |
-| Backups | Back up DSH_HOME before migrations or dependency operations. Cover DSH_HOME, workspace, Chromium profile, Auth DB, Provider state, and encryption secrets. Restore tests must prove TOTP and existing Passkeys still work. |
+| Releases | Version the Runtime image, DSH npm, Gateway image, and Chromium independently. Provider and the input gate ship with Gateway. |
+| Backups | Back up DSH_HOME before migrations or dependency operations. Cover DSH_HOME, workspace, Chromium profile, Gateway SQLite database, Provider state, and encryption secrets. Restore tests must prove TOTP and existing Passkeys still work. |
 | Health and recovery | Check actual readiness. Document and test upgrades, matched data restore, and rollback. |
 
 ## Out of scope

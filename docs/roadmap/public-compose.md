@@ -4,30 +4,37 @@ English · [简体中文](public-compose.zh-CN.md)
 
 The owner approved a single-administrator public Compose release. The authenticated standalone browser/control page is the first-release UI; native Sidebar is deferred. Agent browser control remains gated until held-input release and exclusive handoff pass #4, and broad untrusted-site browsing remains gated until the egress policy passes #11. [ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.md) · [M0](M0-evidence.md) · [Provider results](M0-provider-evidence.md) · [M1 Runtime results](M1.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
 
-## Existing Traefik and three Docker networks
+## Compose networks
 
 | Network | What it carries |
 | --- | --- |
-| Existing proxy | Go Auth listeners. Auth checks the exact Traefik source IP from the trusted proxy network. |
-| `workstation` | DSH and official MCP. Traefik and Auth can reach DSH here. |
-| `browser` | Chromium, Selkies, and the credential-protected Provider management listener. Traefik connects for HTTP and Auth for WebSockets. |
+| Existing proxy | Gateway's public and verification listeners. Gateway checks the exact Traefik source IP. |
+| `workstation` | Runtime, Gateway and Browser share this network. Traefik reaches DSH and Selkies HTTP here. |
 
-Five workstation containers reuse external Traefik. Runtime and Chromium keep independent outbound routes. [Deployment guide](../../deploy/public/README.md)
+## Three-service candidate
 
-The CDP relay shares Chromium's network namespace. It forwards loopback CDP over a dedicated Unix socket volume. The relay writes the socket, and the Provider mounts the volume read-only. Playwright attaches via the Provider's own loopback listener. The topology requires no custom host firewall rules.
+Full starts `browser`, `gateway` and `runtime`. Core starts `gateway` and `runtime`. Both declare one `workstation` network alongside the external proxy network. Provider and the input gate run inside Gateway, and LinuxServer starts the CDP relay inside Browser. The relay writes the Unix socket and Gateway mounts it read-only. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](../adr/0007-three-service-deployment.md)
+
+### Shared-network verification
+
+All four full-stack jobs passed at `21cdcdc` with Agent MCP enabled against the trusted HTTPS fixture. `bash deploy/public/ci.sh` used Runtime `0.2.2`, Gateway `0.1.0`, official DSH `0.2.2-rc.1`, LinuxServer Chromium `075b0b99-ls64`, and Playwright `1.61.1`. It verified the single business network, Selkies HTML reachability, and denial of direct data and token access on both Nginx listeners. The browser tests measured held-pointer release on handoff and disconnect and reattached Gateway to Chromium after recreation. The core deployment and anonymous pull of the published `81feffd` stack passed in separate jobs. [Public Compose run](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777) · [Issue #37](https://github.com/sagehou/dsh-workstation/issues/37)
+
+`bash deploy/test/init.test.sh` confirmed that removing the old Browser subnet settings preserved the CA, Runtime certificate, and authentication key. The SSH preview also passed. Host preflight and recovery use the target-host checklist. [M1 run](https://github.com/sagehou/dsh-workstation/actions/runs/45923718776) · [Target-host acceptance](https://github.com/sagehou/dsh-workstation/issues/6)
+
+The three-service predecessor with separate workstation and Browser networks passed all four Traefik matrix jobs and the core shape at `179bdaa`. [Public Compose run](https://github.com/sagehou/dsh-workstation/actions/runs/45914350105)
 
 ### Reproduce on GitHub Actions
 
 Public Compose runs `go test -race -v ./...` in the pinned Go image and `bash deploy/public/ci.sh` on the GitHub-hosted runner. The integration uses a separate Traefik, a temporary certificate, and a deterministic model fixture. [Public Compose](../../.github/workflows/public-compose.yml)
 
-The job matrix reads its versions only from [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env). Each leg pulls `tag@digest`, runs the same Compose stack, the same edge probe and the same post-login browser checks; only the Traefik image differs. [#3](https://github.com/sagehou/dsh-workstation/issues/3)
+The job matrix reads its versions from `deploy/public/traefik-matrix.env`. It runs the same Compose, edge and post-login checks on each pinned `tag@digest` with both the default `172.30.241.0/24` and custom `10.71.241.0/24` workstation subnets. [Matrix file](../../deploy/public/traefik-matrix.env) · [#3](https://github.com/sagehou/dsh-workstation/issues/3)
 
 ### Traefik compatibility matrix
 
 | Traefik | Pinned digest | Status |
 | --- | --- | --- |
-| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Passed the full stack at `540ddd5` |
-| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Passed the full stack at `540ddd5` |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Default and custom subnets passed at `21cdcdc`. [Default](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179100) · [Custom](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179301) |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Default and custom subnets passed at `21cdcdc`. [Default](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179126) · [Custom](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179153) |
 
 Lowest version with a recorded pass: **v3.7.14**. Both legs passed [run 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598) with identical checks: `v3.7.14` ([job 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)) and `v3.7.19` ([job 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)); both passed again at `43065af` in [run 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367).
 
@@ -41,7 +48,19 @@ CONNECT behaves differently across the matrix, and the probe records the observe
 - `v3.7.14` has **no `denyConnect`** at all. A `CONNECT` falls through to the router, so it answers **404**. That is still not a tunnel, but it is not the 501 guarantee.
 - The migration guide's `v3.7.9` note about HTTP/1 `CONNECT` does not match the `v3.7.14` source; the observed `v3.7.14` status is therefore recorded from the run instead of being assumed from the prose.
 
-### Observed results
+### Gateway candidate verification
+
+The following results are from the earlier six-container Gateway candidate at `f57e92d`.
+
+- Go 1.27.3 ran `go test -race -v ./...`. All four `bash deploy/public/ci.sh` jobs passed on DSH 0.2.2-rc.1 and Playwright 1.61.1. The probes covered HTTPS sign-in, Passkey, existing-session restore, Gateway management pages, backup creation and verification, and browser input handoff. [Public Compose at f57e92d](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100)
+- `bash deploy/public/ci-core.sh` verified that only Gateway and Runtime were running, that a real TOTP login reached DSH, and that the signed-in browser data WebSocket returned 503. The separate `release-compose` job pulled the published Auth images for `81feffd` anonymously. [Core job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [Published-image job](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+- Gateway pages were rendered with Chromium 156.0.8078.4 and Playwright 1.61.1 using fixture data. Desktop, narrow viewport, system dark mode, keyboard controls, authentication and archive feedback were verified. [Gateway UI evidence](https://github.com/sagehou/dsh-workstation/issues/35#issuecomment-7191691647)
+
+These runs used GitHub-hosted runners or local test fixtures. The deployment-host acceptance remains open. [Deployment issue](https://github.com/sagehou/dsh-workstation/issues/6)
+
+## Historical runs
+
+### Observed results at `333e6f3`
 
 The job passed at `333e6f3` with a single Traefik 3.7.19 leg. It used Traefik `3.7.19`, Chromium `156.0.8078.79`, Selkies `2.2.1`, DSH `0.2.2-rc.1`, and Playwright `1.61.1`. [GitHub Actions job at `333e6f3`](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 

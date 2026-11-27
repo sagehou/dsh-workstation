@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Derive every workstation address from one pair of CIDRs, and refuse to
-# deploy over an overlapping network.
+# Derive the workstation addresses and refuse overlapping networks.
 #
 # Usage:
 #   bash deploy/network.sh derive            # shell assignments (eval-safe)
@@ -10,14 +9,13 @@
 #
 # Configuration (environment):
 #   WORKSTATION_SUBNET   workstation network CIDR   (default 172.30.241.0/24)
-#   BROWSER_SUBNET       browser network CIDR       (default 172.30.233.0/24)
 #   WORKSTATION_ENTRY_SUBNET  preview-only edge CIDR (default 172.30.244.0/24)
 #   DOCKER               docker binary              (default docker)
 #
 # Addresses are derived from the low end of each subnet, in a fixed order:
 #   .1      Docker's gateway (never used here)
-#   .2      Runtime on the workstation network; Provider on the browser network
-#   .3      Provider on the workstation network
+#   .2      Runtime on the workstation network
+#   .3      Gateway on the workstation network
 # Dynamic allocation is confined to the upper half of each subnet, so a
 # container that starts first can never take a static address. That ordering
 # matters: without it Docker hands out .2 and the runtime then fails to claim
@@ -28,7 +26,6 @@ set -euo pipefail
 # empty subnet is a mistake, and defaulting it would silently deploy the
 # addresses the operator was trying to avoid.
 WORKSTATION_SUBNET=${WORKSTATION_SUBNET-172.30.241.0/24}
-BROWSER_SUBNET=${BROWSER_SUBNET-172.30.233.0/24}
 WORKSTATION_ENTRY_SUBNET=${WORKSTATION_ENTRY_SUBNET-172.30.244.0/24}
 # The public CI stack creates its own throwaway Traefik proxy network. It is
 # derived here too, so no script carries a literal and the fixture cannot land
@@ -94,62 +91,31 @@ derive_network() {
   printf '%s_IP_RANGE=%s/%s\n' "$label" "$(int2ip "$pool_start")" "$pool_prefix"
   printf '%s_STATIC_2=%s\n' "$label" "$(int2ip $(( network + 2 )))"
   printf '%s_STATIC_3=%s\n' "$label" "$(int2ip $(( network + 3 )))"
-  printf '%s_STATIC_4=%s\n' "$label" "$(int2ip $(( network + 4 )))"
-  # Exposed for the overlap check and for callers that print a diagnosis.
-  printf '%s_NETWORK_INT=%s\n' "$label" "$network"
-  printf '%s_SIZE=%s\n' "$label" "$size"
 }
 
 derive() {
   derive_network WORKSTATION "$WORKSTATION_SUBNET" || return 1
-  derive_network BROWSER "$BROWSER_SUBNET" || return 1
   derive_network ENTRY "$WORKSTATION_ENTRY_SUBNET" || return 1
   derive_network CI_PROXY "$WORKSTATION_CI_PROXY_SUBNET" || return 1
 }
 
-# Fail when the CI proxy network would sit inside one of the deployment
-# networks. Kept separate so the message names which plan collided.
-ci_clear() {
-  local net=$1 size=$2 label=$3
-  local ci_net=$CI_PROXY_NETWORK_INT ci_size=$CI_PROXY_SIZE
-  if (( ci_net < net + size && net < ci_net + ci_size )); then
-    printf 'The CI proxy subnet %s overlaps the %s subnet %s\n' \
-      "$WORKSTATION_CI_PROXY_SUBNET" "$label" "$(int2ip "$net")" >&2
-    return 1
-  fi
-}
-
 # Fold the raw derivation into the names Compose and the initializer use.
-# BROWSER_GATE_IP is the browser input gate (ADR-0005), the only path to the
-# Selkies data socket; it is derived here rather than written into Compose.
+# The Gateway MCP listener keeps the previous Provider address.
 # Keep any comment outside the heredoc below: `derive --json` parses its output.
 named() {
   local body
   body="$(derive)" || return 1
   eval "$body"
-  # An overlap between the two workstation networks is never valid, so it is
-  # rejected here rather than only in the preflight: every consumer derives its
-  # addresses from this function, and a Compose file built from overlapping
-  # subnets cannot be fixed after the fact.
-  local ws_end=$(( WORKSTATION_NETWORK_INT + WORKSTATION_SIZE ))
-  local br_end=$(( BROWSER_NETWORK_INT + BROWSER_SIZE ))
-  (( WORKSTATION_NETWORK_INT >= br_end || BROWSER_NETWORK_INT >= ws_end )) || {
-    printf 'The workstation %s and browser %s subnets overlap\n' "$WORKSTATION_SUBNET" "$BROWSER_SUBNET" >&2
+  if overlaps "$WORKSTATION_SUBNET" "$WORKSTATION_CI_PROXY_SUBNET"; then
+    printf 'The CI proxy subnet %s overlaps the workstation subnet %s\n' \
+      "$WORKSTATION_CI_PROXY_SUBNET" "$WORKSTATION_SUBNET" >&2
     return 1
-  }
-  # The CI stack runs its own proxy network. It is not part of a deployment,
-  # but a plan that covered it would make the CI job collide with itself.
-  ci_clear "$WORKSTATION_NETWORK_INT" "$WORKSTATION_SIZE" workstation || return 1
-  ci_clear "$BROWSER_NETWORK_INT" "$BROWSER_SIZE" browser || return 1
+  fi
   cat <<EOF
 WORKSTATION_SUBNET=$WORKSTATION_SUBNET
 WORKSTATION_IP_RANGE=$WORKSTATION_IP_RANGE
 WORKSTATION_RUNTIME_IP=$WORKSTATION_STATIC_2
 WORKSTATION_PROVIDER_IP=$WORKSTATION_STATIC_3
-BROWSER_SUBNET=$BROWSER_SUBNET
-BROWSER_IP_RANGE=$BROWSER_IP_RANGE
-BROWSER_PROVIDER_IP=$BROWSER_STATIC_2
-BROWSER_GATE_IP=$BROWSER_STATIC_4
 WORKSTATION_ENTRY_SUBNET=$WORKSTATION_ENTRY_SUBNET
 WORKSTATION_ENTRY_IP_RANGE=$ENTRY_IP_RANGE
 WORKSTATION_ENTRY_EDGE_IP=$ENTRY_STATIC_2
@@ -259,21 +225,13 @@ check() {
 
   local status=0
   printf 'Workstation network %s (dynamic %s)\n' "$WORKSTATION_SUBNET" "$WORKSTATION_IP_RANGE"
-  printf 'Browser network     %s (dynamic %s)\n' "$BROWSER_SUBNET" "$BROWSER_IP_RANGE"
-  printf 'Runtime %s, Provider %s/%s\n' \
-    "$WORKSTATION_RUNTIME_IP" "$WORKSTATION_PROVIDER_IP" "$BROWSER_PROVIDER_IP"
-
-  if overlaps "$WORKSTATION_SUBNET" "$BROWSER_SUBNET"; then
-    printf 'The workstation and browser subnets overlap\n' >&2
-    status=1
-  fi
+  printf 'Runtime %s, Gateway MCP %s\n' \
+    "$WORKSTATION_RUNTIME_IP" "$WORKSTATION_PROVIDER_IP"
 
   # A host route for the whole RFC1918 block is common on VPN hosts, and a
   # conflict there is exactly what this check exists to catch.
   printf 'Checking host routes from %s\n' "$routes"
-  for pair in "workstation:$WORKSTATION_SUBNET" "browser:$BROWSER_SUBNET"; do
-    check_conflict "${pair%%:*}" "${pair#*:}" "$routes" || status=1
-  done
+  check_conflict workstation "$WORKSTATION_SUBNET" "$routes" || status=1
 
   local docker_lines
   docker_lines="$(docker_cidrs "$docker_dump")"
@@ -283,26 +241,24 @@ check() {
     printf 'Checking %s existing Docker subnet(s)\n' "$(printf '%s\n' "$docker_lines" | wc -l | tr -d ' ')"
     while read -r line; do
       [[ -n $line ]] || continue
-      for pair in "workstation:$WORKSTATION_SUBNET" "browser:$BROWSER_SUBNET"; do
-        if overlaps "${pair#*:}" "$line"; then
-          printf '  %s %s overlaps Docker network %s\n' "${pair%%:*}" "${pair#*:}" "$line" >&2
-          status=1
-        fi
-      done
+      if overlaps "$WORKSTATION_SUBNET" "$line"; then
+        printf '  workstation %s overlaps Docker network %s\n' "$WORKSTATION_SUBNET" "$line" >&2
+        status=1
+      fi
     done <<<"$docker_lines"
   fi
 
   if (( status )); then
     cat >&2 <<'EOF'
 
-Refusing to continue. Neither network was created or changed.
+Refusing to continue. No network was created or changed.
 
-Choose different subnets, for example:
+Choose a different subnet, for example:
 
-  WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+  WORKSTATION_SUBNET=10.71.241.0/24 \
     bash deploy/public/init.sh <domain> <proxy> <traefik>
 
-Any unused RFC1918 /16 works. Re-run the preflight with the new values before
+Use an unused RFC1918 subnet with a /16 through /28 prefix. Re-run the preflight before
 starting Compose; no existing Docker network or host route is modified here.
 EOF
     return 1

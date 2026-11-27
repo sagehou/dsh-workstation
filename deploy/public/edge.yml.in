@@ -1,11 +1,11 @@
 http:
   routers:
-    dsh-workstation-auth:
+    dsh-workstation-gateway:
       entryPoints: ["@ENTRYPOINT@"]
-      rule: Host(@DOMAIN_RULE@) && PathPrefix(@AUTH_RULE@)
+      rule: Host(@DOMAIN_RULE@) && (PathPrefix(@AUTH_RULE@) || PathPrefix(`/mgmt`) || Path(`/mgmt`))
       tls: @TLS@
       middlewares: [dsh-workstation-security]
-      service: dsh-workstation-auth
+      service: dsh-workstation-gateway
     dsh-workstation-browser:
       entryPoints: ["@ENTRYPOINT@"]
       rule: Host(@DOMAIN_RULE@) && PathPrefix(@BROWSER_RULE@) && !PathPrefix(@TOKENS_RULE@)
@@ -14,7 +14,7 @@ http:
       service: dsh-workstation-selkies
     dsh-workstation-dsh:
       entryPoints: ["@ENTRYPOINT@"]
-      rule: Host(@DOMAIN_RULE@) && !PathPrefix(@AUTH_RULE@) && !Path(@AUTH_BASE@) && !PathPrefix(@BROWSER_RULE@) && !Path(@BROWSER_BASE@)
+      rule: Host(@DOMAIN_RULE@) && !PathPrefix(@AUTH_RULE@) && !Path(@AUTH_BASE@) && !PathPrefix(`/mgmt`) && !Path(`/mgmt`) && !PathPrefix(@BROWSER_RULE@) && !Path(@BROWSER_BASE@)
       tls: @TLS@
       middlewares: [dsh-workstation-security, dsh-workstation-signin]
       service: dsh-workstation-dsh
@@ -24,14 +24,14 @@ http:
       priority: 200
       tls: @TLS@
       middlewares: [dsh-workstation-security, dsh-workstation-signin, dsh-workstation-browser-frame]
-      service: dsh-workstation-auth
+      service: dsh-workstation-gateway
     dsh-workstation-dsh-ws:
       entryPoints: ["@ENTRYPOINT@"]
-      rule: Host(@DOMAIN_RULE@) && !PathPrefix(@AUTH_RULE@) && !Path(@AUTH_BASE@) && !PathPrefix(@BROWSER_RULE@) && !Path(@BROWSER_BASE@) && HeaderRegexp(@UPGRADE_HEADER@, @UPGRADE_PATTERN@)
+      rule: Host(@DOMAIN_RULE@) && !PathPrefix(@AUTH_RULE@) && !Path(@AUTH_BASE@) && !PathPrefix(`/mgmt`) && !Path(`/mgmt`) && !PathPrefix(@BROWSER_RULE@) && !Path(@BROWSER_BASE@) && HeaderRegexp(@UPGRADE_HEADER@, @UPGRADE_PATTERN@)
       priority: 200
       tls: @TLS@
       middlewares: [dsh-workstation-security, dsh-workstation-signin]
-      service: dsh-workstation-auth
+      service: dsh-workstation-gateway
   middlewares:
     dsh-workstation-security:
       headers:
@@ -44,7 +44,7 @@ http:
           X-Workstation-User: ""
     dsh-workstation-signin:
       forwardAuth:
-        address: http://dsh-workstation-auth-edge:8081/verify
+        address: http://dsh-workstation-gateway-edge:8081/verify
         trustForwardHeader: false
         preserveLocationHeader: true
         authRequestHeaders: [Cookie, Accept, Sec-Fetch-Mode, Sec-Fetch-Dest, Upgrade]
@@ -63,10 +63,10 @@ http:
         - |
 @RUNTIME_CA@
   services:
-    dsh-workstation-auth:
+    dsh-workstation-gateway:
       loadBalancer:
         servers:
-          - url: http://dsh-workstation-auth-edge:8080
+          - url: http://dsh-workstation-gateway-edge:8080
     dsh-workstation-dsh:
       loadBalancer:
         serversTransport: dsh-workstation-dsh-tls

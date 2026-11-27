@@ -16,7 +16,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, runtime, auth, provider, browser-gate]
+        options: [all, runtime, gateway]
 
 permissions:
   contents: read
@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       # A JSON array of {image, version} pairs, so a run that publishes one
-      # image and a run that publishes all four use the same matrix.
+      # image and a run that publishes both use the same matrix.
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -62,13 +62,19 @@ jobs:
           matrix='['
           separator=
           for image in $images; do
+            if bash deploy/public/images.sh --field digest "$image" >/dev/null 2>&1; then
+              [[ $REQUESTED == all ]] && continue
+              echo "$image already has a published digest. Bump its version to publish an update." >&2
+              exit 1
+            fi
             version="$(bash deploy/public/images.sh --field version "$image")"
             matrix+="$separator{\"image\":\"$image\",\"version\":\"$version\"}"
             separator=,
           done
           matrix+=']'
+          [[ $matrix != '[]' ]] || { echo 'No unpublished image versions.' >&2; exit 1; }
           printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
-          echo "Publishing: $(echo $images)"
+          echo "Publishing: $matrix"
 
   publish:
     needs: plan
@@ -127,11 +133,7 @@ jobs:
           printf 'name=%s\n' "$name" >> "$GITHUB_OUTPUT"
           case "$IMAGE" in
             runtime) printf 'context=runtime\n' >> "$GITHUB_OUTPUT"; printf 'file=runtime/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
-            auth) printf 'context=auth\n' >> "$GITHUB_OUTPUT"; printf 'file=auth/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
-            # The provider and gate build from the repository root because each
-            # copies files from outside its own directory.
-            provider) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=provider/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
-            browser-gate) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=browser-gate/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
+            gateway) printf 'context=.\n' >> "$GITHUB_OUTPUT"; printf 'file=gateway/Dockerfile\n' >> "$GITHUB_OUTPUT" ;;
             *) echo "No build context for $IMAGE" >&2; exit 1 ;;
           esac
       - name: Build for the smoke test
@@ -189,9 +191,13 @@ jobs:
                 { echo 'the runtime image cannot read its own modules as its own user' >&2; exit 1; }
               docker run --rm --entrypoint dsh-runtime "$reference" health >/dev/null 2>&1 || true
               ;;
-            auth|provider|browser-gate)
-              docker run --rm --entrypoint sh "$reference" -c 'exit 0' >/dev/null ||
-                { echo "$IMAGE cannot start" >&2; exit 1; }
+            gateway)
+              docker run --rm --entrypoint sh "$reference" -ec '
+                test -x /usr/local/bin/workstation-gateway
+                test -x /usr/local/bin/workstation-start
+                node --check /opt/workstation/provider/cdp.mjs
+                node --check /opt/workstation/gate/server.mjs
+              '
               ;;
           esac
           echo "Smoke-tested $reference"
@@ -305,7 +311,7 @@ jobs:
           done
           # Validate only the images this run published. A partial publish is
           # legitimate -- a dispatch may target one image -- and the other lines
-          # are still unpublished on purpose, so resolving all four would fail
+          # are still unpublished on purpose, so resolving the full set would fail
           # here for the wrong reason.
           published=()
           for file in digests/digest-*.txt; do published+=("$(awk '{print $1}' "$file")"); done

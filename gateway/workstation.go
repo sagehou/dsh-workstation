@@ -16,6 +16,8 @@ import (
 )
 
 const dshUpstream = "https://dsh-workstation-runtime:3080"
+const providerLoopback = "127.0.0.1:8081"
+const gateLoopback = "http://127.0.0.1:8082"
 
 func readSecret(name string) (string, error) {
 	data, err := os.ReadFile("/run/secrets/" + name)
@@ -28,6 +30,7 @@ func readSecret(name string) (string, error) {
 	}
 	return value, nil
 }
+
 // initRuntime wires the DSH client. It has nothing to do with the browser: DSH is
 // served by the Runtime in every deployment shape, so these fields must be set
 // even when no Chromium exists. They used to live in initBrowser, which left
@@ -110,13 +113,13 @@ func (g *gateway) websocket(w http.ResponseWriter, r *http.Request) {
 		// Only the data socket carries input, so only it goes through the gate.
 		// Any other browser WebSocket keeps talking to Selkies directly, which
 		// keeps the gate's surface to the one connection it must own.
-		if r.URL.Path == "/browser/api/websockets" {
+		if r.URL.Path == "/browser/api/websockets" || r.URL.Path == "/browser/api/websockets/" {
 			proxy = g.browserWS
 		} else {
 			proxy = g.browserDirectWS
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/_auth/") {
-		http.NotFound(w,r)
+		http.NotFound(w, r)
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())
@@ -191,12 +194,21 @@ func (g *gateway) openBrowser(w http.ResponseWriter, r *http.Request) {
 }
 
 type peer struct {
-	ID, Label string
-	Tab       bool
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Tab   bool   `json:"tab"`
 }
+
+// browserStatus mirrors the Provider's `/status` payload. The fields are exported
+// because the template reads them; `Lease` and `InFlight` come from the same
+// response and were missing here, which made the operations page fail to render
+// past the Provider row.
 type browserStatus struct {
-	State, Reason string
-	Peers         []peer
+	State    string `json:"state"`
+	Reason   string `json:"reason"`
+	InFlight bool   `json:"inFlight"`
+	Lease    bool   `json:"lease"`
+	Peers    []peer `json:"peers"`
 }
 
 var providerHTTP = &http.Client{
@@ -204,14 +216,12 @@ var providerHTTP = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-func (g *gateway) provider(r *http.Request, method, route string, body io.Reader, result any) error {
-	// The provider's control listener address comes from configuration, so this
-	// code carries no copy of the default subnet.
+func (g *gateway) provider(ctx context.Context, method, route string, body io.Reader, result any) error {
 	controlAddr := g.providerControlAddr
 	if controlAddr == "" {
-		controlAddr = "172.30.233.2:8081"
+		controlAddr = providerLoopback
 	}
-	request, err := http.NewRequestWithContext(r.Context(), method,
+	request, err := http.NewRequestWithContext(ctx, method,
 		"http://"+controlAddr+route, body)
 	if err != nil {
 		return err
@@ -234,10 +244,12 @@ func (g *gateway) provider(r *http.Request, method, route string, body io.Reader
 	return nil
 }
 func (g *gateway) controlPage(w http.ResponseWriter, r *http.Request) {
-	var status browserStatus
-	p := page{View: "control", Title: "浏览器控制", Control: status}
-	if err := g.provider(r, "GET", "/status", nil, &p.Control); err != nil {
-		p.Error = "浏览器控制服务不可用。"
+	p := page{View: "control", Title: "浏览器控制"}
+	if g.browserEnabled {
+		p.ProviderOK = g.provider(r.Context(), "GET", "/status", nil, &p.Control) == nil
+		if !p.ProviderOK {
+			p.Error = "浏览器控制服务不可用。"
+		}
 	}
 	if r.URL.Query().Get("failed") == "1" {
 		p.Error = "浏览器未接受此操作。"
@@ -263,7 +275,7 @@ func (g *gateway) controlAction(w http.ResponseWriter, r *http.Request) {
 	}
 	body, _ := json.Marshal(args)
 	location := "/_auth/control"
-	if err := g.provider(r, "POST", "/"+action, strings.NewReader(string(body)), nil); err != nil {
+	if err := g.provider(r.Context(), "POST", "/"+action, strings.NewReader(string(body)), nil); err != nil {
 		location += "?failed=1"
 		g.failure(r, "browser_"+action+"_denied")
 	} else {

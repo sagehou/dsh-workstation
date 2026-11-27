@@ -57,6 +57,9 @@ type gateway struct {
 	// address nothing listens on and surface as a stalled WebSocket instead of a
 	// clear refusal.
 	browserEnabled bool
+	// debugPeer, when set, is accepted in place of the edge address so the
+	// rendered pages can be exercised from inside the container (AUTH_DEBUG_PEER).
+	debugPeer string
 }
 
 func cookie(r *http.Request, name string) string {
@@ -122,6 +125,13 @@ func document(r *http.Request, method, uri string) bool {
 		clean != "/browser/api" && !strings.HasPrefix(clean, "/browser/api/")
 }
 
+// fromEdge reports whether the request came from the trusted reverse proxy, or
+// from the diagnostic peer when one is configured.
+func (g *gateway) fromEdge(r *http.Request) bool {
+	addr := ip(r)
+	return addr == g.edge || (g.debugPeer != "" && addr == g.debugPeer)
+}
+
 func (g *gateway) session(r *http.Request) (s session, err error) {
 	token := cookie(r, sessionCookie)
 	if len(token) != 43 {
@@ -151,11 +161,13 @@ func (g *gateway) loginDone(w http.ResponseWriter, r *http.Request, token, next 
 	setCookie(w, preCookie, "", -1)
 	setCookie(w, csrfCookie, "", -1)
 	next = safePath(next)
+	target, _, _ := strings.Cut(next, "?")
+	target = path.Clean(target)
 	to := next
 	switch {
-	case next == "/browser" || strings.HasPrefix(next, "/browser/"):
+	case target == "/browser" || strings.HasPrefix(target, "/browser/"):
 		to = "/_auth/browser"
-	case !strings.HasPrefix(next, "/_auth/"):
+	case target != "/mgmt" && !strings.HasPrefix(target, "/mgmt/") && !strings.HasPrefix(target, "/_auth/"):
 		to = nextURL("/_auth/dsh", next)
 	}
 	if asJSON {
@@ -175,7 +187,7 @@ func (g *gateway) verify(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if r.Method != "GET" || r.URL.Path != "/verify" || ip(r) != g.edge ||
+	if r.Method != "GET" || r.URL.Path != "/verify" || !g.fromEdge(r) ||
 		r.Header.Get("X-Forwarded-Proto") != "https" || r.Header.Get("X-Forwarded-Host") != g.host {
 		http.NotFound(w, r)
 		return
@@ -248,12 +260,12 @@ func writeJSON(w http.ResponseWriter, value any) {
 }
 func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 	security(w)
-	if ip(r) != g.edge || r.Host != g.host {
+	if !g.fromEdge(r) || r.Host != g.host {
 		http.NotFound(w, r)
 		return
 	}
-	if strings.EqualFold(r.Header.Get("Upgrade"),"websocket") {
-		g.websocket(w,r)
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		g.websocket(w, r)
 		return
 	}
 	if r.Method == "POST" {
@@ -307,6 +319,10 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = w.Write(passkeyJS)
 		return
+	case "GET /_auth/ui.js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write(uiJS)
+		return
 	}
 
 	s, err := g.session(r)
@@ -327,17 +343,66 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		g.dsh(w, r)
 	case "GET /_auth/browser":
 		g.openBrowser(w, r)
-	case "GET /_auth/control":
-		g.controlPage(w, r)
+	case "POST /_auth/control/record":
+		// Start/stop the browser recording (#31). The action is a fixed enum so a
+		// caller cannot reach an arbitrary Provider route through this endpoint.
+		action := r.PostForm.Get("action")
+		if action != "start" && action != "stop" {
+			http.Error(w, "invalid recording action", http.StatusBadRequest)
+			return
+		}
+		if err := g.provider(r.Context(), "POST", "/record/"+action, strings.NewReader("{}"), nil); err != nil {
+			g.failure(r, "browser_record_denied")
+			http.Error(w, "recording refused", http.StatusConflict)
+			return
+		}
+		g.failure(r, "browser_record_"+action)
+		writeJSON(w, map[string]string{"recording": action})
+	case "POST /_auth/control/takeover":
+		// JSON counterpart of the control page's takeover button, for the sidebar
+		// plugin (#29). CSRF is already enforced by `csrf(r)` above for every POST,
+		// so this cannot be driven from another origin.
+		if err := g.provider(r.Context(), "POST", "/takeover", strings.NewReader("{}"), nil); err != nil {
+			g.failure(r, "browser_takeover_denied")
+			http.Error(w, "takeover refused", http.StatusConflict)
+			return
+		}
+		g.failure(r, "browser_takeover")
+		writeJSON(w, map[string]string{"state": "HUMAN"})
+	case "GET /_auth/control/state":
+		// Read-only JSON for the Sidebar plugin (#29): it polls this to open the
+		// browser tab when the Agent takes the lease. Session-authenticated like
+		// every other /_auth/ route; the Provider credential never leaves this
+		// process.
+		var status browserStatus
+		if err := g.provider(r.Context(), "GET", "/status", nil, &status); err != nil {
+			unavailable(w)
+			return
+		}
+		writeJSON(w, status)
 	case "POST /_auth/control":
 		g.controlAction(w, r)
-	case "GET /_auth/account":
+	case "GET /mgmt", "GET /_auth/operations":
+		g.operationsPage(w, r)
+	case "GET /mgmt/backup":
+		g.backupPage(w, r, s)
+	case "POST /mgmt/runtime":
+		g.runtimeControl(w, r, s)
+	case "GET /_auth/stepup":
+		g.stepUpPage(w, r)
+	case "POST /_auth/stepup":
+		if g.allow(w, r, "stepup") {
+			g.stepUp(w, r, s)
+		}
+	case "GET /mgmt/browser", "GET /_auth/control":
+		g.controlPage(w, r)
+	case "GET /mgmt/account", "GET /_auth/account":
 		g.accountPage(w, r, s)
 	case "POST /_auth/logout", "POST /_auth/sessions/revoke", "POST /_auth/sessions/revoke-all":
 		g.revoke(w, r, s)
 	case "POST /_auth/passkey/register/begin", "POST /_auth/passkey/register/finish", "POST /_auth/passkey/remove",
 		"POST /_auth/recovery/regenerate", "POST /_auth/password/change", "POST /_auth/totp/rotate", "POST /_auth/totp/confirm":
-		if s.Stepped <= time.Now().Unix()-300 {
+		if !stepped(s) {
 			invalid(w)
 			return
 		}

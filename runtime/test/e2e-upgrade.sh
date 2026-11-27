@@ -11,7 +11,15 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 repo="$(cd -- .. && pwd)"
 work="$(mktemp -d /tmp/dsh-runtime-e2e.XXXXXXXX)"
-trap 'rm -rf -- "$work"' EXIT
+web_pid=
+cleanup() {
+  if [[ -n $web_pid ]]; then
+    kill "$web_pid" 2>/dev/null || true
+    wait "$web_pid" || true
+  fi
+  rm -rf -- "$work"
+}
+trap cleanup EXIT
 
 home="$work/dsh-home"
 backup="$work/backup"
@@ -63,6 +71,11 @@ cat > "$stubs/node" <<STUB
 if [[ \${1:-} == */web.mjs && \${2:-} == probe ]]; then
   exit 0
 fi
+if [[ \${1:-} == */web.mjs && \${2:-} == serve && -n \${DSH_TEST_WEB_READY:-} ]]; then
+  trap 'exit 0' TERM
+  touch "\$DSH_TEST_WEB_READY"
+  while :; do sleep 0.1; done
+fi
 exec "$real_node" "\$@"
 STUB
 chmod +x "$stubs/node"
@@ -90,6 +103,31 @@ runtime_cmd install 0.2.2-rc.1 >/dev/null || fail install 'initial install faile
 runtime_cmd select 0.2.2-rc.1 >/dev/null || fail install 'initial select failed'
 expect install "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.1
 pass install 'installed and selected 0.2.2-rc.1 with a pinned bundle in place'
+
+env -u MAINTENANCE_ADDR DSH_TEST_WEB_READY="$work/web-ready" bash "$runtime" serve &
+web_pid=$!
+for ((attempt=0; attempt<50; attempt++)); do
+  [[ -f $work/web-ready ]] && break
+  sleep 0.1
+done
+[[ -f $work/web-ready ]] || fail locking 'the Web supervisor did not start'
+online_backup="$(runtime_cmd backup)"
+online_id="$(sed -n 's/^Backup id: //p' <<<"$online_backup")"
+runtime_cmd check "$online_id" >/dev/null
+for action in upgrade select rollback restore; do
+  target=0.2.2-rc.5
+  if [[ $action == restore ]]; then target="$online_id"; fi
+  if output="$(runtime_cmd "$action" "$target" 2>&1)"; then
+    fail locking "$action was allowed while serving"
+  fi
+  [[ $output == *'runtime is serving or being modified'* ]] || fail locking "unexpected refusal: $output"
+done
+expect locking "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.1
+[[ ! -e $home/runtime/versions/0.2.2-rc.5 ]] || fail locking 'the blocked upgrade modified the installation'
+kill "$web_pid"
+wait "$web_pid"
+web_pid=
+pass locking 'Web and an online backup coexist; independent write commands are refused until Web exits'
 
 # --- 2. a bundle that pins another DSH blocks the switch --------------------
 if runtime_cmd upgrade 0.2.2-rc.5 >"$work/blocked.log" 2>&1; then

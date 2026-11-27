@@ -1,0 +1,45 @@
+#!/usr/bin/python3
+
+import os
+import pwd
+import select
+import socket
+from socketserver import BaseRequestHandler, ThreadingUnixStreamServer
+
+
+class Relay(BaseRequestHandler):
+    def handle(self):
+        try:
+            with socket.create_connection(("127.0.0.1", 9222), timeout=2) as chromium:
+                chromium.settimeout(None)
+                peers = {self.request: chromium, chromium: self.request}
+                while True:
+                    readable, _, _ = select.select(peers, [], [])
+                    for peer in readable:
+                        chunk = peer.recv(65536)
+                        if not chunk:
+                            return
+                        peers[peer].sendall(chunk)
+        except OSError:
+            # Chromium may still be starting or may have closed this connection.
+            return
+
+
+if __name__ == "__main__":
+    directory = "/run/workstation-cdp"
+    operator = pwd.getpwnam("abc")
+    os.chown(directory, operator.pw_uid, operator.pw_gid)
+    os.chmod(directory, 0o700)
+    os.setgroups([])
+    os.setgid(operator.pw_gid)
+    os.setuid(operator.pw_uid)
+    os.umask(0o077)
+
+    path = directory + "/cdp.sock"
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    with ThreadingUnixStreamServer(path, Relay) as server:
+        server.daemon_threads = True
+        server.serve_forever()

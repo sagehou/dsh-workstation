@@ -4,30 +4,37 @@
 
 项目所有者批准首版单管理员公网 Compose。首版正式浏览器入口是已认证的独立浏览器/控制页面；原生 Sidebar 延后。#4 的已按住输入释放和独占交接通过前，不开放 Agent 浏览器控制；#11 的出口策略通过前，不开放 Agent 广泛访问不可信网站。[ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.zh-CN.md) · [M0](M0-evidence.zh-CN.md) · [Provider 验证](M0-provider-evidence.zh-CN.md) · [M1 Runtime 结果](M1.zh-CN.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
 
-## 复用 Traefik 的三网拓扑
+## Compose 网络
 
 | 网络 | 用途 |
 | --- | --- |
-| 已有代理网 | Go Auth 监听。Auth 检查可信代理网上 Traefik 的确切来源 IP。 |
-| `workstation` | DSH 和官方 MCP。Traefik 和 Auth 在这里连接 DSH。 |
-| `browser` | Chromium、Selkies 和要求凭据的 Provider 管理监听器。Traefik 转发 HTTP，Auth 转发 WebSocket。 |
+| 已有代理网 | Gateway 的公开和校验监听器。Gateway 核对 Traefik 的确切来源 IP。 |
+| `workstation` | Runtime、Gateway 和 Browser 共用。Traefik 在这里访问 DSH 和 Selkies HTTP。 |
 
-五个工作台容器复用外部 Traefik。Runtime 和 Chromium 各自保留出站路径。[部署指南](../../deploy/public/README.zh-CN.md)
+## 三服务候选版
 
-CDP 中继与 Chromium 共用网络命名空间，通过专用 Unix socket 卷转发回环 CDP。中继写入 socket，Provider 只读挂载。Playwright 从 Provider 自己的回环监听器接入。拓扑无需自定义宿主机防火墙规则。
+完整版运行 `browser`、`gateway` 和 `runtime`，精简版运行 `gateway` 和 `runtime`。两种形态都使用一张 `workstation` 网络及外部代理网。Provider 与输入门禁在 Gateway 内运行，LinuxServer 在 Browser 内启动 CDP 中继。中继写入 Unix socket，Gateway 只读挂载。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](../adr/0007-three-service-deployment.zh-CN.md)
+
+### 共享网络验证
+
+提交 `21cdcdc` 的四组完整部署测试均通过，测试对可信 HTTPS 站点启用 Agent MCP。`bash deploy/public/ci.sh` 使用 Runtime `0.2.2`、Gateway `0.1.0`、官方 DSH `0.2.2-rc.1`、LinuxServer Chromium `075b0b99-ls64` 和 Playwright `1.61.1`。实测只有一张业务网，Selkies 页面可达，两个 Nginx 监听端口都拒绝直连数据和令牌接口。浏览器测试验证交接和断线时释放实际按住的鼠标键，并在 Chromium 容器重建后验证 Gateway 恢复连接。精简版和匿名拉取已发布 `81feffd` 部署的作业也通过。[Public Compose 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777) · [Issue #37](https://github.com/sagehou/dsh-workstation/issues/37)
+
+`bash deploy/test/init.test.sh` 确认移除旧浏览器子网配置时保留 CA、Runtime 证书和认证密钥。SSH 私有预览也通过。目标主机的预检和恢复演练由部署任务验收。[M1 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45923718776) · [目标主机验收](https://github.com/sagehou/dsh-workstation/issues/6)
+
+仍分工作台网络和浏览器网络的三服务提交 `179bdaa` 已通过四组 Traefik 矩阵和精简版测试。[Public Compose 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45914350105)
 
 ### 在 GitHub Actions 复现
 
 Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 GitHub 托管运行器执行 `bash deploy/public/ci.sh`。集成测试使用单独启动的 Traefik、临时证书及结果确定的模型服务。[Public Compose](../../.github/workflows/public-compose.yml)
 
-作业矩阵的版本只来自 [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env)。每条腿拉取 `tag@digest`，跑同一套 Compose、同一个边缘探测和同一套登录后浏览器检查，唯一差异是 Traefik 镜像。[#3](https://github.com/sagehou/dsh-workstation/issues/3)
+作业矩阵从 `deploy/public/traefik-matrix.env` 读取版本。每个固定的 `tag@digest` 分别在默认 `172.30.241.0/24` 和自定义 `10.71.241.0/24` 工作台子网上运行同一套 Compose、边缘探测与登录后浏览器检查。[矩阵配置](../../deploy/public/traefik-matrix.env) · [#3](https://github.com/sagehou/dsh-workstation/issues/3)
 
 ### Traefik 兼容性矩阵
 
 | Traefik | 固定摘要 | 状态 |
 | --- | --- | --- |
-| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | 在 `540ddd5` 通过全栈测试 |
-| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | 在 `540ddd5` 通过全栈测试 |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | `21cdcdc` 通过两组子网测试。[默认](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179100) · [自定义](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179301) |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | `21cdcdc` 通过两组子网测试。[默认](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179126) · [自定义](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179153) |
 
 已记录通过的最低版本为 **v3.7.14**。两条腿都在[运行 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598)通过，检查项完全一致：`v3.7.14`（[作业 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)）与 `v3.7.19`（[作业 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)）；在 `43065af` 的[运行 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367) 再次通过。
 
@@ -41,7 +48,19 @@ CONNECT 在两个版本上行为不同，探测按版本记录实际观察值：
 - `v3.7.14` 完全没有 `denyConnect`，`CONNECT` 会落到路由器，返回 **404**。它仍然不是隧道，但不是 501 那种保证。
 - 迁移文档中 `v3.7.9` 关于 HTTP/1 `CONNECT` 的说明与 `v3.7.14` 源码不符，因此 `v3.7.14` 的实际状态以运行结果记录，不按文字推断。
 
-### 实际结果
+### Gateway 候选版验证
+
+以下结果对应早期六容器 Gateway 候选版 `f57e92d`。
+
+- Go 1.27.3 的 `go test -race -v ./...` 通过。四组 `bash deploy/public/ci.sh` 使用 DSH 0.2.2-rc.1 与 Playwright 1.61.1，验证 HTTPS 登录、Passkey、会话恢复、Gateway 管理页、备份创建与校验和浏览器输入交接。[f57e92d 的 Public Compose](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100)
+- `bash deploy/public/ci-core.sh` 确认仅 Gateway 与 Runtime 在运行，真实 TOTP 登录可进入 DSH，已登录的浏览器数据 WebSocket 握手返回 503。独立的 `release-compose` 作业匿名拉取 `81feffd` 对应的已发布 Auth 镜像。[精简版作业](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896781308) · [发布镜像作业](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+- Chromium 156.0.8078.4 和 Playwright 1.61.1 使用测试数据渲染 Gateway 实际页面，验证桌面和窄屏布局、系统暗色、键盘操作、登录与备份校验反馈。[界面验收记录](https://github.com/sagehou/dsh-workstation/issues/35#issuecomment-7191691647)
+
+集成测试在 GitHub 托管运行器完成，界面实测使用本地测试数据。目标主机的验收仍待完成。[部署验收 Issue](https://github.com/sagehou/dsh-workstation/issues/6)
+
+## 历史验证
+
+### `333e6f3` 的实际结果
 
 提交 `333e6f3` 的作业通过（当时只有 Traefik 3.7.19 一条腿）。使用 Traefik `3.7.19`、Chromium `156.0.8078.79`、Selkies `2.2.1`、DSH `0.2.2-rc.1` 和 Playwright `1.61.1`。[提交 `333e6f3` 的 GitHub Actions 作业](https://github.com/sagehou/dsh-workstation/actions/runs/44688814854/job/136129433239)
 

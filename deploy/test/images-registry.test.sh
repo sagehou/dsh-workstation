@@ -70,7 +70,7 @@ set -e
 (( status != 0 )) || fail 'a non-GHCR registry override was accepted'
 pass 'a registry other than GHCR or loopback is refused'
 
-# Build one image rather than all four: the digest mechanism is per-image and
+# Build one image: the digest mechanism is per-image and
 # identical, and the full stack is covered by the Public Compose job. The
 # smallest context keeps the test short.
 image=runtime

@@ -33,8 +33,21 @@ chosen() {
   fi
 }
 lock() {
+  # The serving process keeps this lock after startup releases the state lock.
+  # Both Compose services see the same inode through DSH_HOME.
+  exec 8>"$root/.serve.lock"
+  flock -n -x 8 || die 'runtime is serving or being modified; stop it before maintenance'
   exec 9>"$root/.lock"
   flock -n -x 9 || die 'runtime is serving or being modified; stop it before maintenance'
+  chosen
+}
+# A backup only reads. It still excludes an upgrade (which holds the exclusive
+# lock), so it cannot capture a half-switched state, but it does not exclude the
+# serving process — which is the normal case, since the management page is used
+# while DSH is up.
+lock_shared() {
+  exec 9>"$root/.lock"
+  flock -n -s 9 || die 'an upgrade or restore is in progress; retry when it finishes'
   chosen
 }
 record() { node "$state" record --append "$audit" --json-file "$1" > /dev/null; }
@@ -197,8 +210,19 @@ case "${1:-}" in
         touch "$bundle"
       fi
     fi
-    # Keep the lock for the lifetime of the supervisor and its Web process.
-    exec node "$web" serve "$(bin "$active")"
+    # Backups may take the state lock while Web holds the serving lock.
+    flock -u 9
+    exec 9>&-
+    if [[ -z ${MAINTENANCE_ADDR:-} ]]; then
+      exec node "$web" serve "$(bin "$active")"
+    fi
+    node "$lib/maintenance.mjs" 8>&- &
+    maintenance_pid=$!
+    trap 'kill "$maintenance_pid" 2>/dev/null || true; wait "$maintenance_pid" || true' EXIT
+    node "$web" serve "$(bin "$active")" &
+    web_pid=$!
+    trap 'kill "$web_pid" 2>/dev/null || true; wait "$web_pid" || true; exit 0' TERM INT
+    wait "$web_pid"
     ;;
   install) lock; install_version "${2:-}" ;;
   upgrade)
@@ -422,7 +446,7 @@ EOF
       require("node:fs").writeFileSync(out, JSON.stringify({ phase: "pointer-rollback", at, from, to }))
     ' "$(stamp)" "$from" "$to")"
     ;;
-  backup) lock; snapshot ;;
+  backup) lock_shared; snapshot ;;
   audit)
     [[ -f $audit ]] || { printf 'No upgrade records.\n'; exit 0; }
     node -e 'for (const line of require("node:fs").readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean)) { const r = JSON.parse(line); console.log([r.at, r.phase, r.from ? `${r.from} -> ${r.to}` : "", r.backup ?? "", r.migrated === undefined ? "" : `migrated=${r.migrated}`].filter(Boolean).join("  ")) }' "$audit"
@@ -447,6 +471,18 @@ EOF
     '
     ;;
   versions) exec pnpm view --registry https://registry.npmjs.org @deepseek-ai/dsh versions --json ;;
+  components)
+    # What this image and this home actually contain, reported rather than
+    # assumed: the management page must show the Node the container runs.
+    printf 'node %s\n' "$(node --version 2>/dev/null || echo unknown)"
+    printf 'pnpm %s\n' "$(pnpm --version 2>/dev/null || echo unknown)"
+    printf 'git %s\n' "$(git --version 2>/dev/null | awk '{print $3}' || echo unknown)"
+    printf 'python %s\n' "$(python3 --version 2>/dev/null | awk '{print $2}' || echo unknown)"
+    printf 'os %s\n' "$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || echo unknown)"
+    printf 'arch %s\n' "$(uname -m)"
+    printf 'runtime-image %s\n' "${WORKSTATION_RUNTIME_IMAGE:-unknown}"
+    if [[ -n ${active:-} ]]; then printf 'dsh-active %s\n' "$active"; fi
+    ;;
   status)
     chosen
     printf 'Active: %s\nPrevious: %s\n' "${active:-none}" "${previous:-none}"
@@ -462,5 +498,5 @@ EOF
   health)
     exec node "$web" health
     ;;
-  *) die 'usage: dsh-runtime {serve|install VERSION|upgrade VERSION|select VERSION|rollback|verify|restore BACKUP_ID|check BACKUP_ID|backups|backup|approve PACKAGE@VERSION|audit|compat|inspect|status|versions|health|launch-url}' ;;
+  *) die 'usage: dsh-runtime {serve|install VERSION|upgrade VERSION|select VERSION|rollback|verify|restore BACKUP_ID|check BACKUP_ID|backups|backup|approve PACKAGE@VERSION|audit|compat|inspect|status|components|versions|health|launch-url}' ;;
 esac
