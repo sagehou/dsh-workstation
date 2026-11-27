@@ -24,7 +24,7 @@ The current Compose configuration runs **Runtime + Gateway** in core and **Runti
 | Public access | One operator signs in over HTTPS using password and TOTP or Passkey. Go Gateway provides session management and Traefik ForwardAuth. `/mgmt` opens the console for the administrator, browser control and Runtime maintenance. |
 | Browser | Operator and Agent share Chromium. Use the authenticated standalone desktop at `/browser/`. The Browser Bundle adds an optional **浏览器** tab to the right sidebar in DSH conversations. |
 | Input handoff | Held input is released at the Selkies boundary on handover and on disconnect, both measured on the real stack; held keys, mid-press expiry, mid-press restart and Provider abnormal exit are covered by tests against a fake upstream only. [#4](https://github.com/sagehou/dsh-workstation/issues/4) |
-| Images | The published stack uses Runtime `0.2.3` and Gateway `0.1.1` pinned by digest. Full includes the pinned LinuxServer Chromium image. [Release status](docs/release.md#current-deployment) · [Deployment evidence](docs/roadmap/public-compose.md) |
+| Images | The published stack uses Runtime `0.2.4` and Gateway `0.1.2` pinned by digest. Full includes the pinned LinuxServer Chromium image. [Release status](docs/release.md#current-deployment) · [Deployment evidence](docs/roadmap/public-compose.md) |
 
 ## Project documents
 

@@ -11,11 +11,11 @@ error, so there is no code path from that file to a floating tag.
 
 ## Current deployment
 
-Runtime `0.2.3` and Gateway `0.1.1` are built from `7509e8c` for Linux amd64. Use the commit recorded in `deploy/public/release-commit` on `main` for the matching Compose files and image digests. Regenerate the Traefik routes from that checkout so the routes use the new service endpoints. [Image inventory](../deploy/public/images.env) · [Publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45947520822) · [Deployment instructions](../deploy/public/README.md#traefik)
+Runtime `0.2.4` and Gateway `0.1.2` are built from `fefaa42` for Linux amd64. Use the commit recorded in `deploy/public/release-commit` on `main` for the matching Compose files and image digests. Regenerate the Traefik routes from that checkout. [Image inventory](../deploy/public/images.env) · [Publish run](https://github.com/sagehou/dsh-workstation/actions/runs/46018906944) · [Deployment instructions](../deploy/public/README.md#traefik)
 
-The release includes DSH upgrade progress, default workspace initialization, and a persistent shared skills directory. The HTTPS Compose drill upgraded DSH `0.2.2-rc.1` to `0.2.2-rc.5` with the browser Bundle installed, exercised the browser MCP tools after recreation, and verified the Profile. [Compose drill](https://github.com/sagehou/dsh-workstation/actions/runs/45946909560/job/140333615353)
+This release adds the browser tab in the official DSH conversation sidebar, a redesigned Gateway console, and DSH upgrades initiated from the overview. The source Compose run verified compatibility failure feedback and a successful upgrade from DSH `0.2.2-rc.1` to `0.2.2-rc.5`, with the sidebar and Browser Bundle MCP tools working on both versions. [Compose drill](https://github.com/sagehou/dsh-workstation/actions/runs/46017797942/job/140569361399)
 
-The previous deployment at `0e1ef08` uses Runtime `0.2.2` and Gateway `0.1.0`. The earlier deployment at `81feffd` uses Runtime `0.2.1`, Auth `0.1.1`, Provider `0.2.0`, and browser-gate `0.1.0`. Use either deployment's own checkout for its Compose files and pinned digests. [Previous publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [Earlier deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+The previous deployment at [`0381396`](https://github.com/sagehou/dsh-workstation/commit/0381396a5d21cafd55e01083ab43d8a35f8ec2d0) uses Runtime `0.2.3` and Gateway `0.1.1`. Use its matching checkout and pinned digests for rollback. Earlier deployment commits include `0e1ef08` and `81feffd`. [Previous publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45947520822)
 
 ## What guarantees the chain
 
@@ -171,7 +171,5 @@ superseded.
 
 ## Not yet verified
 
-- Upgrade and rollback across two real releases on a deployment host has not
-  been run; there is only one release. The digest mechanism itself is proven,
-  but not the operator procedure on a real host.
+- Target-host validation for each new deployment is tracked in [#6](https://github.com/sagehou/dsh-workstation/issues/6).
 - Only `linux/amd64` is published. There is no multi-architecture claim.

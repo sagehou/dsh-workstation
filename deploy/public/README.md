@@ -204,7 +204,7 @@ Before replacing an older Runtime container, export any files in its `/home/node
 
 ### Traefik
 
-- For Runtime 0.2.3 and Gateway 0.1.1, use their matching deployment checkout. Rerun `deploy/public/init.sh --release` with the saved domain, proxy, Traefik container and subnet, then load its generated route file. Use `http://gateway:8080/mcp` in any custom DSH MCP configuration that references the Workstation provider.
+- For Runtime 0.2.4 and Gateway 0.1.2, use their matching deployment checkout. Rerun `deploy/public/init.sh --release` with the saved domain, proxy, Traefik container and subnet, then load its generated route file. Use `http://gateway:8080/mcp` in any custom DSH MCP configuration that references the Workstation provider.
 - To retain the attachment across Traefik recreation, declare `dsh-workstation_workstation` as an external network in Traefik's Compose.
 - If Traefik's IP on the proxy network changes, use the teardown in [Existing deployment migration](#migrate-from-the-auth-service), rerun the initializer with the saved settings, and follow step 4 to reconnect Traefik and reload the routes.
 
@@ -232,7 +232,7 @@ The Provider tries to reconnect automatically. If the control page still shows `
 
 ### DSH versions
 
-On first start, Runtime installs official DSH `0.2.2-rc.1`. When Agent MCP is enabled, the official Plugin Manager adds the Workstation browser Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
+On first start, Runtime installs official DSH `0.2.2-rc.1`. In a full deployment, the official Plugin Manager adds the Workstation browser Bundle to the persistent Web Profile. Package lifecycle scripts stay disabled during Runtime and Profile installation. The Bundle uses the verified DSH version.
 
 Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenance commands against the public Compose with `--env-file .env.public`. A version rollback changes the selected install. Restoring migrated data requires a matching backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
 
