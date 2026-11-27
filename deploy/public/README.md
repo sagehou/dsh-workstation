@@ -9,22 +9,17 @@ English · [简体中文](README.zh-CN.md)
 - Use a **Linux amd64** host with rootful Docker Engine 28+ and Compose v2. Use a non-root user with Docker access. No registry credential is needed: the workstation images are public.
 - The release publishes `linux/amd64` only. Do not run it on another architecture.
 - Point **DNS** at the Traefik host. Traefik serves public ports 80 and 443 and manages the certificates.
-- Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. You do **not** have to upgrade Traefik: CI pins and exercises `v3.7.14` and `v3.7.19` through the same full stack. [Compatibility matrix](../../docs/roadmap/public-compose.md#traefik-compatibility-matrix) records which versions have a passing run.
-- Check that neither **Docker subnet** overlaps your host routes. `bash deploy/network.sh check` does this and refuses to continue on a conflict. See [Network addresses](#network-addresses).
+- Use **Traefik** already running on the same Docker host. Identify its trusted Docker network, HTTPS entrypoint, certificate resolver, and the directory watched by its file provider. CI pins and exercises `v3.7.14` and `v3.7.19` through the full stack. [Compatibility matrix](../../docs/roadmap/public-compose.md#traefik-compatibility-matrix)
+- Check the workstation subnet against host routes and Docker networks. [Network addresses](#network-addresses)
 
 ## Network addresses
 
-The two Compose networks and every address inside them come from one place:
-`deploy/network.sh`. Nothing has to be edited by hand, and the initializer
-refuses to run when the plan conflicts with the host.
+Runtime, Gateway and Browser share `workstation`. Traefik joins it to reach DSH
+and Selkies, and uses its existing proxy network for Gateway and ForwardAuth.
 
-| Setting | Default | Used for |
-| --- | --- | --- |
-| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime and Gateway's authenticated MCP listener. |
-| `BROWSER_SUBNET` | `172.30.233.0/24` | Browser, Gateway and Traefik's connection to Selkies. |
-
-Runtime uses offset `.2` and Gateway MCP uses `.3` on the workstation network.
-Docker assigns dynamic addresses from the upper half of each subnet.
+`WORKSTATION_SUBNET` defaults to `172.30.241.0/24`. `deploy/network.sh` derives
+Runtime and Gateway MCP addresses at offsets `.2` and `.3`. Docker assigns
+dynamic addresses from the upper half of the subnet.
 
 Check the plan against the host before starting anything:
 
@@ -38,19 +33,16 @@ It reports three things, and creates or changes nothing:
 - a subnet that overlaps an **existing Docker network**;
 - an invalid CIDR, a prefix outside `/16`..`/28`, or a CIDR with host bits set.
 
-If it fails, pick two unused RFC1918 ranges and pass them to the initializer:
+If it fails, pass an unused RFC1918 subnet to the initializer:
 
 ```bash
-WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+WORKSTATION_SUBNET=10.71.241.0/24 \
   bash deploy/public/init.sh workstation.example.net proxy traefik
 ```
 
-The Runtime certificate is issued for the derived address, so re-running the
-initializer with different subnets is refused rather than silently reissuing
-the internal CA that every service trusts. `--reissue` performs that change
-deliberately; it replaces the CA and the Runtime certificate, keeps the other
-secrets, and requires recreating the containers so they take their new
-addresses.
+Changing `WORKSTATION_SUBNET` requires `--reissue` to replace the CA and Runtime
+certificate. It preserves the other secrets. Recreate the containers to use the
+new addresses.
 
 ## Choose a deployment shape
 
@@ -61,7 +53,7 @@ addresses.
 
 Both shapes reuse the existing Traefik. Including that container brings the totals to 3 and 4. Run `gateway-admin` and `maintenance` on demand with `docker compose run --rm --no-deps`.
 
-Core runs DSH and Gateway with its browser workers stopped. With a valid session, `/_auth/browser` and the browser data WebSocket return 503. Full starts Provider and the input gate inside Gateway. Browser runs Chromium, Selkies and the CDP relay. Keep `browser/cdp-relay` from the same checkout with the Compose files so LinuxServer can start it. [Three-service topology](../../docs/roadmap/public-compose.md#three-service-candidate)
+Core runs DSH and Gateway with its browser workers stopped. With a valid session, `/_auth/browser` and the browser data WebSocket return 503. Full starts Provider and the input gate inside Gateway. Browser runs Chromium, Selkies and the CDP relay. Keep `browser/cdp-relay` and `browser/selkies-guard.sh` executable and use them from the same checkout as Compose. [Three-service topology](../../docs/roadmap/public-compose.md#three-service-candidate)
 
 Set `COMPOSE_FILE` from the checkout root and keep it for every Compose command in this deployment. Full uses the base file.
 
@@ -75,7 +67,7 @@ Core adds the override file.
 export COMPOSE_FILE=compose.yml:deploy/public/compose.core.yml
 ```
 
-When moving an existing full deployment to core, run `down` with the full configuration first and keep the named volumes.
+When moving an existing full deployment to core, detach Traefik from `dsh-workstation_workstation`, run `down` with the full configuration, and keep the named volumes. Reconnect Traefik in step 4.
 
 ## Install
 
@@ -118,9 +110,8 @@ docker compose --env-file .env.public build
 
 #### Existing deployment
 
-Re-run the initializer with the original domain, state directory and subnets to
-preserve credentials and certificates. Skip account bootstrap for an existing
-administrator. [Auth migration](#migrate-from-the-auth-service)
+Keep the original domain, state directory and workstation subnet. Skip account
+bootstrap for an existing administrator. [Existing deployment migration](#migrate-from-the-auth-service)
 
 ### 3. Create the administrator
 
@@ -139,12 +130,6 @@ Connect Traefik once to the workstation network after the services start.
 ```bash
 docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420 &&
   docker network connect dsh-workstation_workstation "$traefik"
-```
-
-For full, also connect Traefik once to the browser network.
-
-```bash
-docker network connect dsh-workstation_browser "$traefik"
 ```
 
 Install the routes in the directory Traefik watches. Use `ps` to check the running services.
@@ -180,7 +165,7 @@ For a lost connection or tab, create a new DSH session and grant it a lease. To 
 
 ### The input gate
 
-`browser-gate` sits between the login proxy and the Chromium data socket, and it is the only path that carries input. The pinned Selkies decides input authority per frame against its live token table and installs a new table *before* announcing the change, so a release frame sent after a revocation is dropped. That is why a mouse button held at handoff used to stay down for the whole Agent lease. The gate releases held input with Selkies' own `reset_keyboard()` and `release_mouse_buttons()` primitives *before* the Provider takes authority, and waits for the upstream to acknowledge the frames. If it cannot, it closes that socket while it still holds authority so Selkies releases on the departure path, and the lease is refused.
+`browser-gate` forwards operator input to Selkies. Browser's Nginx accepts the data WebSocket and token administration only from Gateway on `workstation`. The gate releases held input and waits for Selkies to acknowledge it before Provider changes authority. If it cannot confirm release, it closes the socket while it still holds authority so Selkies releases held input on disconnect, and the lease is refused.
 
 Check it without touching the browser:
 
@@ -203,8 +188,8 @@ Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME b
 
 ### Traefik
 
-- To retain the two workstation networks across Traefik recreation, declare them as external networks in Traefik's Compose.
-- If Traefik's IP on the proxy network changes, rerun the initializer with the same domain, entrypoint, and resolver. Then run `docker compose --env-file .env.public up -d --no-build gateway`.
+- To retain the attachment across Traefik recreation, declare `dsh-workstation_workstation` as an external network in Traefik's Compose.
+- If Traefik's IP on the proxy network changes, use the teardown in [Existing deployment migration](#migrate-from-the-auth-service), rerun the initializer with the saved settings, and follow step 4 to reconnect Traefik and reload the routes.
 
 ### Browser recovery
 
@@ -242,32 +227,33 @@ Back up DSH_HOME before changing a Profile or version. Run the Runtime maintenan
 
 ### Migrate from the `auth` service
 
-These steps also apply when upgrading from the six-container Gateway candidate.
+These steps also apply to a Gateway checkout that still has a separate Browser network.
 
-1. Confirm the destination release resolves both digests with `bash deploy/public/images.sh`. Stop the old stack and back up `auth-data` and `.workstation/`. Then run `docker compose --env-file .env.public down` with the old Compose files and the same project name. Keep the named volumes. This releases the old Provider address before Gateway binds it.
-2. Switch to the destination release in the same deployment. Run the initializer with the saved domain, state path, external proxy network and Traefik options. Install the regenerated `routes.yml` over Traefik's existing Workstation route file so it points to `dsh-workstation-gateway-edge`.
-3. Start the stack with `up -d --no-build --wait`. `gateway` opens the existing `auth-data` SQLite volume with the saved `auth-key`. Browser reuses its hostname and profile volume. Provider reuses its state volume. Confirm your existing login, `/mgmt`, and `/browser/` in a full deployment.
+1. For a published destination, confirm `bash deploy/public/images.sh` resolves both digests. Stop the old stack and back up `.env.public`, `.workstation/`, and the named volumes. Disconnect Traefik from `dsh-workstation_workstation` and `dsh-workstation_browser` where attached. Run `docker compose --env-file .env.public down` with the old Compose files and same project name. Keep the named volumes.
+2. Switch to the destination checkout. Follow [step 2](#2-set-the-domain-and-traefik-values) with the saved domain, state path and Traefik settings. Pass the saved `WORKSTATION_SUBNET` if it is customized. The initializer drops `BROWSER_SUBNET` and `BROWSER_IP_RANGE` and preserves the Runtime CA and certificate for the same workstation subnet.
+3. Follow [step 4](#4-start-compose-and-add-the-routes) to start Compose, attach Traefik once to `dsh-workstation_workstation`, and replace its Workstation route file. Confirm your existing login, `/mgmt`, and `/browser/` in a full deployment.
 
-`GATEWAY_IDLE`, `GATEWAY_ABSOLUTE`, and `GATEWAY_MAX_SESSIONS` take precedence over their `AUTH_*` predecessors. For rollback, stop the new stack, return to the old checkout, and regenerate the old image references and Traefik routes with that checkout's initializer. The old published `dsh-workstation-auth` image remains available for that release.
+`GATEWAY_IDLE`, `GATEWAY_ABSOLUTE`, and `GATEWAY_MAX_SESSIONS` take precedence over their `AUTH_*` predecessors. For rollback, follow the same teardown, return to the old checkout, restore the saved `.env.public`, and use that checkout's initializer and network attachment commands.
 
 If the old hostname left a browser profile lock, confirm that the old Chromium has stopped before removing the `SingletonLock`, `SingletonSocket`, and `SingletonCookie` symlinks in `/config/chromium` on the profile volume. [Chromium profile locking](https://github.com/chromium/chromium/blob/156.0.8078.79/chrome/browser/process_singleton_posix.cc)
 
 ### Upgrading and rolling back
 
-An upgrade is a change of digests. Back up first, then switch the references and
-recreate the affected services; Compose pulls the new digests on `up`:
+Back up and tear down the running stack as in the migration above so the subnet
+preflight can run. Then switch to the new digests and reuse the saved subnet.
 
 ```bash
 # Set deployment_ref to the commit whose images.env records the destination digests.
+workstation_subnet="$(sed -n 's/^WORKSTATION_SUBNET=//p' .env.public)"
 git switch --detach "$deployment_ref" &&
   bash deploy/public/images.sh &&
+  WORKSTATION_SUBNET="${workstation_subnet:-172.30.241.0/24}" \
   WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-    bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release &&
-  docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420
+    bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-Install the regenerated routes as in step 4. For a rollback, repeat the
-procedure with the older deployment commit.
+Start Compose, reconnect Traefik and install the routes as in step 4. For a
+rollback, use the older deployment commit and its network attachment commands.
 
 Runtime version rollback is separate and does not touch these images: see
 [Runtime maintenance](../README.md#upgrade-and-rollback). Image rollback and data

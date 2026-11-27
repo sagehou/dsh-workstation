@@ -6,7 +6,7 @@
 
 ## 部署
 
-当前 Compose 精简版常驻 **Runtime + Gateway**，完整版常驻 **Runtime + Gateway + Browser**。两种形态都复用现有 Traefik。SSH 私有预览共 **3 个**，含自带的 Traefik。
+当前 Compose 精简版常驻 **Runtime + Gateway**，完整版常驻 **Runtime + Gateway + Browser**。各服务共用一张 `workstation` 网络，两种形态都复用现有 Traefik。SSH 私有预览共 **3 个**，含自带的 Traefik。
 
 | 需求 | 指南 |
 | --- | --- |

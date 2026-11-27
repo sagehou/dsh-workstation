@@ -54,14 +54,13 @@ flowchart LR
 | 网络 | 端点 |
 | --- | --- |
 | 已有代理网 | Traefik 与 Gateway。Gateway 的公开和校验监听器绑定在这张网，并验证可信 Traefik 对端。 |
-| `workstation` | Runtime、MCP 监听器，以及 Traefik 和 Gateway 连接 DSH 的路径。 |
-| `browser` | Browser、Traefik 和 Gateway，承载 Selkies 的 HTTP 和 WebSocket。 |
+| `workstation` | Runtime、Gateway 和 Browser。Traefik 也接入这张网，访问 DSH 和 Selkies HTTP。 |
 
-Browser 写入私有 CDP socket，Gateway 只读挂载。输入门禁和 Provider 管理端口只绑定 Gateway 回环。Gateway 转发 DSH 和 Selkies 的 WebSocket，并检查会话是否有效。[拓扑和 CI](roadmap/public-compose.zh-CN.md)
+Browser 内的 Nginx 校验 Selkies 数据 WebSocket 和令牌管理请求的 Gateway 来源地址。Gateway 校验操作者会话后，将数据 WebSocket 交给输入门禁。Provider 管理端口和输入门禁只监听 Gateway 回环。Chromium 的 CDP TCP 只监听 Browser 回环，Browser 写入私有 Unix socket，Gateway 只读挂载。[拓扑和 CI](roadmap/public-compose.zh-CN.md)
 
-两个子网均可配置。`deploy/network.sh` 推导工作台网络上 Runtime 和 MCP 的 `.2`、`.3` 地址、Runtime 证书 SAN 和子网的上半段动态地址池。浏览器网络上的地址均动态分配。
+`deploy/network.sh` 从 `WORKSTATION_SUBNET` 推导 Runtime 和 MCP 的 `.2`、`.3` 地址、Runtime 证书 SAN 和子网上半段的动态地址池。Browser 使用动态地址。
 
-`deploy/network.sh check` 在初始化脚本创建任何资源之前运行，遇到与宿主机路由或现有 Docker 网络重叠时拒绝执行，且不创建、不修改任何东西。默认路由被有意排除：它覆盖所有地址，而 Docker 更具体的子网路由优先。若状态目录记录的子网与请求的不一致，会拒绝而不是静默重签内部 CA，因为 Runtime 证书按推导地址签发；`--reissue` 才是有意的路径。
+`deploy/network.sh check` 在初始化前运行，遇到与宿主机路由或现有 Docker 网络重叠时拒绝执行。检查比较具体路由，因为 Docker 的子网路由优先于默认路由。改变已保存的 `WORKSTATION_SUBNET` 时，需要用 `--reissue` 替换 Runtime 证书和内部 CA。
 
 ## 路由
 

@@ -236,7 +236,7 @@ try {
     await desk.evaluate(protocol => {
       // Speak the data protocol directly, which is how the page drives the
       // desktop and what makes a client-side toggle irrelevant here.
-      const ws = new WebSocket('wss://' + location.host + '/browser/api/websockets', ['selkies', protocol])
+      const ws = new WebSocket('wss://' + location.host + '/browser/api/websockets/', ['selkies', protocol])
       window.ciDesk = { ws, mk: null }
       ws.addEventListener('open', () => ws.send('SETTINGS,' + JSON.stringify({
         displayId: 'primary', tabId: 'ci-hold', encoder: 'jpeg',

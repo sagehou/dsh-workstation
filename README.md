@@ -6,7 +6,7 @@ A self-hosted deployment, security, browser-control, and operations layer around
 
 ## Deploy
 
-The current Compose configuration runs **Runtime + Gateway** in core and **Runtime + Gateway + Browser** in full. Both use the existing Traefik. The SSH preview runs 3 containers, including its own Traefik.
+The current Compose configuration runs **Runtime + Gateway** in core and **Runtime + Gateway + Browser** in full. Both share one `workstation` network and use the existing Traefik. The SSH preview runs 3 containers, including its own Traefik.
 
 | I want to | Guide |
 | --- | --- |

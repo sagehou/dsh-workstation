@@ -4,23 +4,26 @@ English · [简体中文](public-compose.zh-CN.md)
 
 The owner approved a single-administrator public Compose release. The authenticated standalone browser/control page is the first-release UI; native Sidebar is deferred. Agent browser control remains gated until held-input release and exclusive handoff pass #4, and broad untrusted-site browsing remains gated until the egress policy passes #11. [ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.md) · [M0](M0-evidence.md) · [Provider results](M0-provider-evidence.md) · [M1 Runtime results](M1.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
 
-## Existing Traefik and three Docker networks
+## Compose networks
 
 | Network | What it carries |
 | --- | --- |
 | Existing proxy | Gateway's public and verification listeners. Gateway checks the exact Traefik source IP. |
-| `workstation` | DSH and official MCP. Traefik and Gateway reach DSH here. |
-| `browser` | Browser, Gateway and Traefik. Traefik reaches Selkies over HTTP and Gateway forwards its WebSockets. |
+| `workstation` | Runtime, Gateway and Browser share this network. Traefik reaches DSH and Selkies HTTP here. |
 
 ## Three-service candidate
 
-Full starts `browser`, `gateway` and `runtime`. Core starts `gateway` and `runtime`. Provider and the input gate run inside Gateway, and LinuxServer starts the CDP relay inside Browser. The relay writes the Unix socket and Gateway mounts it read-only. Both shapes were verified with Compose v2.40.3 using `config --services`. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](../adr/0007-three-service-deployment.md)
+Full starts `browser`, `gateway` and `runtime`. Core starts `gateway` and `runtime`. Both declare one `workstation` network alongside the external proxy network. Provider and the input gate run inside Gateway, and LinuxServer starts the CDP relay inside Browser. The relay writes the Unix socket and Gateway mounts it read-only. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](../adr/0007-three-service-deployment.md)
+
+Full CI enables Agent MCP against the trusted HTTPS fixture. It inspects the network attachments, checks for direct Selkies HTTP access and denial of the data and token routes on both Nginx listeners, and exercises authenticated browser input and captured pointer release through Gateway. The core and published `81feffd` stacks run in separate jobs. [Shared-network acceptance](https://github.com/sagehou/dsh-workstation/issues/37)
+
+The three-service predecessor with separate workstation and Browser networks passed all four Traefik matrix jobs and the core shape at `179bdaa`. [Public Compose run](https://github.com/sagehou/dsh-workstation/actions/runs/45914350105)
 
 ### Reproduce on GitHub Actions
 
 Public Compose runs `go test -race -v ./...` in the pinned Go image and `bash deploy/public/ci.sh` on the GitHub-hosted runner. The integration uses a separate Traefik, a temporary certificate, and a deterministic model fixture. [Public Compose](../../.github/workflows/public-compose.yml)
 
-The job matrix reads its versions only from [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env). Each leg pulls `tag@digest`, runs the same Compose stack, the same edge probe and the same post-login browser checks; only the Traefik image differs. [#3](https://github.com/sagehou/dsh-workstation/issues/3)
+The job matrix reads its versions from `deploy/public/traefik-matrix.env`. It runs the same Compose, edge and post-login checks on each pinned `tag@digest` with both the default `172.30.241.0/24` and custom `10.71.241.0/24` workstation subnets. [Matrix file](../../deploy/public/traefik-matrix.env) · [#3](https://github.com/sagehou/dsh-workstation/issues/3)
 
 ### Traefik compatibility matrix
 

@@ -92,7 +92,7 @@ The approved direction is a self-hosted workstation around the official DSH appl
 | ForwardAuth | Protect DSH and Selkies. Unauthenticated APIs return 401 and WebSocket upgrades are denied. |
 | Browser control | Internal or authenticated endpoints. Keep management off unauthenticated public routes. |
 | Compose | Core runs Runtime and Gateway. Full adds Browser. Gateway hosts Provider and the input gate. Browser hosts Chromium, Selkies, and the private CDP relay. Both reuse an external Traefik. |
-| Networks | Check Docker subnet overlap before deployment. Make the workstation/browser subnets configurable and derive fixed addresses, health-check targets, and certificate SANs from one configuration source. |
+| Networks | Runtime, Gateway and Browser share one configurable workstation subnet. Traefik connects to it and keeps its existing proxy network for Gateway and ForwardAuth. Derive fixed addresses and the Runtime certificate SAN from `WORKSTATION_SUBNET` and check for overlaps before deployment. |
 | Images | Publish Runtime and Gateway to GHCR by immutable digest. Pin the upstream LinuxServer Chromium image by digest. |
 
 ## User interface and operations

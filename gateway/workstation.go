@@ -113,7 +113,7 @@ func (g *gateway) websocket(w http.ResponseWriter, r *http.Request) {
 		// Only the data socket carries input, so only it goes through the gate.
 		// Any other browser WebSocket keeps talking to Selkies directly, which
 		// keeps the gate's surface to the one connection it must own.
-		if r.URL.Path == "/browser/api/websockets" {
+		if r.URL.Path == "/browser/api/websockets" || r.URL.Path == "/browser/api/websockets/" {
 			proxy = g.browserWS
 		} else {
 			proxy = g.browserDirectWS

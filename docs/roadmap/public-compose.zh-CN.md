@@ -4,23 +4,26 @@
 
 项目所有者批准首版单管理员公网 Compose。首版正式浏览器入口是已认证的独立浏览器/控制页面；原生 Sidebar 延后。#4 的已按住输入释放和独占交接通过前，不开放 Agent 浏览器控制；#11 的出口策略通过前，不开放 Agent 广泛访问不可信网站。[ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.zh-CN.md) · [M0](M0-evidence.zh-CN.md) · [Provider 验证](M0-provider-evidence.zh-CN.md) · [M1 Runtime 结果](M1.zh-CN.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
 
-## 复用 Traefik 的三网拓扑
+## Compose 网络
 
 | 网络 | 用途 |
 | --- | --- |
 | 已有代理网 | Gateway 的公开和校验监听器。Gateway 核对 Traefik 的确切来源 IP。 |
-| `workstation` | DSH 和官方 MCP。Traefik 和 Gateway 在这里连接 DSH。 |
-| `browser` | Browser、Gateway 和 Traefik。Traefik 转发 Selkies HTTP，Gateway 转发 WebSocket。 |
+| `workstation` | Runtime、Gateway 和 Browser 共用。Traefik 在这里访问 DSH 和 Selkies HTTP。 |
 
 ## 三服务候选版
 
-完整版运行 `browser`、`gateway` 和 `runtime`，精简版运行 `gateway` 和 `runtime`。Provider 与输入门禁在 Gateway 内运行，LinuxServer 在 Browser 内启动 CDP 中继。中继写入 Unix socket，Gateway 只读挂载。两个清单均用 Compose v2.40.3 的 `config --services` 核对。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](../adr/0007-three-service-deployment.zh-CN.md)
+完整版运行 `browser`、`gateway` 和 `runtime`，精简版运行 `gateway` 和 `runtime`。两种形态都使用一张 `workstation` 网络及外部代理网。Provider 与输入门禁在 Gateway 内运行，LinuxServer 在 Browser 内启动 CDP 中继。中继写入 Unix socket，Gateway 只读挂载。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](../adr/0007-three-service-deployment.zh-CN.md)
+
+完整 CI 对可信 HTTPS 测试站启用 Agent MCP，并检查容器网络接入、Selkies 普通 HTTP 可达、两个 Nginx 监听端口拒绝数据和令牌路由直连，以及经 Gateway 登录后接管时释放实际按住的鼠标键。精简版和已发布的 `81feffd` 分别在独立作业运行。[共享网络验收](https://github.com/sagehou/dsh-workstation/issues/37)
+
+仍分工作台网络和浏览器网络的三服务提交 `179bdaa` 已通过四组 Traefik 矩阵和精简版测试。[Public Compose 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45914350105)
 
 ### 在 GitHub Actions 复现
 
 Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 GitHub 托管运行器执行 `bash deploy/public/ci.sh`。集成测试使用单独启动的 Traefik、临时证书及结果确定的模型服务。[Public Compose](../../.github/workflows/public-compose.yml)
 
-作业矩阵的版本只来自 [`deploy/public/traefik-matrix.env`](../../deploy/public/traefik-matrix.env)。每条腿拉取 `tag@digest`，跑同一套 Compose、同一个边缘探测和同一套登录后浏览器检查，唯一差异是 Traefik 镜像。[#3](https://github.com/sagehou/dsh-workstation/issues/3)
+作业矩阵从 `deploy/public/traefik-matrix.env` 读取版本。每个固定的 `tag@digest` 分别在默认 `172.30.241.0/24` 和自定义 `10.71.241.0/24` 工作台子网上运行同一套 Compose、边缘探测与登录后浏览器检查。[矩阵配置](../../deploy/public/traefik-matrix.env) · [#3](https://github.com/sagehou/dsh-workstation/issues/3)
 
 ### Traefik 兼容性矩阵
 

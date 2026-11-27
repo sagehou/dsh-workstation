@@ -349,7 +349,7 @@ const server = createServer((request, response) => {
 const sockets = new WebSocketServer({ noServer: true })
 server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url, 'http://gate.invalid')
-  if (url.pathname !== wsPath) {
+  if (url.pathname !== wsPath && url.pathname !== wsPath + '/') {
     socket.destroy()
     return
   }

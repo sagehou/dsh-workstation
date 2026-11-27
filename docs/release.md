@@ -2,7 +2,7 @@
 
 English · [简体中文](release.zh-CN.md)
 
-The current source builds `dsh-workstation-runtime` and `dsh-workstation-gateway` for public release on GHCR. Provider and the input gate ship inside Gateway. Compose pins the upstream LinuxServer Chromium image and mounts the checkout's CDP relay at startup.
+The current source builds `dsh-workstation-runtime` and `dsh-workstation-gateway` for public release on GHCR. Provider and the input gate ship inside Gateway. Compose pins the upstream LinuxServer Chromium image and mounts the checkout's CDP relay and Selkies access script at startup.
 
 A deployment never references a tag alone. `deploy/public/images.env` records a
 manifest-list digest per image, and `deploy/public/images.sh` turns those into

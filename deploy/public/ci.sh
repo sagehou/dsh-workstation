@@ -134,7 +134,6 @@ viewer_user="$(docker run --rm --entrypoint sh workstation-ci-viewer -c 'printf 
 sudo chown -R "$viewer_user" "$state/ci-state"
 compose up -d --no-build --wait --wait-timeout 360
 docker network connect dsh-workstation_workstation "$edge"
-docker network connect dsh-workstation_browser "$edge"
 install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
 mv "$edge_dir/.routes.tmp" "$edge_dir/routes.yml"
 
@@ -145,7 +144,7 @@ for service in gateway runtime browser; do
   test -z "$(docker port "$(compose ps -q "$service")")"
 done
 networks="$(docker network ls --filter label=com.docker.compose.project=dsh-workstation --format '{{.Name}}' | sort)"
-test "$networks" = $'dsh-workstation_browser\ndsh-workstation_workstation'
+test "$networks" = dsh-workstation_workstation
 docker inspect "$edge" "$(compose ps -q gateway)" "$(compose ps -q runtime)" \
   "$(compose ps -q browser)" |
   node --input-type=module -e '
@@ -161,19 +160,42 @@ docker inspect "$edge" "$(compose ps -q gateway)" "$(compose ps -q runtime)" \
       gateway: ["/run/workstation-cdp", false],
       browser: ["/run/workstation-cdp", true],
     })
-    const browser = containers.find(container => container.Config.Labels["com.docker.compose.service"] === "browser")
-    assert.deepEqual(Object.keys(browser.NetworkSettings.Networks), ["dsh-workstation_browser"])
-  '
+    const workstation = "dsh-workstation_workstation"
+    const proxy = process.argv[1]
+    const networks = containers.map(container => Object.keys(container.NetworkSettings.Networks).sort())
+    assert.deepEqual(networks, [[proxy, workstation], [proxy, workstation], [workstation], [workstation]])
+  ' "$proxy"
 network_ip() { docker inspect --format "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1"; }
-browser_ip="$(network_ip "$(compose ps -q browser)" dsh-workstation_browser)"
+browser_ip="$(network_ip "$(compose ps -q browser)" dsh-workstation_workstation)"
 gateway_ip="$(network_ip "$(compose ps -q gateway)" "$proxy")"
-gateway_browser_ip="$(network_ip "$(compose ps -q gateway)" dsh-workstation_browser)"
-compose exec -T runtime node - "$browser_ip" "$gateway_ip" <<'NET'
+compose exec -T runtime node - "$browser_ip" "$gateway_ip" "$WORKSTATION_PROVIDER_IP" <<'NET'
 const assert = require('node:assert/strict')
-const [browser, gateway] = process.argv.slice(2)
+const { request } = require('node:https')
+const [browser, gateway, gatewayPeer] = process.argv.slice(2)
 ;(async () => {
+  const origin = `http://${browser}:3000`
+  const document = await fetch(origin + '/browser/', { signal: AbortSignal.timeout(2000) })
+  assert.equal(document.status, 200, 'Selkies HTML is reachable on the shared network')
+  await document.body.cancel()
+  for (const [path, method] of [
+    ['/browser/api/websockets', 'GET'], ['/browser/api/websockets/', 'GET'], ['/browser/api/tokens', 'POST'],
+  ]) {
+    const headers = { 'X-Forwarded-For': gatewayPeer }
+    const response = await fetch(origin + path, { method, headers, signal: AbortSignal.timeout(2000) })
+    assert.equal(response.status, 403, path)
+    assert.equal(await response.text(), 'Gateway required', path)
+    await new Promise((resolve, reject) => {
+      request(`https://${browser}:3001${path}`, {
+        method, headers, rejectUnauthorized: false, signal: AbortSignal.timeout(2000),
+      }, response => {
+        response.resume()
+        if (response.statusCode === 403) resolve()
+        else reject(Error(`Selkies TLS listener answered ${response.statusCode} for ${path}`))
+      }).on('error', reject).end()
+    })
+  }
   for (const url of [
-    `http://${browser}:3000/browser/`,
+    `http://${browser}:8082/`,
     `http://${browser}:9222/json/version`,
     `http://${browser}:9223/json/version`,
     'http://provider:9223/json/version',
@@ -190,22 +212,32 @@ const [browser, gateway] = process.argv.slice(2)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover' }),
   })).status, 401, 'unauthenticated MCP version probe')
-  console.log('DSH cannot reach Selkies, CDP, Provider control or ForwardAuth; MCP requires a credential')
-})().catch(error => { console.error('Network isolation check failed:', error.message); process.exitCode = 1 })
+  console.log('Shared-network Selkies HTML works. HTTP and HTTPS reject direct input and token administration.')
+})().catch(error => { console.error('Workstation network check failed:', error.message); process.exitCode = 1 })
 NET
-compose exec -T browser python3 - "$gateway_browser_ip" <<'NET'
+compose exec -T browser python3 - "$WORKSTATION_PROVIDER_IP" <<'NET'
+import http.client
 import socket
 import sys
 
-for port in (8080, 8081, 8082, 9223):
+for port in (8081, 8082, 9223):
     try:
         connection = socket.create_connection((sys.argv[1], port), timeout=1)
     except OSError:
         continue
     with connection:
         raise SystemExit(f"Browser reached a private Gateway listener on port {port}")
+
+connection = http.client.HTTPConnection("dsh-workstation-runtime", 8099, timeout=2)
+try:
+    connection.request("POST", "/", body="{}")
+    response = connection.getresponse()
+    if response.status != 401:
+        raise SystemExit(f"Runtime maintenance answered {response.status} without a credential")
+finally:
+    connection.close()
 NET
-for address in "$browser_ip" "$gateway_ip" "$gateway_browser_ip" "$WORKSTATION_PROVIDER_IP"; do
+for address in "$browser_ip" "$gateway_ip" "$WORKSTATION_PROVIDER_IP"; do
   for port in 9222 9223; do
     if curl -s --noproxy '*' --connect-timeout 1 --max-time 2 -o /dev/null "http://$address:$port/json/version"; then
       echo 'Host reached a CDP listener' >&2
@@ -320,7 +352,7 @@ if [[ -z $current || $current == "$previous" ]]; then
   exit 1
 fi
 compose exec -T browser test -f /config/.ci-profile-witness
-compose up -d --no-build --wait --wait-timeout 120 gateway
+compose up -d --no-build --wait --wait-timeout 120 browser gateway
 echo 'Browser recreated. Gateway reached the new Chromium instance through the reused CDP socket volume.'
 check browser
 

@@ -84,29 +84,32 @@ pass 'repeated initialization preserves the CA, the certificate and every secret
 rm -- "$state/secrets/maintenance"
 printf 'WORKSTATION_AUTH_IMAGE=dsh-workstation-auth:0.1.1\nAUTH_IDLE=42m\n' >> .env.public
 printf 'WORKSTATION_PROVIDER_IMAGE=old-provider\nWORKSTATION_GATE_IMAGE=old-gate\nBROWSER_PROVIDER_IP=172.30.233.2\nBROWSER_GATE_IP=172.30.233.4\n' >> .env.public
+printf 'BROWSER_SUBNET=172.30.233.0/24\nBROWSER_IP_RANGE=172.30.233.128/25\n' >> .env.public
 sed -i '/^WORKSTATION_GATEWAY_IMAGE=/d' .env.public
 sed -i 's/dsh-workstation-gateway/dsh-workstation-auth/g' "$state/edge/routes.yml"
 run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
   bash deploy/public/init.sh "$domain" proxy traefik
 (( status == 0 )) || fail "the gateway migration failed: $out"
 grep -q '^WORKSTATION_GATEWAY_IMAGE=dsh-workstation-gateway:' .env.public || fail 'the gateway image was not recorded'
-if grep -Eq '^(WORKSTATION_(AUTH|PROVIDER|GATE)_IMAGE|BROWSER_(PROVIDER|GATE)_IP)=' .env.public; then
-  fail 'an obsolete service setting survived migration'
+if grep -Eq '^(WORKSTATION_(AUTH|PROVIDER|GATE)_IMAGE|BROWSER_(PROVIDER_IP|GATE_IP|SUBNET|IP_RANGE))=' .env.public; then
+  fail 'an obsolete service or network setting survived migration'
 fi
 grep -Fxq 'AUTH_IDLE=42m' .env.public || fail 'the saved session limit was lost'
 grep -Fq 'dsh-workstation-gateway-edge:8081/verify' "$state/edge/routes.yml" || fail 'ForwardAuth still uses the old alias'
 [[ $(stat -c '%s:%a' "$state/secrets/maintenance") == 64:444 ]] || fail 'missing or unreadable maintenance secret'
 [[ "$(sha256sum "$state/secrets/auth-key" | cut -d' ' -f1)" == "$key_before" ]] || fail 'migration replaced the authentication key'
 [[ "$(openssl x509 -in "$state/secrets/runtime-ca.pem" -noout -fingerprint -sha256)" == "$ca_before" ]] || fail 'migration replaced the CA'
-pass 'legacy initialization moves the image and routes to gateway while keeping saved settings and keys'
+[[ "$(openssl x509 -in "$state/secrets/runtime.pem" -noout -fingerprint -sha256)" == "$cert_before" ]] || fail 'migration replaced the Runtime certificate'
+grep -Fxq 'WORKSTATION_SUBNET=172.30.241.0/24' .env.public || fail 'migration changed the workstation subnet'
+pass 'legacy initialization moves the image and routes to Gateway and removes the browser subnet settings while keeping credentials'
 
 # --- 3. a changed subnet is refused without --reissue --------------------
 cd "$workdir"
 run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
-  WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+  WORKSTATION_SUBNET=10.71.241.0/24 \
   bash deploy/public/init.sh "$domain" proxy traefik
 (( status != 0 )) || fail 'a subnet change was accepted without --reissue'
-grep -q 'saved subnets differ' <<<"$out" || fail "the refusal did not explain the mismatch: $out"
+grep -q 'saved workstation subnet differs' <<<"$out" || fail "the refusal did not explain the mismatch: $out"
 [[ "$(openssl x509 -in "$state/secrets/runtime-ca.pem" -noout -fingerprint -sha256)" == "$ca_before" ]] ||
   fail 'a refused subnet change still replaced the CA'
 grep -Fxq 'WORKSTATION_SUBNET=172.30.241.0/24' .env.public ||
@@ -116,7 +119,7 @@ pass 'a subnet change is refused, and nothing on disk changes'
 # --- 4. --reissue rebuilds the PKI for the new address -------------------
 cd "$workdir"
 run env WORKSTATION_STATE="$state" WORKSTATION_TRAEFIK_RESOLVER='' \
-  WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+  WORKSTATION_SUBNET=10.71.241.0/24 \
   bash deploy/public/init.sh "$domain" proxy traefik --reissue
 (( status == 0 )) || fail "the reissue failed: $out"
 openssl x509 -in "$state/secrets/runtime.pem" -noout -ext subjectAltName > "$work/san-new"
@@ -129,7 +132,7 @@ grep -q 'IP Address:10\.71\.241\.2' "$work/san-new" ||
 grep -Fxq 'WORKSTATION_SUBNET=10.71.241.0/24' .env.public || fail 'the reissue did not record the new subnet'
 grep -Fxq 'WORKSTATION_RUNTIME_IP=10.71.241.2' .env.public || fail 'the reissue did not record the new address'
 # Exactly one of each key: the old values are replaced, not appended to.
-for key in WORKSTATION_SUBNET WORKSTATION_IP_RANGE WORKSTATION_RUNTIME_IP BROWSER_SUBNET; do
+for key in WORKSTATION_SUBNET WORKSTATION_IP_RANGE WORKSTATION_RUNTIME_IP WORKSTATION_PROVIDER_IP; do
   count="$(grep -c "^$key=" .env.public || true)"
   [[ $count == 1 ]] || fail ".env.public has $count $key lines, expected 1"
 done
@@ -139,7 +142,7 @@ pass '--reissue rebuilds the PKI for the new address and keeps the other secrets
 workdir="$(scenario preflight)"
 cd "$workdir"
 fresh="$work/fresh"
-# The conflict must overlap the subnets being requested, otherwise the
+# The conflict must overlap the subnet being requested, otherwise the
 # preflight correctly passes and the test proves nothing.
 printf '10.71.0.0/16\n' > "$work/docker-conflict"
 cat > "$work/bin/docker" <<STUB
@@ -153,7 +156,7 @@ exit 0
 STUB
 chmod +x "$work/bin/docker"
 run env WORKSTATION_STATE="$fresh" WORKSTATION_TRAEFIK_RESOLVER='' \
-  WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+  WORKSTATION_SUBNET=10.71.241.0/24 \
   bash deploy/public/init.sh "$domain" proxy traefik
 (( status != 0 )) || fail 'init continued past a Docker network conflict'
 [[ ! -e $fresh ]] || fail 'init created the state directory before the preflight passed'

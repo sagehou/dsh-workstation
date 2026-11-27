@@ -9,19 +9,14 @@
 - **主机**需要 Linux amd64、以 root 运行的 Docker Engine 28+ 和 Compose v2。用有 Docker 权限的非 root 用户执行。不需要镜像仓库凭据：工作台镜像为公开包。
 - 发布仅提供 `linux/amd64`。不要在其他架构上运行。
 - **DNS** 将工作台域名指向 Traefik 所在主机。Traefik 提供公网端口 80 和 443，并管理证书。
-- **Traefik** 须已在同一台 Docker 主机运行。确认它所在的可信 Docker 网络、HTTPS 入口、证书 resolver，以及 file provider 监视的宿主机目录。**不需要升级 Traefik**：CI 按摘要固定 `v3.7.14` 与 `v3.7.19`，并用同一套全栈测试覆盖两者；哪些版本已有通过记录见[兼容性矩阵](../../docs/roadmap/public-compose.zh-CN.md#traefik-兼容性矩阵)。
-- **Docker 网络**用 `bash deploy/network.sh check` 核对两个 Compose 子网与宿主机路由；冲突时会拒绝继续。见[网络地址](#网络地址)。
+- **Traefik** 须已在同一台 Docker 主机运行。确认它所在的可信 Docker 网络、HTTPS 入口、证书 resolver，以及 file provider 监视的宿主机目录。CI 按摘要固定 `v3.7.14` 与 `v3.7.19`，并用全栈测试覆盖两者。[兼容性矩阵](../../docs/roadmap/public-compose.zh-CN.md#traefik-兼容性矩阵)
+- 核对工作台子网与宿主机路由及已有 Docker 网络是否冲突。[网络地址](#网络地址)
 
 ## 网络地址
 
-两个 Compose 网络及其中的所有地址只来自一处：`deploy/network.sh`。无需手工修改任何文件，且初始化脚本在方案与宿主机冲突时会拒绝执行。
+Runtime、Gateway 和 Browser 共用 `workstation`。Traefik 加入该网络以访问 DSH 和 Selkies，并沿用现有代理网访问 Gateway 和 ForwardAuth。
 
-| 配置项 | 默认值 | 用途 |
-| --- | --- | --- |
-| `WORKSTATION_SUBNET` | `172.30.241.0/24` | Runtime 和 Gateway 的认证 MCP 监听器。 |
-| `BROWSER_SUBNET` | `172.30.233.0/24` | Browser、Gateway 与 Traefik 到 Selkies 的连接。 |
-
-Runtime 和 Gateway MCP 在工作台网络上使用 `.2` 和 `.3`。Docker 从两个子网的上半段分配动态地址。
+`WORKSTATION_SUBNET` 默认为 `172.30.241.0/24`。`deploy/network.sh` 推导 Runtime 和 Gateway MCP 的 `.2`、`.3` 地址。Docker 从子网的上半段分配动态地址。
 
 启动前先核对方案：
 
@@ -35,14 +30,14 @@ bash deploy/network.sh check
 - 与**现有 Docker 网络**重叠的子网；
 - 非法 CIDR、超出 `/16`..`/28` 的前缀，或带主机位的 CIDR。
 
-若失败，选择两段未使用的 RFC1918 地址传给初始化脚本：
+若失败，选择一段未使用的 RFC1918 地址传给初始化脚本。
 
 ```bash
-WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+WORKSTATION_SUBNET=10.71.241.0/24 \
   bash deploy/public/init.sh workstation.example.net proxy traefik
 ```
 
-Runtime 证书按推导出的地址签发，因此在已有状态目录上用不同子网重跑初始化会被拒绝，而不是静默重签所有服务都信任的内部 CA。`--reissue` 才是有意为之的路径：它替换 CA 与 Runtime 证书，保留其他密钥，并要求重建容器以取得新地址。
+更改 `WORKSTATION_SUBNET` 时，用 `--reissue` 替换内部 CA 与 Runtime 证书。其他密钥会保留。重建容器以使用新地址。
 
 ## 选择部署形态
 
@@ -53,7 +48,7 @@ Runtime 证书按推导出的地址签发，因此在已有状态目录上用不
 
 两个形态都复用已有 Traefik。把 Traefik 容器计入，总数分别为 3 和 4。`gateway-admin` 和 `maintenance` 只在需要时通过 `docker compose run --rm --no-deps` 执行。
 
-精简版只启动 DSH 和 Gateway，Gateway 的浏览器进程关闭。已登录时访问 `/_auth/browser` 或建立浏览器数据 WebSocket 会返回 503。完整版在 Gateway 内运行 Provider 和输入门禁，Browser 内运行 Chromium、Selkies 和 CDP 中继。请随 Compose 文件保留同一提交中的 `browser/cdp-relay`，供 LinuxServer 启动。[三服务拓扑](../../docs/roadmap/public-compose.zh-CN.md#三服务候选版)
+精简版只启动 DSH 和 Gateway，Gateway 的浏览器进程关闭。已登录时访问 `/_auth/browser` 或建立浏览器数据 WebSocket 会返回 503。完整版在 Gateway 内运行 Provider 和输入门禁，Browser 内运行 Chromium、Selkies 和 CDP 中继。使用与 Compose 文件同一提交的 `browser/cdp-relay` 和 `browser/selkies-guard.sh`，保留可执行权限。[三服务拓扑](../../docs/roadmap/public-compose.zh-CN.md#三服务候选版)
 
 在仓库根目录设置本次部署使用的 `COMPOSE_FILE`，后续所有 Compose 命令沿用该设置。完整版执行以下命令。
 
@@ -67,7 +62,7 @@ export COMPOSE_FILE=compose.yml
 export COMPOSE_FILE=compose.yml:deploy/public/compose.core.yml
 ```
 
-已有完整版切为精简版时，先用完整版配置执行 `down`，保留命名卷。
+已有完整版切为精简版时，先从 `dsh-workstation_workstation` 断开 Traefik，再用完整版配置执行 `down`，保留命名卷。按第 4 步重新接入 Traefik。
 
 ## 部署
 
@@ -108,7 +103,7 @@ docker compose --env-file .env.public build
 
 #### 已有部署
 
-沿用原域名、状态目录和子网重跑初始化，保留凭据和证书。已有管理员可跳过创建步骤。[Auth 迁移](#从-auth-迁移到-gateway)
+沿用原域名、状态目录和工作台子网。已有管理员可跳过创建步骤。[已有部署迁移](#从-auth-迁移到-gateway)
 
 ### 3. 创建管理员
 
@@ -122,17 +117,11 @@ docker compose --env-file .env.public run --rm --no-deps gateway-admin bootstrap
 
 ### 4. 启动 Compose 并添加路由
 
-服务启动后将 Traefik 接入工作台网络。每张网络只需接入一次。
+服务启动后将 Traefik 接入一次工作台网络。
 
 ```bash
 docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420 &&
   docker network connect dsh-workstation_workstation "$traefik"
-```
-
-完整版还需将 Traefik 接入浏览器网络。
-
-```bash
-docker network connect dsh-workstation_browser "$traefik"
 ```
 
 把生成的路由文件放进 Traefik 监视的目录，再用 `ps` 核对已启动的服务。
@@ -168,7 +157,7 @@ MCP 启用时，Agent 先用 `mcp__browser__lease_status` 获取代次，再调�
 
 ### 输入门禁
 
-`browser-gate` 位于登录代理与 Chromium 数据连接之间，是唯一承载输入的路径。已固定的 Selkies 会在每个帧上按实时令牌表判定输入权限，并且**先**安装新表**再**通告变更，因此权限收回之后发出的释放帧会被丢弃。这就是交接时按住的鼠标键此前会在整个 Agent 租约期间保持按下的原因。门禁会在 Provider 接管权限**之前**，用 Selkies 自带的 `reset_keyboard()` 与 `release_mouse_buttons()` 原语释放已按住输入，并等待上游确认这些帧。若无法证明，它会在该连接仍持有权限时关闭它，让 Selkies 走离开路径完成释放，并拒绝发放租约。
+`browser-gate` 将操作者输入转发至 Selkies。Browser 内的 Nginx 仅接受 `workstation` 网上来自 Gateway 的数据 WebSocket 和令牌管理请求。门禁先释放已按住的输入，等 Selkies 确认后，Provider 才切换控制权。如果无法确认，门禁会在该连接仍有控制权时关闭它，由 Selkies 在断开时释放输入，并拒发本次租约。
 
 不碰浏览器即可检查：
 
@@ -191,8 +180,8 @@ docker compose --env-file .env.public exec -T gateway node --input-type=module -
 
 ### Traefik
 
-- 若需要重建 Traefik，在它自己的 Compose 中把两张工作台网声明为外部网络。
-- 若 Traefik 在代理网上的 IP 变化，以相同域名、HTTPS 入口和 resolver 重跑初始化，然后运行 `docker compose --env-file .env.public up -d --no-build gateway` 更新信任地址。
+- 如需在重建 Traefik 时保留连接，在它自己的 Compose 中将 `dsh-workstation_workstation` 声明为外部网络。
+- 若 Traefik 在代理网上的 IP 变化，按[已有部署迁移](#从-auth-迁移到-gateway)的步骤停服并拆除旧网络。沿用已保存的配置重新初始化，再按第 4 步接回 Traefik 并更新路由。
 
 ### 浏览器恢复
 
@@ -232,28 +221,29 @@ Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。启用 Agent MCP 时，Ru
 
 ### 从 auth 迁移到 Gateway
 
-这组步骤也适用于从六容器 Gateway 候选版迁移。
+这组步骤也适用于仍使用独立浏览器网络的 Gateway 候选版。
 
-1. 用 `bash deploy/public/images.sh` 确认目标版本能解析两个镜像摘要。停服备份 `auth-data` 卷和 `.workstation/`。用原来的 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，保留命名卷。这会先释放旧 Provider 的固定地址，供 Gateway 使用。
-2. 在原部署中切换到目标版本，沿用域名、状态目录、代理网络及 Traefik 选项重跑带 `--release` 的初始化。用新生成的 `routes.yml` 替换 Traefik 工作台路由文件，使其指向 `dsh-workstation-gateway-edge`。
-3. 使用 `up -d --no-build --wait` 启动。Gateway 会用原 `auth-key` 打开原 `auth-data` SQLite 卷。Browser 复用原 hostname 和配置卷，Provider 复用原状态卷。用已有账户测试登录、`/mgmt` 和完整部署的 `/browser/`。
+1. 如果目标是发布版本，用 `bash deploy/public/images.sh` 确认两个镜像摘要可解析。停止旧栈并备份 `.env.public`、`.workstation/` 和命名卷。将 Traefik 从已接入的 `dsh-workstation_workstation` 和 `dsh-workstation_browser` 断开。用原 Compose 文件和项目名执行 `docker compose --env-file .env.public down`，保留命名卷。
+2. 切换到目标版本，沿用原域名、状态目录及 Traefik 配置，按[第 2 步](#2-配置域名和-traefik)初始化。如已定制 `WORKSTATION_SUBNET`，传入保存的值。初始化会移除 `BROWSER_SUBNET` 和 `BROWSER_IP_RANGE`，在沿用工作台子网时保留 Runtime CA 和证书。
+3. 按[第 4 步](#4-启动-compose-并添加路由)启动 Compose，将 Traefik 接入 `dsh-workstation_workstation` 一次，并替换工作台路由文件。用已有账户测试登录、`/mgmt` 和完整版的 `/browser/`。
 
-旧 `AUTH_*` 会话设置继续生效，优先读取新的 `GATEWAY_*`。如需回退，先停止新栈，再用原提交的初始化脚本恢复旧镜像引用和路由。原 `dsh-workstation-auth` 镜像留在旧发行版中。
+会话设置优先读取 `GATEWAY_*`，其次读取 `AUTH_*`。如需回退，按前述步骤拆除新栈及其网络，切回原提交，恢复保存的 `.env.public`，按原提交初始化并接回网络。
 
 ### 升级与回滚
 
-升级前先备份，再切换到已记录目标摘要的部署提交。Compose 在启动时拉取新摘要。
+按前面的迁移步骤备份并拆除运行中的工作台，供初始化执行子网预检。切换到已记录目标镜像摘要的部署提交，沿用原工作台子网。
 
 ```bash
 # 将 deployment_ref 设为 images.env 已记录目标摘要的部署提交。
+workstation_subnet="$(sed -n 's/^WORKSTATION_SUBNET=//p' .env.public)"
 git switch --detach "$deployment_ref" &&
   bash deploy/public/images.sh &&
+  WORKSTATION_SUBNET="${workstation_subnet:-172.30.241.0/24}" \
   WORKSTATION_TRAEFIK_ENTRYPOINT=websecure WORKSTATION_TRAEFIK_RESOLVER=letsencrypt \
-    bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release &&
-  docker compose --env-file .env.public up -d --no-build --wait --wait-timeout 420
+    bash deploy/public/init.sh "$domain" "$proxy" "$traefik" --release
 ```
 
-按第 4 步安装重新生成的路由。回滚时，用旧部署提交重复此流程。
+按第 4 步启动 Compose、接回 Traefik 并安装路由。回滚时使用旧部署提交及其网络接入命令。
 
 Runtime 版本回滚是另一件事，不改这些镜像，见 [Runtime 维护](../README.zh-CN.md#升级与回滚)。镜像回滚与数据回滚不同，涉及 DSH_HOME 迁移时必须配一份对应的备份。
 

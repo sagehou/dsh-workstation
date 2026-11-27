@@ -22,8 +22,6 @@ for expected in \
   'WORKSTATION_IP_RANGE=172.30.241.128/25' \
   'WORKSTATION_RUNTIME_IP=172.30.241.2' \
   'WORKSTATION_PROVIDER_IP=172.30.241.3' \
-  'BROWSER_SUBNET=172.30.233.0/24' \
-  'BROWSER_IP_RANGE=172.30.233.128/25' \
   'WORKSTATION_ENTRY_SUBNET=172.30.244.0/24' \
   'WORKSTATION_ENTRY_EDGE_IP=172.30.244.2'; do
   grep -Fxq "$expected" <<<"$out" || fail "missing default $expected in: $out"
@@ -34,6 +32,8 @@ pass 'the defaults reproduce every address the stack used before derivation'
 eval "$out"
 [[ $WORKSTATION_RUNTIME_IP == 172.30.241.2 ]] || fail 'eval did not set WORKSTATION_RUNTIME_IP'
 run bash deploy/network.sh derive --json
+(( status == 0 )) || fail "JSON derive failed: $out"
+derived_json="$out"
 node -e '
   const values = JSON.parse(process.argv[1])
   const want = {
@@ -48,7 +48,7 @@ node -e '
 pass 'derive emits eval-safe assignments and matching JSON'
 
 # --- 3. a custom subnet moves every derived address -----------------------
-run env WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 bash deploy/network.sh derive
+run env WORKSTATION_SUBNET=10.71.241.0/24 bash deploy/network.sh derive
 (( status == 0 )) || fail "custom derive failed: $out"
 grep -Fxq 'WORKSTATION_RUNTIME_IP=10.71.241.2' <<<"$out" || fail 'the runtime IP did not follow the subnet'
 grep -Fxq 'WORKSTATION_PROVIDER_IP=10.71.241.3' <<<"$out" || fail 'the provider IP did not follow the subnet'
@@ -65,18 +65,8 @@ run env WORKSTATION_SUBNET='172.30.241.7/24' bash deploy/network.sh derive
 grep -q '172.30.241.0/24' <<<"$out" || fail "the host-bits message did not suggest the network address: $out"
 pass 'invalid, tiny, huge and non-canonical subnets are all refused with a diagnosis'
 
-# --- 5. overlapping workstation and browser subnets are refused ----------
-run env WORKSTATION_SUBNET=10.1.0.0/16 BROWSER_SUBNET=10.1.5.0/24 bash deploy/network.sh derive
-(( status != 0 )) || fail 'derive accepted overlapping workstation and browser subnets'
-grep -q 'overlap' <<<"$out" || fail "the overlap message is missing: $out"
-run env WORKSTATION_SUBNET=10.1.0.0/24 BROWSER_SUBNET=10.1.0.0/24 bash deploy/network.sh derive
-(( status != 0 )) || fail 'derive accepted identical subnets'
-pass 'overlapping workstation and browser subnets are refused by derive itself'
-
-# --- 5b. the CI-only proxy network cannot land on a real plan -----------
-# ci.sh creates its own proxy network. If it overlapped the workstation or
-# browser subnet, the CI stack would fight itself; the derivation refuses it.
-run env WORKSTATION_SUBNET=172.30.0.0/16 BROWSER_SUBNET=10.71.233.0/24 bash deploy/network.sh derive
+# --- 5. the CI proxy and workstation subnets must be disjoint ------------
+run env WORKSTATION_SUBNET=172.30.0.0/16 bash deploy/network.sh derive
 (( status != 0 )) || fail 'a plan overlapping the CI proxy network was accepted'
 grep -q 'overlaps the workstation subnet' <<<"$out" || fail "the CI proxy overlap was not explained: $out"
 pass 'a workstation subnet overlapping the CI proxy network is refused'
@@ -93,7 +83,7 @@ printf 'eth0\t0000A8C0\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n' >> "$work/
 run bash deploy/network.sh check --routes "$work/routes-conflict" --docker-dump "$work/no-docker"
 (( status != 0 )) || fail 'a host route covering the subnet did not fail the preflight'
 grep -q 'overlaps 172.30.0.0/16' <<<"$out" || fail "the conflict was not named: $out"
-grep -q 'Neither network was created' <<<"$out" || fail 'the refusal did not state that nothing was changed'
+grep -q 'No network was created' <<<"$out" || fail 'the refusal did not state that nothing was changed'
 pass 'a host route conflict fails the preflight and says nothing was created'
 
 run bash deploy/network.sh check --routes "$work/routes-clear" --docker-dump "$work/no-docker"
@@ -113,7 +103,7 @@ run bash deploy/network.sh check --routes "$work/routes-clear" --docker-dump "$w
 pass 'Docker overlaps fail the preflight, adjacency does not'
 
 # --- 8. a custom subnet that clears the conflict passes ------------------
-run env WORKSTATION_SUBNET=10.71.241.0/24 BROWSER_SUBNET=10.71.233.0/24 \
+run env WORKSTATION_SUBNET=10.71.241.0/24 \
   bash deploy/network.sh check --routes "$work/routes-conflict" --docker-dump "$work/docker-conflict"
 (( status == 0 )) || fail "a conflict-free custom subnet failed the preflight: $out"
 pass 'a custom subnet that avoids both conflicts passes the preflight'
@@ -125,7 +115,6 @@ for file in compose.yml compose.preview.yml; do
   grep -q 'WORKSTATION_RUNTIME_IP' "$file" || fail "$file does not derive the runtime address"
   grep -q 'WORKSTATION_SUBNET' "$file" || fail "$file does not derive the workstation subnet"
 done
-grep -q 'BROWSER_SUBNET' compose.yml || fail 'compose.yml does not derive the browser subnet'
 # No literal 172.30 address may remain outside a documented default.
 if grep -nE '(^|[^-])\b172\.30\.[0-9]+\.[0-9]+' compose.yml compose.preview.yml |
      grep -vE ':-[0-9]' >"$work/literals"; then
@@ -151,12 +140,12 @@ check_binding() {
   local file=$1 pattern=$2 why=$3
   grep -qE "$pattern" "$file" || fail "$file does not $why"
 }
-check_binding compose.yml 'PROVIDER_IP: \$\{WORKSTATION_PROVIDER_IP' 'bind MCP to the derived workstation address'
+check_binding compose.yml '^[[:space:]]+PROVIDER_IP: \$\{WORKSTATION_PROVIDER_IP' 'bind MCP to the derived workstation address'
+check_binding compose.yml 'WORKSTATION_PROVIDER_IP: \$\{WORKSTATION_PROVIDER_IP' 'use the derived Gateway address for the Selkies rule'
 check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_PROVIDER_IP' 'assign Gateway its derived workstation address'
 check_binding compose.yml 'ipv4_address: \$\{WORKSTATION_RUNTIME_IP' 'assign the runtime its derived address'
 check_binding compose.yml 'DSH_BIND_IP: \$\{WORKSTATION_RUNTIME_IP' 'bind the runtime to its derived address'
 check_binding compose.yml 'subnet: \$\{WORKSTATION_SUBNET' 'derive the workstation subnet'
-check_binding compose.yml 'subnet: \$\{BROWSER_SUBNET' 'derive the browser subnet'
 check_binding compose.yml 'PROVIDER_CONTROL_IP: 127\.0\.0\.1$' 'keep the provider control listener on loopback'
 check_binding compose.yml 'GATE_ADDR: 127\.0\.0\.1:8082$' 'keep the input gate on loopback'
 # The provider reads these from its environment; the code must not carry its own.
@@ -201,10 +190,9 @@ pass 'no shipped image hard-codes a routable address'
 # Every ${VAR:-default} must equal the derived value, or an existing deployment
 # without an override would move to a different address when it upgrades.
 node --input-type=module -e '
-  import { execFileSync } from "node:child_process"
   import { readFileSync } from "node:fs"
-  const derived = JSON.parse(execFileSync("bash", ["deploy/network.sh", "derive", "--json"], { encoding: "utf8" }))
-  const pattern = /\$\{(WORKSTATION_(?:SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)|BROWSER_(?:SUBNET|IP_RANGE)):-([^}]*)\}/g
+  const derived = JSON.parse(process.argv[1])
+  const pattern = /\$\{(WORKSTATION_(?:SUBNET|IP_RANGE|RUNTIME_IP|PROVIDER_IP|ENTRY_SUBNET|ENTRY_IP_RANGE|ENTRY_EDGE_IP)):-([^}]*)\}/g
   let checked = 0
   const bad = []
   for (const file of ["compose.yml", "compose.preview.yml"]) {
@@ -216,7 +204,7 @@ node --input-type=module -e '
   if (checked === 0) throw Error("no network variables found in the Compose files")
   if (bad.length) throw Error(bad.join("\n"))
   console.log(`  ${checked} Compose defaults match the derivation`)
-' || fail 'a Compose default disagrees with the derivation'
+' "$derived_json" || fail 'a Compose default disagrees with the derivation'
 pass 'every Compose default equals the value the derivation produces'
 
 printf 'network OK: derivation, custom subnets, invalid input, route and Docker conflicts\n'

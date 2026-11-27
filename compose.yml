@@ -34,7 +34,7 @@ services:
       GATEWAY_VERIFY_ADDR: dsh-workstation-gateway-edge:8081
       GATEWAY_PROVIDER_CONTROL_ADDR: 127.0.0.1:8081
       GATEWAY_BROWSER_UPSTREAM: http://127.0.0.1:8082
-      # Every other browser WebSocket bypasses the gate.
+      # Non-input WebSockets go to Selkies over the workstation network.
       GATEWAY_BROWSER_DIRECT: http://dsh-workstation-chromium:3000
       WORKSTATION_PROVIDER: "1"
       WORKSTATION_BROWSER_MCP: ${WORKSTATION_BROWSER_MCP:-0}
@@ -74,7 +74,6 @@ services:
         ipv4_address: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
         # Keep the endpoint in already-installed DSH Profiles.
         aliases: [provider]
-      browser: {}
     healthcheck:
       test: ["CMD", "workstation-gateway", "health"]
       interval: 10s
@@ -144,6 +143,7 @@ services:
       PUID: "1000"
       PGID: "1000"
       SUBFOLDER: /browser/
+      WORKSTATION_PROVIDER_IP: ${WORKSTATION_PROVIDER_IP:-172.30.241.3}
       CHROME_CLI: --user-data-dir=/config/chromium --remote-debugging-port=9222 --no-first-run
       SELKIES_MODE: websockets
       SELKIES_ENABLE_DUAL_MODE: "false"
@@ -168,9 +168,25 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: ./browser/selkies-guard.sh
+        target: /custom-cont-init.d/workstation-selkies
+        read_only: true
+        bind:
+          create_host_path: false
     secrets: [m0_master]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(curl -sS --max-time 2 http://127.0.0.1:3000/browser/api/websockets)" = 'Gateway required' &&
+          curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:3000/browser/api/health
+      interval: 10s
+      timeout: 5s
+      retries: 4
+      start_period: 1m
     networks:
-      browser:
+      workstation:
         aliases: [dsh-workstation-chromium]
 
 networks:
@@ -182,11 +198,6 @@ networks:
       config:
         - subnet: ${WORKSTATION_SUBNET:-172.30.241.0/24}
           ip_range: ${WORKSTATION_IP_RANGE:-172.30.241.128/25}
-  browser:
-    ipam:
-      config:
-        - subnet: ${BROWSER_SUBNET:-172.30.233.0/24}
-          ip_range: ${BROWSER_IP_RANGE:-172.30.233.128/25}
 
 secrets:
   auth_key:

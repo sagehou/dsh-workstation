@@ -2,7 +2,7 @@
 
 [English](release.md) · 简体中文
 
-当前源码构建 `dsh-workstation-runtime` 和 `dsh-workstation-gateway`，用于 GHCR 公开发布。Provider 和输入门禁随 Gateway 镜像发布。Compose 固定 LinuxServer Chromium 的上游摘要，并在启动时挂载同一提交的 CDP 中继。
+当前源码构建 `dsh-workstation-runtime` 和 `dsh-workstation-gateway`，用于 GHCR 公开发布。Provider 和输入门禁随 Gateway 镜像发布。Compose 固定 LinuxServer Chromium 的上游摘要，并在启动时挂载同一提交的 CDP 中继和 Selkies 访问限制脚本。
 
 部署从不只引用标签。`deploy/public/images.env` 记录每个镜像的 manifest list
 摘要，`deploy/public/images.sh` 把摘要解析成

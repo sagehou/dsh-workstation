@@ -19,6 +19,5 @@ services:
       - ./deploy/public:/test:ro
       - ./.workstation/fixture:/fixture:ro
     networks:
-      workstation: {}
-      browser:
+      workstation:
         aliases: [fixture.test]

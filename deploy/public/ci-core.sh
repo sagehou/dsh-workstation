@@ -114,10 +114,7 @@ echo 'Administrator bootstrapped'
 
 compose up -d --no-build --wait --wait-timeout 420
 
-# The edge must join the workstation network and pick up the route file, or
-# Traefik answers with its own 404 instead of reaching Gateway. Only the workstation
-# network is connected here: the browser network exists but has no consumer, and
-# connecting the edge to it would suggest the browser side is wired up.
+# Traefik joins the shared workstation network to reach Runtime.
 docker network connect dsh-workstation_workstation "$edge"
 install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
 mv "$edge_dir/.routes.tmp" "$edge_dir/routes.yml"

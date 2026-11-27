@@ -92,7 +92,7 @@
 | ForwardAuth | 保护 DSH 和 Selkies。未认证的 API 返回 401，WebSocket 升级被拒绝。 |
 | 浏览器控制 | 仅供内部或通过认证访问。管理端点不作为免认证公网入口。 |
 | Compose | 精简版运行 Runtime 和 Gateway，完整版增加 Browser。Gateway 运行 Provider 和输入门禁，Browser 运行 Chromium、Selkies 与私有 CDP 中继。两种形态都复用外部 Traefik。 |
-| 网络 | 部署前检查 Docker 子网冲突。工作台和浏览器子网可配置，固定地址、健康检查目标和证书 SAN 从同一配置源生成。 |
+| 网络 | Runtime、Gateway 和 Browser 共用一张可配置的工作台网络。Traefik 加入该网络，并沿用现有代理网与 Gateway 通信及执行 ForwardAuth。固定地址和 Runtime 证书 SAN 从 `WORKSTATION_SUBNET` 推导。部署前检查子网冲突。 |
 | 镜像 | Runtime 和 Gateway 发布至 GHCR，部署使用不可变摘要。LinuxServer Chromium 镜像按上游摘要固定。 |
 
 ## 界面和运维

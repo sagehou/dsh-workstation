@@ -54,14 +54,13 @@ flowchart LR
 | Network | Endpoints |
 | --- | --- |
 | Existing proxy | Traefik and Gateway. Gateway binds its public and verify listeners here and verifies the expected Traefik peer. |
-| `workstation` | Runtime, the MCP listener, and the Traefik and Gateway connections to DSH. |
-| `browser` | Browser, Traefik and Gateway. Selkies HTTP and WebSockets travel here. |
+| `workstation` | Runtime, Gateway and Browser. Traefik also joins this network to reach DSH and Selkies HTTP. |
 
-Browser writes the private CDP socket and Gateway mounts it read-only. The input gate and Provider control listeners use Gateway loopback. Gateway forwards DSH and Selkies WebSockets and checks the live session. [Topology and CI](roadmap/public-compose.md)
+Browser's Nginx checks the Gateway source address for the Selkies data WebSocket and token administration. Gateway routes the data WebSocket through its input gate after checking the operator's session. Provider control and the input gate listen on Gateway loopback. Browser binds Chromium's CDP TCP listener to loopback and writes a private Unix socket that Gateway mounts read-only. [Topology and CI](roadmap/public-compose.md)
 
-Both subnets are configurable. `deploy/network.sh` derives static Runtime and MCP addresses at offsets `.2` and `.3` on the workstation network, the Runtime certificate SAN, and the upper-half dynamic ranges. Browser-network addresses use dynamic allocation.
+`deploy/network.sh` derives static Runtime and MCP addresses at offsets `.2` and `.3`, the Runtime certificate SAN, and the upper-half dynamic pool from `WORKSTATION_SUBNET`. Browser uses a dynamic address.
 
-`deploy/network.sh check` runs before the initializer creates anything and refuses on an overlap with a host route or an existing Docker network. It creates and modifies nothing. The default route is excluded by design: it covers every address and Docker's more specific subnet route wins. A state directory whose recorded subnets differ from the requested ones is refused rather than silently reissuing the internal CA, because the Runtime certificate is issued for the derived address; `--reissue` is the deliberate path.
+`deploy/network.sh check` runs before initialization and refuses an overlap with a host route or an existing Docker network. The check compares specific routes because Docker's subnet route takes precedence over the default route. Changing the saved `WORKSTATION_SUBNET` requires `--reissue` to replace the Runtime certificate and internal CA.
 
 ## Routes
 

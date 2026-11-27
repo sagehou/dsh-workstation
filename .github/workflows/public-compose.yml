@@ -18,6 +18,7 @@ on:
       - browser/**
       - browser-gate/**
       - compose.yml
+      - deploy/network.sh
       - deploy/public/**
       - deploy/test/**
       # The publish workflow consumes the resolver too. Without this its test
@@ -36,6 +37,7 @@ on:
       - browser/**
       - browser-gate/**
       - compose.yml
+      - deploy/network.sh
       - deploy/public/**
       - deploy/test/**
       - .github/workflows/publish-images.yml
@@ -126,11 +128,11 @@ jobs:
         # Every Traefik version also runs once on a custom address plan. The
         # default leg proves the documented values; this leg proves nothing
         # silently depends on 172.30.x, which is the point of making the
-        # subnets configurable.
+        # subnet configurable.
         subnet:
           - default
           - custom
-    name: public-compose (${{ matrix.traefik }}, ${{ matrix.subnet }} subnets)
+    name: public-compose (${{ matrix.traefik }}, ${{ matrix.subnet }} subnet)
     env:
       WORKSTATION_CI_TRAEFIK_VERSION: ${{ matrix.traefik }}
       WORKSTATION_CI_SUBNETS: ${{ matrix.subnet }}
@@ -144,7 +146,7 @@ jobs:
           if [[ "$WORKSTATION_CI_TRAEFIK_VERSION" != "$(bash deploy/public/traefik-image.sh --default)" ]]; then
             suffix="-${WORKSTATION_CI_TRAEFIK_VERSION}"
           fi
-          # Only the default Traefik on the default subnets keeps the unsuffixed
+          # Only the default Traefik on the default subnet keeps the unsuffixed
           # artifact names the deployment guide points at.
           if [[ "$WORKSTATION_CI_SUBNETS" != default ]]; then
             suffix="${suffix}-custom-subnets"
@@ -154,9 +156,9 @@ jobs:
           if [[ "$WORKSTATION_CI_SUBNETS" == custom ]]; then
             # Deliberately outside 172.30.0.0/16. The derivation moves the
             # static addresses and the certificate SAN with the subnet.
-            printf 'WORKSTATION_SUBNET=10.71.241.0/24\n' >> "$GITHUB_ENV"
-            printf 'BROWSER_SUBNET=10.71.233.0/24\n' >> "$GITHUB_ENV"
-            printf 'Address plan: custom (10.71.241.0/24, 10.71.233.0/24)\n'
+            export WORKSTATION_SUBNET=10.71.241.0/24
+            printf 'WORKSTATION_SUBNET=%s\n' "$WORKSTATION_SUBNET" >> "$GITHUB_ENV"
+            printf 'Address plan: custom workstation subnet (%s)\n' "$WORKSTATION_SUBNET"
             bash deploy/network.sh derive
           else
             printf 'Address plan: default\n'
@@ -361,12 +363,12 @@ jobs:
               for (const version of JSON.parse(process.env.VERSIONS)) {
                 const digest = execFileSync("bash", ["deploy/public/traefik-image.sh", "--field", "digest", version], { encoding: "utf8" }).trim()
                 for (const plan of ["default", "custom"]) {
-                  const note = plan === "custom" ? "10.71.241.0/24 + 10.71.233.0/24" : "172.30.241.0/24 + 172.30.233.0/24"
+                  const note = plan === "custom" ? "10.71.241.0/24" : "172.30.241.0/24"
                   console.log(`| \`${version}\` | \`${digest}\` | ${plan} (${note}) | \`deploy/public/ci.sh\` + \`deploy/public/edge-probe.mjs\` |`)
                 }
               }
             '
-            printf '\nEvery leg runs the same Compose stack, edge probe and authenticated browser checks. Two things vary: the pinned Traefik image, and whether the subnets are the defaults or a custom plan.\n'
+            printf '\nEvery leg runs the same Compose stack, edge probe and authenticated browser checks with the pinned Traefik image and its assigned workstation subnet.\n'
             printf '\n## Published digests\n\n'
             if [[ "$RELEASE" == success ]]; then
               printf 'The `release-compose` job pulled the published digests anonymously and passed the probes from deployment commit `%s`. See the `public-compose-release` artifact for the exact references.\n' "$RELEASE_REF"
