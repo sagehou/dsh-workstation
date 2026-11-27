@@ -164,6 +164,11 @@ docker inspect "$edge" "$(compose ps -q gateway)" "$(compose ps -q runtime)" \
     const proxy = process.argv[1]
     const networks = containers.map(container => Object.keys(container.NetworkSettings.Networks).sort())
     assert.deepEqual(networks, [[proxy, workstation], [proxy, workstation], [workstation], [workstation]])
+    const oldAliases = ["provider", "dsh-workstation-runtime", "dsh-workstation-chromium"]
+    for (const [index, container] of containers.slice(1).entries()) {
+      const aliases = container.NetworkSettings.Networks[workstation].Aliases ?? []
+      assert.ok(!aliases.includes(oldAliases[index]), `retired workstation alias ${oldAliases[index]}`)
+    }
   ' "$proxy"
 network_ip() { docker inspect --format "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1"; }
 browser_ip="$(network_ip "$(compose ps -q browser)" dsh-workstation_workstation)"
@@ -176,7 +181,6 @@ const [browser, gateway, gatewayPeer] = process.argv.slice(2)
 ;(async () => {
   assert.equal((await lookup('browser')).address, browser)
   assert.equal((await lookup('gateway')).address, gatewayPeer)
-  await assert.rejects(lookup('provider'), { code: 'ENOTFOUND' })
   const origin = 'http://browser:3000'
   const document = await fetch(origin + '/browser/', { signal: AbortSignal.timeout(2000) })
   assert.equal(document.status, 200, 'Selkies HTML is reachable on the shared network')
