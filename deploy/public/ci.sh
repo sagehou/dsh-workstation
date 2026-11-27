@@ -315,7 +315,7 @@ check() {
 }
 check gateway
 console_drill=0
-if [[ $ci_image_mode == build && $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ]]; then
+if [[ $ci_image_mode == release || ( $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ) ]]; then
   console_drill=1
   compose exec -T runtime mkdir -p /workspace/sidebar-initial /workspace/sidebar-upgraded
   check sidebar-initial
@@ -421,8 +421,8 @@ compose up -d --no-build --wait --wait-timeout 60 gateway
 check browser
 echo 'Input gate verified: authenticated handover, refusal of unauthenticated, stack healthy after'
 
-# Exercise the installed Browser Bundle after a Web upgrade on the default
-# source leg. The release job runs the probes from its own deployment checkout.
+# Exercise the Browser Bundle after a Web upgrade on the default source leg
+# and on the published images using their matching deployment checkout.
 if [[ $console_drill == 1 ]]; then
   # A disposable Profile pin exercises the error feedback on the upgrade page.
   compose exec -T runtime sh -ec '
