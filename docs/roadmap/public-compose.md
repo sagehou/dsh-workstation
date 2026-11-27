@@ -15,7 +15,11 @@ The owner approved a single-administrator public Compose release. The authentica
 
 Full starts `browser`, `gateway` and `runtime`. Core starts `gateway` and `runtime`. Both declare one `workstation` network alongside the external proxy network. Provider and the input gate run inside Gateway, and LinuxServer starts the CDP relay inside Browser. The relay writes the Unix socket and Gateway mounts it read-only. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](../adr/0007-three-service-deployment.md)
 
-Full CI enables Agent MCP against the trusted HTTPS fixture. It inspects the network attachments, checks for direct Selkies HTTP access and denial of the data and token routes on both Nginx listeners, and exercises authenticated browser input and captured pointer release through Gateway. The core and published `81feffd` stacks run in separate jobs. [Shared-network acceptance](https://github.com/sagehou/dsh-workstation/issues/37)
+### Shared-network verification
+
+All four full-stack jobs passed at `21cdcdc` with Agent MCP enabled against the trusted HTTPS fixture. `bash deploy/public/ci.sh` used Runtime `0.2.2`, Gateway `0.1.0`, official DSH `0.2.2-rc.1`, LinuxServer Chromium `075b0b99-ls64`, and Playwright `1.61.1`. It verified the single business network, Selkies HTML reachability, and denial of direct data and token access on both Nginx listeners. The browser tests measured held-pointer release on handoff and disconnect and reattached Gateway to Chromium after recreation. The core deployment and anonymous pull of the published `81feffd` stack passed in separate jobs. [Public Compose run](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777) · [Issue #37](https://github.com/sagehou/dsh-workstation/issues/37)
+
+`bash deploy/test/init.test.sh` confirmed that removing the old Browser subnet settings preserved the CA, Runtime certificate, and authentication key. The SSH preview also passed. Host preflight and recovery use the target-host checklist. [M1 run](https://github.com/sagehou/dsh-workstation/actions/runs/45923718776) · [Target-host acceptance](https://github.com/sagehou/dsh-workstation/issues/6)
 
 The three-service predecessor with separate workstation and Browser networks passed all four Traefik matrix jobs and the core shape at `179bdaa`. [Public Compose run](https://github.com/sagehou/dsh-workstation/actions/runs/45914350105)
 
@@ -29,8 +33,8 @@ The job matrix reads its versions from `deploy/public/traefik-matrix.env`. It ru
 
 | Traefik | Pinned digest | Status |
 | --- | --- | --- |
-| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Default and custom subnets passed at `f57e92d` |
-| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Default and custom subnets passed at `f57e92d` |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | Default and custom subnets passed at `21cdcdc`. [Default](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179100) · [Custom](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179301) |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | Default and custom subnets passed at `21cdcdc`. [Default](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179126) · [Custom](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179153) |
 
 Lowest version with a recorded pass: **v3.7.14**. Both legs passed [run 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598) with identical checks: `v3.7.14` ([job 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)) and `v3.7.19` ([job 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)); both passed again at `43065af` in [run 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367).
 

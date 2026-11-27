@@ -15,7 +15,11 @@
 
 完整版运行 `browser`、`gateway` 和 `runtime`，精简版运行 `gateway` 和 `runtime`。两种形态都使用一张 `workstation` 网络及外部代理网。Provider 与输入门禁在 Gateway 内运行，LinuxServer 在 Browser 内启动 CDP 中继。中继写入 Unix socket，Gateway 只读挂载。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](../adr/0007-three-service-deployment.zh-CN.md)
 
-完整 CI 对可信 HTTPS 测试站启用 Agent MCP，并检查容器网络接入、Selkies 普通 HTTP 可达、两个 Nginx 监听端口拒绝数据和令牌路由直连，以及经 Gateway 登录后接管时释放实际按住的鼠标键。精简版和已发布的 `81feffd` 分别在独立作业运行。[共享网络验收](https://github.com/sagehou/dsh-workstation/issues/37)
+### 共享网络验证
+
+提交 `21cdcdc` 的四组完整部署测试均通过，测试对可信 HTTPS 站点启用 Agent MCP。`bash deploy/public/ci.sh` 使用 Runtime `0.2.2`、Gateway `0.1.0`、官方 DSH `0.2.2-rc.1`、LinuxServer Chromium `075b0b99-ls64` 和 Playwright `1.61.1`。实测只有一张业务网，Selkies 页面可达，两个 Nginx 监听端口都拒绝直连数据和令牌接口。浏览器测试验证交接和断线时释放实际按住的鼠标键，并在 Chromium 容器重建后验证 Gateway 恢复连接。精简版和匿名拉取已发布 `81feffd` 部署的作业也通过。[Public Compose 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777) · [Issue #37](https://github.com/sagehou/dsh-workstation/issues/37)
+
+`bash deploy/test/init.test.sh` 确认移除旧浏览器子网配置时保留 CA、Runtime 证书和认证密钥。SSH 私有预览也通过。目标主机的预检和恢复演练由部署任务验收。[M1 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45923718776) · [目标主机验收](https://github.com/sagehou/dsh-workstation/issues/6)
 
 仍分工作台网络和浏览器网络的三服务提交 `179bdaa` 已通过四组 Traefik 矩阵和精简版测试。[Public Compose 运行记录](https://github.com/sagehou/dsh-workstation/actions/runs/45914350105)
 
@@ -29,8 +33,8 @@ Public Compose 在固定 Go 镜像内运行 `go test -race -v ./...`，并在 Gi
 
 | Traefik | 固定摘要 | 状态 |
 | --- | --- | --- |
-| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | 在 `f57e92d` 通过默认及自定义网段测试 |
-| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | 在 `f57e92d` 通过默认及自定义网段测试 |
+| `v3.7.19` | `sha256:a6c0194dda77bcb804824580f36fa7edc56e315b1acfe933366c8b52844a78a4` | `21cdcdc` 通过两组子网测试。[默认](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179100) · [自定义](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179301) |
+| `v3.7.14` | `sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c` | `21cdcdc` 通过两组子网测试。[默认](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179126) · [自定义](https://github.com/sagehou/dsh-workstation/actions/runs/45923718777/job/140260179153) |
 
 已记录通过的最低版本为 **v3.7.14**。两条腿都在[运行 45115206598](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598)通过，检查项完全一致：`v3.7.14`（[作业 137496422641](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422641)）与 `v3.7.19`（[作业 137496422567](https://github.com/sagehou/dsh-workstation/actions/runs/45115206598/job/137496422567)）；在 `43065af` 的[运行 45116032367](https://github.com/sagehou/dsh-workstation/actions/runs/45116032367) 再次通过。
 

@@ -30,7 +30,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent-first lease, browser egress hardening and recording | Automatic acquisition passed source Compose. Egress and recording acceptance remain open. |
 | 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | Operations console, Gateway rename and UI | Console and authentication verified in source CI. Gateway image publication and migration on the deployment host remain open. |
 | 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | Three-service full deployment | Runtime, Gateway and Browser. Verify CDP isolation, browser recreation and existing login and lease flows. |
-| 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | Shared workstation network | Verify direct-access boundaries, certificate preservation and browser handoff with Agent MCP enabled. |
+| 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | Shared workstation network | Direct-access boundaries, certificate preservation and browser handoff with Agent MCP enabled passed. [Compose evidence](public-compose.md#shared-network-verification) |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | Native DSH Browser Sidebar | Deferred enhancement; standalone page remains supported. Does not block first release. |
 
 ## Release gates
