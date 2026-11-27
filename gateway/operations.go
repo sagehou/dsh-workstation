@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -19,6 +21,101 @@ type runtimeState struct {
 	Previous  string   `json:"previous"`
 	Installed []string `json:"installed"`
 	ReadError string   `json:"readError,omitempty"`
+}
+
+type upgradeStatus struct {
+	From     string   `json:"from"`
+	To       string   `json:"to"`
+	Phase    string   `json:"phase"`
+	Result   string   `json:"result"`
+	Backup   string   `json:"backup"`
+	Blockers []string `json:"blockers"`
+}
+
+var runtimeVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$`)
+var upgradePhases = map[string]string{
+	"install": "安装候选版本", "compatibility": "检查插件与依赖兼容性", "readiness": "验证候选版本启动",
+	"backup": "创建升级前备份", "switch": "切换活动版本",
+}
+var upgradeResults = map[string]string{
+	"running": "进行中", "failed": "失败", "selected": "已切换，待启动及校验", "verified": "已校验，Profile 状态未变",
+	"migrated": "已校验，Profile 状态有变化", "interrupted": "中断，需检查活动版本", "superseded": "已离开此次升级的版本",
+}
+
+func (s upgradeStatus) message() string {
+	if s.Result == "running" || s.Result == "failed" || s.Result == "interrupted" {
+		return upgradeResults[s.Result] + " · " + upgradePhases[s.Phase]
+	}
+	return upgradeResults[s.Result]
+}
+
+func runtimeHome(root string) string {
+	if root == "" {
+		return "/dsh-home"
+	}
+	return root
+}
+
+func readRuntimeOperation(dir, name string) *upgradeStatus {
+	file, err := os.OpenFile(filepath.Join(dir, name), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	var status upgradeStatus
+	if err := json.NewDecoder(io.LimitReader(file, 16<<10)).Decode(&status); err != nil ||
+		!runtimeVersion.MatchString(status.To) || upgradePhases[status.Phase] == "" || upgradeResults[status.Result] == "" {
+		return nil
+	}
+	return &status
+}
+
+func readUpgradeStatus(root string) *upgradeStatus {
+	dir := filepath.Join(runtimeHome(root), "runtime")
+	status := readRuntimeOperation(dir, "upgrade-status.json")
+	if status == nil || !runtimeVersion.MatchString(status.From) {
+		return nil
+	}
+	if status.Result == "running" {
+		// Maintenance and Web share .serve.lock with the CLI. Upgrade also
+		// takes .lock. A pending record with no writer is from an interrupted run.
+		if guard, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0); err == nil {
+			if err := syscall.Flock(int(guard.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err == nil {
+				if current := readRuntimeOperation(dir, "upgrade-status.json"); current != nil {
+					status = current
+				}
+				if status.Result == "running" {
+					status.Result = "interrupted"
+				}
+			}
+			guard.Close()
+		}
+	}
+	if status.Result == "selected" || status.Result == "verified" || status.Result == "migrated" {
+		active, _, _ := readRuntimeSelection(dir)
+		if active != "" && active != status.To {
+			status.Result = "superseded"
+		}
+	}
+	return status
+}
+
+func readStartupStatus(root string) string {
+	status := readRuntimeOperation(filepath.Join(runtimeHome(root), "runtime"), "startup-status.json")
+	if status == nil {
+		return ""
+	}
+	switch status.Result {
+	case "running":
+		return "正在初始化 DSH · " + upgradePhases[status.Phase]
+	case "failed":
+		return "首次初始化失败 · " + upgradePhases[status.Phase]
+	default:
+		return ""
+	}
 }
 
 // components and available versions come from the Runtime container, which is the
@@ -49,31 +146,33 @@ type backupEntry struct {
 	HasManifest bool   `json:"hasManifest"`
 }
 
-// readRuntimeState reads the Runtime's own selection files rather than shelling
-// out to `dsh-runtime status`. The Gateway has the volume mounted read-only and
-// no shell, and parsing two small files is less to go wrong than executing a
-// script whose output format is a UI concern of its own.
-func readRuntimeState(root string) runtimeState {
-	state := runtimeState{Installed: []string{}}
-	if root == "" {
-		root = "/dsh-home"
+func readRuntimeSelection(dir string) (active, previous string, err error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "selection"))
+	if err != nil {
+		return "", "", err
 	}
-	selection := filepath.Join(root, "runtime", "selection")
-	if raw, err := os.ReadFile(selection); err == nil {
-		fields := strings.Fields(string(raw))
-		if len(fields) > 0 {
-			state.Active = fields[0]
-		}
-		if len(fields) > 1 {
-			state.Previous = fields[1]
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	fields := strings.Fields(string(raw))
+	if len(fields) > 0 {
+		active = fields[0]
+	}
+	if len(fields) > 1 {
+		previous = fields[1]
+	}
+	return active, previous, nil
+}
+
+// Gateway reads the selection and installed versions from its read-only mount.
+func readRuntimeState(root string) runtimeState {
+	dir := filepath.Join(runtimeHome(root), "runtime")
+	active, previous, err := readRuntimeSelection(dir)
+	state := runtimeState{Active: active, Previous: previous, Installed: []string{}}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		state.ReadError = "could not read the version selection"
 	}
-	versions := filepath.Join(root, "runtime", "versions")
+	versions := filepath.Join(dir, "versions")
 	if entries, err := os.ReadDir(versions); err == nil {
 		for _, entry := range entries {
-			if entry.IsDir() {
+			if entry.IsDir() && runtimeVersion.MatchString(entry.Name()) {
 				state.Installed = append(state.Installed, entry.Name())
 			}
 		}
@@ -138,7 +237,9 @@ func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request) {
 		View:  "operations",
 		Title: "控制台",
 	}
-	page.Runtime = readRuntimeState(os.Getenv("WORKSTATION_DSH_HOME"))
+	root := os.Getenv("WORKSTATION_DSH_HOME")
+	page.Runtime = readRuntimeState(root)
+	page.Upgrade = readUpgradeStatus(root)
 	inventoryCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	g.fetchInventory(r.WithContext(inventoryCtx), &page)

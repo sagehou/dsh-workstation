@@ -29,6 +29,10 @@ mkdir -p "$home/runtime/versions" "$backup" "$stubs" "$home/profiles/web"
 pass() { printf 'runtime e2e %s: %s\n' "$1" "$2"; }
 fail() { printf 'runtime e2e %s FAILED: %s\n' "$1" "$2" >&2; exit 1; }
 expect() { [[ $2 == "$3" ]] || fail "$1" "expected $3, got $2"; }
+status_field() {
+  node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]])' \
+    "$home/runtime/upgrade-status.json" "$1"
+}
 
 # --- stubs -------------------------------------------------------------------
 # pnpm materialises a version directory with a CLI that reports its version.
@@ -79,6 +83,27 @@ fi
 exec "$real_node" "\$@"
 STUB
 chmod +x "$stubs/node"
+
+real_tar="$(command -v tar)"
+cat > "$stubs/tar" <<STUB
+#!/usr/bin/env bash
+if [[ \${DSH_TEST_ARCHIVE_FAILURE:-} == 1 && \${1:-} == -czf ]]; then
+  printf 'partial archive\n' > "\$2"
+  exit 2
+fi
+exec "$real_tar" "\$@"
+STUB
+chmod +x "$stubs/tar"
+
+real_mv="$(command -v mv)"
+cat > "$stubs/mv" <<STUB
+#!/usr/bin/env bash
+if [[ \${DSH_TEST_RESTORE_FAILURE:-} == 1 && \${3:-} == "\$DSH_HOME"/.restore.*/profiles && \${4:-} == "\$DSH_HOME/profiles" ]]; then
+  exit 2
+fi
+exec "$real_mv" "\$@"
+STUB
+chmod +x "$stubs/mv"
 
 runtime="$repo/runtime/dsh-runtime"
 export PATH="$stubs:$PATH" DSH_HOME="$home" DSH_RUNTIME_LIB="$repo/runtime" WORKSTATION_RUNTIME_IMAGE="sha256:drill-local"
@@ -134,6 +159,9 @@ if runtime_cmd upgrade 0.2.2-rc.5 >"$work/blocked.log" 2>&1; then
   fail compat 'the upgrade was allowed although a bundle pins another DSH'
 fi
 grep -q 'requires DSH 0.2.2-rc.1' "$work/blocked.log" || fail compat "unexpected refusal: $(cat "$work/blocked.log")"
+expect compat "$(status_field phase)" compatibility
+expect compat "$(status_field result)" failed
+[[ $(status_field blockers) == *'dsh-drill-pin requires DSH 0.2.2-rc.1'* ]] || fail compat 'the progress record omitted the blocking bundle'
 expect compat "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.1
 grep -qx 'Installed: 0.2.2-rc.5' <(runtime_cmd status) || fail compat 'the candidate must be installed beside the active version'
 pass compat 'a Profile bundle pinning 0.2.2-rc.1 blocked 0.2.2-rc.5 and left the pointer alone'
@@ -169,13 +197,33 @@ if ! runtime_cmd approve 'other-thing@2.0.0-rc.1' >/dev/null 2>&1; then
 fi
 pass scripts 'an unapproved postinstall blocked the switch; only an exact package@version was approved'
 
+# A partial archive must never authorize a switch. This runs in the command
+# substitution that gathers the backup ID, where Bash does not inherit errexit.
+if DSH_TEST_ARCHIVE_FAILURE=1 runtime_cmd upgrade 0.2.2-rc.5 >"$work/backup-failed.log" 2>&1; then
+  fail backup 'an incomplete archive allowed the upgrade to switch'
+fi
+expect backup "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.1
+expect backup "$(status_field phase)" backup
+expect backup "$(status_field result)" failed
+[[ "$(find "$backup" -name '*.tgz' -printf '%f\n')" == "dsh-home.$online_id.tgz" ]] ||
+  fail backup 'the partial archive was left in the backup directory'
+if runtime_cmd verify >"$work/uncommitted.log" 2>&1; then
+  fail backup 'verify accepted a transaction that failed before switching'
+fi
+pass backup 'an incomplete archive was removed and prevented the selection change'
+
 # --- 4. restart then upgrade verify ----------------------------------------
+mkdir -p "$home/.agents/skills"
+printf 'original skill\n' > "$home/.agents/skills/probe"
 runtime_cmd upgrade 0.2.2-rc.5 >"$work/upgrade.log" 2>&1 ||
   fail upgrade "the approved upgrade failed: $(cat "$work/upgrade.log")"
 expect upgrade "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.5
 backup_id="$(sed -n 's/^Backup id: //p' "$work/upgrade.log")"
 [[ -n $backup_id ]] || fail upgrade "no backup id: $(cat "$work/upgrade.log")"
 [[ -f "$backup/dsh-home.$backup_id.json" ]] || fail upgrade 'no manifest was written'
+expect upgrade "$(status_field result)" selected
+expect upgrade "$(status_field backup)" "$backup_id"
+expect upgrade "$(grep -c '^Upgrade step:' "$work/upgrade.log")" 5
 pass upgrade "switched to 0.2.2-rc.5 with backup $backup_id"
 
 # --- 5. verify reports an unchanged state ----------------------------------
@@ -183,6 +231,7 @@ runtime_cmd verify >"$work/verify.log" 2>&1 || fail verify "verify failed: $(cat
 grep -q 'unchanged' "$work/verify.log" || fail verify "an untouched Profile was not reported unchanged: $(cat "$work/verify.log")"
 grep -q "restore $backup_id\|matched backup is $backup_id" "$work/verify.log" || fail verify 'verify did not name the matched backup'
 pass verify 'verify reported unchanged state and named the matched backup'
+expect verify "$(status_field result)" verified
 
 # --- 6. a migration is detected and points at the backup -------------------
 printf '# drill migration\n' >> "$home/profiles/web/pnpm-lock.yaml"
@@ -190,6 +239,7 @@ runtime_cmd verify >"$work/verify2.log" 2>&1 || fail detect "verify failed: $(ca
 grep -q 'MIGRATED' "$work/verify2.log" || fail detect "a changed lockfile was not detected: $(cat "$work/verify2.log")"
 grep -q "dsh-runtime restore $backup_id" "$work/verify2.log" || fail detect 'verify did not point at the matched backup'
 pass detect 'a Profile lockfile change was reported as MIGRATED with the matching backup'
+expect detect "$(status_field result)" migrated
 
 # --- 6b. restore must preserve the excluded caches ------------------------
 # The archive omits pnpm and runtime, so the swap must not delete them. Losing
@@ -199,6 +249,17 @@ mkdir -p "$home/pnpm/store/fake" && printf 'store-blob' > "$home/pnpm/store/fake
 before_versions="$(ls "$home/runtime/versions" | tr '\n' ' ')"
 before_store="$(cat "$home/pnpm/store/fake/blob")"
 pass caches 'seeded pnpm store and installed versions before the restore'
+
+printf 'changed skill\n' > "$home/.agents/skills/probe"
+if DSH_TEST_RESTORE_FAILURE=1 runtime_cmd restore "$backup_id" >"$work/incomplete-restore.log" 2>&1; then
+  fail restore 'an incomplete data restore reported success'
+fi
+grep -q 'previous DSH_HOME data was put back' "$work/incomplete-restore.log" ||
+  fail restore "unexpected refusal: $(cat "$work/incomplete-restore.log")"
+expect restore "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.5
+expect restore "$(cat "$home/.agents/skills/probe")" 'changed skill'
+grep -q '# drill migration' "$home/profiles/web/pnpm-lock.yaml" || fail restore 'a partial restore lost the live Profile'
+pass restore 'an interrupted file move preserved the live Profile and hidden shared skills'
 
 # --- 7. pointer rollback does not revert data ------------------------------
 runtime_cmd rollback >"$work/rollback.log" 2>&1 || fail pointer "rollback failed: $(cat "$work/rollback.log")"
@@ -213,6 +274,7 @@ expect restore "$(runtime_cmd status | sed -n 's/^Active: //p')" 0.2.2-rc.1
 if grep -q '# drill migration' "$home/profiles/web/pnpm-lock.yaml"; then
   fail restore 'the migration marker survived the restore'
 fi
+expect restore "$(cat "$home/.agents/skills/probe")" 'original skill'
 pass restore "restored $backup_id and removed the simulated migration"
 
 # --- 8b. check proves a backup is usable without restoring it -------------

@@ -134,6 +134,7 @@ echo 'Only gateway and runtime are running'
 # requests are redirected to the login page before they reach the core branch.
 node deploy/public/login-probe.mjs https://workstation.test "$edge_dir/cert.pem" 443 \
   || { echo 'FAIL: the core login probe failed' >&2; exit 1; }
+compose exec -T runtime test -d /workspace/deepseek-harness/default-workspace
 
 # --- the handler-level refusal is covered by a Go test ---------------------
 # The probe above proves the 503 over HTTP. The Go test covers the handler

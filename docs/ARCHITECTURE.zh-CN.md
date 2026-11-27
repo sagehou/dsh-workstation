@@ -79,13 +79,15 @@ Browser 内的 Nginx 校验 Selkies 数据 WebSocket 和令牌管理请求的 Ga
 
 | 存储 | 内容 |
 | --- | --- |
-| DSH_HOME | Runtime 版本、Profile 清单和锁文件、node_modules、pnpm Store、会话、设置、凭据和插件配置。使用同一个持久化卷。 |
-| 工作区 | 项目文件，使用独立卷或绑定挂载。 |
+| DSH_HOME | Runtime 版本、Profile 清单和锁文件、node_modules、pnpm Store、会话、设置、凭据、插件配置及用户和共享 Skills。使用同一个持久化卷。 |
+| 工作区 | Web 默认工作区、项目文件和项目 Skills，使用独立卷或绑定挂载。 |
 | Chromium `/config` | 持久化浏览器配置、Cookie、扩展和下载。 |
 | Gateway SQLite（`auth-data`） | 唯一管理员和会话状态存入独立 SQLite 卷。 |
 | Provider 状态 | Provider 重启时用于失败关闭的租约/恢复状态。 |
 | 认证密钥 | Docker secrets 或只读文件。与数据库分开存储和备份。 |
 | 部署配置 | 保存在 Git，密钥留在仓库外。 |
+
+Runtime 镜像将 Linux 的 Documents 指向 `/workspace`。DSH 首次使用时创建 `/workspace/deepseek-harness/default-workspace`，之后沿用已有注册。Skills 可放在 `$DSH_HOME/skills`、`$DSH_AGENTS_HOME/skills`（位于 `$DSH_HOME/.agents`，也可通过 `~/.agents` 访问）或项目的 `.agents/skills` 目录。
 
 ## 认证和账户模型
 
@@ -112,6 +114,7 @@ Browser 内的 Nginx 校验 Selkies 数据 WebSocket 和令牌管理请求的 Ga
 - 验证候选版本启动、Node 兼容性、Profile/Bundle 兼容性、锁文件一致性和明确批准的生命周期脚本。
 - `dsh-runtime upgrade` 是一个事务：在活动版本旁安装、门禁、在副本上就绪检查、记录指纹、归档加清单，最后才移动指针。被阻断的候选版本保持安装状态，指针不动。
 - Web 在共享 DSH_HOME 中持有服务锁。独立维护容器必须获取这把锁，才能升级、切换、回滚或恢复。备份使用另一把共享锁，可以在线执行。迁移前停服并备份，避免捕获正在变化的数据。
+- CLI 逐阶段输出升级进度，原子写入 `$DSH_HOME/runtime/upgrade-status.json`。Gateway 通过数据卷读取，Runtime 停止时仍可在 `/mgmt` 查看。完成版本切换后，启动 Runtime 并校验 Profile。
 - 批准针对精确的 `package@version` 并保存在 DSH_HOME 中，因此对后续回滚同样生效。DSH 自身依赖树中的生命周期脚本只报告不阻断，因为该策略固定为 `--ignore-scripts` 且对所有版本一致。
 - 指针回滚只恢复所选可执行版本。如果发生数据迁移，还必须恢复匹配的 DSH_HOME 备份及相关工作区状态。`verify` 比较 Profile 清单、锁文件和 pnpm 存储中的包版本与切换前指纹，并给出所需操作。
 - DSH_HOME 备份排除 `runtime` 和 `pnpm`，因为两者都可重新安装；改用清单记录选择状态和 Runtime 镜像，并拒绝校验和、所有者或 DSH 版本不匹配的恢复。

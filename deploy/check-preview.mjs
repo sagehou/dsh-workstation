@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -21,6 +22,30 @@ try {
   const boot = await request(base, { cookie })
   assert.equal(boot.status, 200, 'authenticated request did not boot through the edge')
   assert((await boot.text()).includes('__DSH_BOOT__'), 'response was not the official DSH Web boot page')
+
+  if (process.argv[2] === 'persistence') {
+    async function rpc(method, args) {
+      const reply = await fetch(base + '/api/' + method, {
+        method: 'POST', signal: AbortSignal.timeout(15000),
+        headers: { cookie, origin: base, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method, payload: { args } }),
+      })
+      assert.equal(reply.status, 200, method + ' transport')
+      const { result } = await reply.json()
+      assert.equal(result?.ok, true, `${method} refused: ${result?.error?.code ?? 'bad envelope'}`)
+      return result.value
+    }
+    const { workspace } = await rpc('workspace/initializeDefault', {})
+    assert.equal(workspace.path, '/workspace/deepseek-harness/default-workspace')
+    if (process.argv[3]) assert.equal(workspace.workspaceId, process.argv[3], 'workspace registration changed')
+    const { sessionId } = await rpc('session/create', { request: { cwd: '/workspace' } })
+    const { skills } = await rpc('skills/list', { request: { sessionId } })
+    for (const name of ['workstation-test-user', 'workstation-test-shared', 'workstation-test-project']) {
+      assert.ok(skills.some(skill => skill.name === name), `${name} did not reach the session catalog`)
+    }
+    console.log('Workspace registration: ' + workspace.workspaceId)
+    console.log('DSH discovered all three persisted skills through the authenticated session catalog')
+  }
 
   const deadline = Date.now() + 90_000
   for (;;) {

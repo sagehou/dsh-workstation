@@ -178,6 +178,18 @@ docker compose --env-file .env.public exec -T gateway node --input-type=module -
 
 打开 `/mgmt` 查看 Runtime 状态与版本、创建或校验 DSH_HOME 备份、管理账户和交接浏览器。创建备份和校验要求五分钟内验证过身份。升级、回滚、恢复以及迁移前的备份，请在停服后执行。[Runtime 维护](../README.zh-CN.md#升级与回滚)
 
+### DSH 升级与恢复
+
+当两个镜像均包含升级进度改动时，`/mgmt` 会显示最近一次 CLI 升级、阶段和结果。停止 Runtime 时保持 Gateway 运行。沿用部署时的 Compose 文件和 `--env-file .env.public`，执行 `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <版本>`。切换后启动 Runtime，确认 DSH Web 可用。再次停服执行 `maintenance verify` 后重启 Runtime。[升级进度 #39](https://github.com/sagehou/dsh-workstation/issues/39)
+
+已安装的 `dsh-workstation-browser@0.1.0` Bundle 将 DSH 锁定为 `0.2.2-rc.1`。`WORKSTATION_BROWSER_MCP=0` 关闭自动安装。若 Bundle 已安装，先备份，再用官方 Plugin Manager 移除，或换用已对目标 DSH 版本验证过的 Bundle。[兼容检查与恢复](../README.zh-CN.md#升级与回滚)
+
+### 工作区与 Skills
+
+DSH_HOME 归档包含设置、凭据、会话、Profile 插件及其锁文件、`$DSH_HOME/skills` 和 `$DSH_HOME/.agents/skills` 中的共享 Skills。单独备份 `/workspace`，保留项目文件和项目 Skills。若链接的插件或 Skills 指向卷外路径，单独挂载或备份链接目标。
+
+替换旧 Runtime 容器前，执行 `docker compose --env-file .env.public cp runtime:/home/node/.agents/. ./agents-export` 导出旧容器中的共享配置与 Skills。用新 Runtime 将导出文件复制到持久卷的 `/dsh-home/.agents`，保留已有文件。
+
 ### Traefik
 
 - 如需在重建 Traefik 时保留连接，在它自己的 Compose 中将 `dsh-workstation_workstation` 声明为外部网络。

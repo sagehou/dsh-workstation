@@ -11,9 +11,78 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestUpgradeStatusWhileRuntimeIsStopped(t *testing.T) {
+	g, sessionCookie := loginForBrowserTest(t)
+	home := t.TempDir()
+	t.Setenv("WORKSTATION_DSH_HOME", home)
+	t.Setenv("WORKSTATION_MAINTENANCE_SECRET", "")
+	dir := filepath.Join(home, "runtime")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const path = "/mgmt/upgrade-status"
+	response(t, request(g, req(g, "GET", path, nil, sessionCookie)), 404)
+	write("selection", "0.2.2-rc.1\n")
+	write(".lock", "")
+	write("upgrade-status.json", `{"from":"0.2.2-rc.1","to":"0.2.2-rc.5","phase":"compatibility","result":"running"}`)
+	response(t, request(g, req(g, "GET", path, nil)), 401)
+	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.db.Exec("UPDATE sessions SET seen=?", time.Now().Unix()-60); err != nil {
+		t.Fatal(err)
+	}
+	var seen int64
+	if err := g.db.QueryRow("SELECT seen FROM sessions").Scan(&seen); err != nil {
+		t.Fatal(err)
+	}
+	running := request(g, req(g, "GET", path, nil, sessionCookie))
+	response(t, running, 200)
+	if !strings.Contains(running.Body.String(), `"result":"running"`) {
+		t.Fatalf("no running phase in %s", running.Body.String())
+	}
+	var after int64
+	if err := g.db.QueryRow("SELECT seen FROM sessions").Scan(&after); err != nil || after != seen {
+		t.Fatalf("a polling request renewed the session: %d -> %d, %v", seen, after, err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	interrupted := request(g, req(g, "GET", path, nil, sessionCookie))
+	response(t, interrupted, 200)
+	if !strings.Contains(interrupted.Body.String(), `"result":"interrupted"`) {
+		t.Fatalf("stale phase remains running: %s", interrupted.Body.String())
+	}
+	write("upgrade-status.json", `{"from":"0.2.2-rc.1","to":"0.2.2-rc.5","phase":"compatibility","result":"failed","blockers":["test-bundle requires DSH 0.2.2-rc.1"]}`)
+	overview := request(g, req(g, "GET", "/mgmt", nil, sessionCookie))
+	response(t, overview, 200)
+	if !strings.Contains(overview.Body.String(), "失败 · 检查插件与依赖兼容性") || !strings.Contains(overview.Body.String(), "test-bundle requires DSH") {
+		t.Fatal("the overview did not render the persisted compatibility refusal")
+	}
+	write("startup-status.json", `{"to":"0.2.2-rc.1","phase":"readiness","result":"failed"}`)
+	w := httptest.NewRecorder()
+	g.dshUnavailable(w, req(g, "GET", "/_auth/dsh", nil, sessionCookie))
+	response(t, w, http.StatusServiceUnavailable)
+	if !strings.Contains(w.Body.String(), "首次初始化失败 · 验证候选版本启动") || !strings.Contains(w.Body.String(), `href="/mgmt"`) {
+		t.Fatal("the unavailable page did not give a startup phase and a recovery link")
+	}
+}
 
 func TestManagementMaintenance(t *testing.T) {
 	g, _, seed := newTestGateway(t)

@@ -186,6 +186,18 @@ docker compose --env-file .env.public exec -T gateway node --input-type=module -
 
 Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME backup, manage the single account, and hand off browser control. Backups and archive checks require verification within the last five minutes. Stop Runtime to upgrade, roll back, restore, or make a quiescent migration backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
 
+### DSH upgrade and recovery
+
+When both images include the upgrade progress change, `/mgmt` shows the latest CLI upgrade, phase, and result. Keep Gateway running while you stop Runtime. Use the same Compose files and `--env-file .env.public` as your deployment to run `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <version>`. After the switch, start Runtime and check DSH Web. Stop Runtime again to run `maintenance verify`, then restart it. [Upgrade progress #39](https://github.com/sagehou/dsh-workstation/issues/39)
+
+The installed `dsh-workstation-browser@0.1.0` Bundle pins DSH to `0.2.2-rc.1`. Setting `WORKSTATION_BROWSER_MCP=0` disables automatic installation. For an already installed Bundle, take a backup and use the official Plugin Manager to remove it, or use a Bundle verified with the target DSH version. [Compatibility and recovery](../README.md#upgrade-and-rollback)
+
+### Workspace and skills
+
+The DSH_HOME archive covers settings, credentials, sessions, Profile plugins and their lockfiles, `$DSH_HOME/skills`, and shared skills stored in `$DSH_HOME/.agents/skills`. Back up `/workspace` separately to retain project files and project skills. Back up or mount external targets for linked plugins and skills.
+
+Before replacing an older Runtime container, export any files in its `/home/node/.agents` with `docker compose --env-file .env.public cp runtime:/home/node/.agents/. ./agents-export`. Copy them into `/dsh-home/.agents` in the persistent volume using the updated Runtime, keeping any existing files.
+
 ### Traefik
 
 - To retain the attachment across Traefik recreation, declare `dsh-workstation_workstation` as an external network in Traefik's Compose.

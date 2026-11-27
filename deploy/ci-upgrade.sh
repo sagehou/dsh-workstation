@@ -9,12 +9,14 @@
 set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_ENVIRONMENT:-} == github-hosted ]]
 cd -- "$(dirname -- "$0")/.."
-compose() { docker compose -f compose.preview.yml "$@"; }
+compose_file=( -f compose.preview.yml )
+compose() { docker compose "${compose_file[@]}" "$@"; }
 tool() { compose run --rm --no-deps -T maintenance "$@"; }
 # The Runtime image ships bash, and these snippets use bash conditionals.
 in_image() { compose run --rm --no-deps -T --entrypoint bash maintenance -ec "$1"; }
 active() { tool status | sed -n 's/^Active: //p'; }
-trap 'compose down --volumes --remove-orphans' EXIT
+override=
+trap 'compose down --volumes --remove-orphans; rm -f -- "$override"' EXIT
 
 pass() { printf 'upgrade-drill %s: %s\n' "$1" "$2"; }
 fail() { printf 'upgrade-drill %s FAILED: %s\n' "$1" "$2" >&2; exit 1; }
@@ -46,6 +48,41 @@ first_container="$(compose ps -q runtime)"
 docker tag "$first_image" dsh-workstation-runtime:rollback-drill
 compose exec -T runtime sh -ec 'printf workspace-v1 > /workspace/.persistence'
 pass initial 'preview ready; Runtime image captured for the image-rollback step'
+
+# Use the M0 Bundle through the same Plugin Manager a user uses. Its harmless
+# activation marker lives in /tmp, so each new container must activate it again.
+compose stop runtime
+compose run --rm --no-deps -T --entrypoint bash \
+  -v "$PWD/prototypes/m0/runtime/fixture:/fixture:ro" maintenance -ec '
+    source=/dsh-home/runtime/versions/0.2.2-rc.1/node_modules/.bin/dsh
+    mkdir -p /dsh-home/local-bundles/dsh-m0-persistence-probe
+    cp /fixture/* /dsh-home/local-bundles/dsh-m0-persistence-probe/
+    "$source" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check \
+      link:/dsh-home/local-bundles/dsh-m0-persistence-probe
+    printf "# workstation config witness\n[]\n" > /dsh-home/cordis.patch.yml
+    user_skill=/dsh-home/skills/workstation-test-user
+    shared_skill=/home/node/.agents/skills/workstation-test-shared
+    project_skill=/workspace/.agents/skills/workstation-test-project
+    for dir in "$user_skill" "$shared_skill" "$project_skill"; do
+      mkdir -p "$dir"
+      printf "%s\n" "---" "name: ${dir##*/}" "description: Disposable persistence fixture" "---" "Read the fixture." > "$dir/SKILL.md"
+    done
+  '
+override="$(mktemp)"
+cat > "$override" <<'YAML'
+services:
+  runtime:
+    environment:
+      M0_MOUNT_LOG: /tmp/ci-bundle-mounted
+YAML
+# Use the same project while adding an activation witness just for this drill.
+compose_file+=(-f "$override")
+compose up -d --no-build --wait --wait-timeout 360 runtime
+compose exec -T runtime test -s /tmp/ci-bundle-mounted
+workspace_out="$(node deploy/check-preview.mjs persistence)"
+workspace_id="$(sed -n 's/^Workspace registration: //p' <<<"$workspace_out")"
+[[ -n $workspace_id ]] || fail persistence 'no workspace was registered'
+pass persistence 'registered the default workspace, mounted a Profile Bundle and read user/shared/project skills'
 
 # 1. An installed Profile bundle that pins another DSH version blocks the
 #    switch. This is the real production constraint: the Workstation Bundle
@@ -144,8 +181,9 @@ pass backup 'check verified the archive and named the recorded DSH version witho
 
 # 5. The new version must actually boot and serve, then report whether it
 #    migrated Profile state.
-compose up -d --no-build --wait --wait-timeout 360 runtime || fail restart "$TO did not become ready"
-node deploy/check-preview.mjs || fail restart "$TO did not serve"
+compose up -d --no-build --force-recreate --wait --wait-timeout 360 runtime || fail restart "$TO did not become ready"
+node deploy/check-preview.mjs persistence "$workspace_id" || fail restart "$TO did not serve the persisted workspace and skills"
+compose exec -T runtime test -s /tmp/ci-bundle-mounted
 expect restart "$(compose exec -T runtime cat /workspace/.persistence)" workspace-v1
 compose stop runtime
 verify_out="$(tool verify 2>&1)" || fail verify "verify failed: $verify_out"
@@ -156,7 +194,11 @@ pass verify "$FROM -> $TO left Profile state $observed (observed, not assumed)"
 # 6. A changed Profile lockfile must be detected and point at the backup.
 #    Synthetic: it proves detection and restore, not that DSH migrates.
 compose up -d --no-build --wait --wait-timeout 360 runtime
-compose exec -T runtime sh -ec 'printf "# drill migration\n" >> '"$INTERNAL"'/pnpm-lock.yaml'
+compose exec -T runtime sh -ec '
+  printf "# drill migration\n" >> /dsh-home/profiles/web/pnpm-lock.yaml
+  printf "# changed config\n" >> /dsh-home/cordis.patch.yml
+  mv /dsh-home/.agents/skills/workstation-test-shared /dsh-home/.agents/skills/hidden-probe
+'
 compose stop runtime
 after="$(tool verify 2>&1)"
 printf '%s\n' "$after" | grep -q MIGRATED || fail detect "a changed lockfile was not reported as migrated: $after"
@@ -174,12 +216,17 @@ pass pointer "active returned to $FROM while the migrated data stayed in place"
 # 8. A matched data restore returns the pre-migration Profile state.
 tool restore "$backup_id" >/tmp/restore.log 2>&1 || fail restore "restore failed: $(cat /tmp/restore.log)"
 expect restore "$(active)" "$FROM"
-# The real Profile has no lockfile, so the synthetic migration created one.
-# Assert both halves positively: the marker is gone, and the Profile itself
-# still exists. `! grep -q` alone would also pass if restore had deleted the
-# whole directory.
-in_image '! test -e '"$INTERNAL"'/pnpm-lock.yaml && test -f '"$INTERNAL"'/package.json' ||
-  fail restore 'the migration marker survived, or the Profile manifest was lost'
+# Installing the Bundle created a real lockfile. Verify restored contents,
+# including the user-level settings and skills that sit outside the Profile.
+in_image '
+  test -s /dsh-home/profiles/web/pnpm-lock.yaml
+  ! grep -q "# drill migration" /dsh-home/profiles/web/pnpm-lock.yaml
+  test -s /dsh-home/profiles/web/node_modules/dsh-m0-persistence-probe/package.json
+  grep -qx "# workstation config witness" /dsh-home/cordis.patch.yml
+  ! grep -q "# changed config" /dsh-home/cordis.patch.yml
+  test -s /dsh-home/.agents/skills/workstation-test-shared/SKILL.md
+  test ! -e /dsh-home/.agents/skills/hidden-probe
+' || fail restore 'the matched restore did not restore Profile, config and shared skills'
 pass restore "restored $backup_id and removed the simulated migration"
 
 # 8b. The restore must not delete what the archive never contained: the
@@ -207,7 +254,8 @@ pass refuse 'a tampered archive and an unknown backup id were both refused'
 # 10. The restored state serves after recreation, on the same Runtime image.
 compose up -d --no-build --force-recreate --wait --wait-timeout 360 runtime ||
   fail serve 'the restored state did not become ready'
-node deploy/check-preview.mjs || fail serve 'the restored state did not serve'
+node deploy/check-preview.mjs persistence "$workspace_id" || fail serve 'the restored workspace and skills did not serve'
+compose exec -T runtime test -s /tmp/ci-bundle-mounted
 expect serve "$(compose exec -T runtime cat /workspace/.persistence)" workspace-v1
 [[ $(compose ps -q runtime) != "$first_container" ]] || fail serve 'the runtime container was not recreated'
 pass serve 'restored DSH_HOME served again after recreation'
@@ -215,9 +263,10 @@ pass serve 'restored DSH_HOME served again after recreation'
 # 11. The previous Runtime image plus the restored data and selection.
 compose stop runtime
 WORKSTATION_RUNTIME_IMAGE=dsh-workstation-runtime:rollback-drill \
-  docker compose -f compose.preview.yml up -d --no-build --force-recreate --wait --wait-timeout 360 runtime ||
+  compose up -d --no-build --force-recreate --wait --wait-timeout 360 runtime ||
   fail combined 'the captured image did not restart'
-node deploy/check-preview.mjs || fail combined 'the captured image did not serve the restored data'
+node deploy/check-preview.mjs persistence "$workspace_id" || fail combined 'the captured image did not serve the restored data'
+compose exec -T runtime test -s /tmp/ci-bundle-mounted
 expect combined "$(active)" "$FROM"
 expect combined "$(docker inspect --format '{{.Image}}' "$(compose ps -q runtime)")" "$first_image"
 pass combined 'image recreation kept the restored data and the restored selection'

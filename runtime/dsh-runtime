@@ -64,6 +64,43 @@ random() { od -An -N6 -tx1 /dev/urandom | tr -d ' \n'; }
 runtime_image() { printf '%s' "${WORKSTATION_RUNTIME_IMAGE:-unpinned}"; }
 pnpm_version() { pnpm --version 2>/dev/null || printf 'unknown'; }
 
+write_runtime_status() {
+  node -e '
+    const { readFileSync, renameSync, writeFileSync } = require("node:fs")
+    const [path, from, to, phase, result, backup, report] = process.argv.slice(1)
+    const status = { from, to, phase, result, backup }
+    if (report) {
+      let failures = []
+      try { failures = JSON.parse(readFileSync(report, "utf8")).failures ?? [] } catch {}
+      status.blockers = failures.slice(0, 8).map(reason => reason.slice(0, 256))
+      if (failures.length > 8) status.blockers.push(`Other blockers: ${failures.length - 8}. See CLI output.`)
+    }
+    writeFileSync(path + ".new", JSON.stringify(status) + "\n", { mode: 0o600 })
+    renameSync(path + ".new", path)
+  ' "$status_file" "$from" "$want" "$upgrade_phase" "$1" "${backup_id:-}" "${2:-}"
+}
+
+runtime_step() {
+  upgrade_phase=$1
+  write_runtime_status running
+  if [[ $operation == upgrade ]]; then
+    printf 'Upgrade step: %s\n' "$2"
+  else
+    printf 'Initialization step: %s\n' "$2"
+  fi
+}
+
+finish_runtime_operation() {
+  local code=$?
+  if (( code != 0 )); then
+    local report=
+    if [[ $upgrade_phase == compatibility ]]; then report=${upgrade_report:-}; fi
+    write_runtime_status failed "$report" || true
+    printf 'dsh-runtime: %s failed during %s\n' "$operation" "$upgrade_phase" >&2
+  fi
+  rm -f -- "${before:-}" "${upgrade_report:-}" "$status_file.new"
+}
+
 install_version() (
   version=$1
   exact "$version" || die 'provide an exact npm version'
@@ -97,11 +134,12 @@ snapshot() (
   # backup into a 223 MB one. Profile `node_modules` stays in, because those
   # are the files the Profile actually runs. The selection pointer is recorded
   # in the manifest instead, which is what lets a restore return a matched set.
-  tar -czf "$output" --exclude='./runtime' --exclude='./pnpm' -C "$DSH_HOME" .
+  tar -czf "$output" --exclude='./runtime' --exclude='./pnpm' -C "$DSH_HOME" . ||
+    die 'could not archive DSH_HOME'
   node "$state" manifest --dsh-home "$DSH_HOME" --archive "$output" --output "$manifest" \
     --backup "$id" --runtime-image "$(runtime_image)" --pnpm "$(pnpm_version)" \
-    --manager "$self_dir/dsh-runtime" --web "$web" >/dev/null
-  chmod 0444 "$output" "$manifest"
+    --manager "$self_dir/dsh-runtime" --web "$web" >/dev/null || die 'could not write the backup manifest'
+  chmod 0444 "$output" "$manifest" || die 'could not finalize the backup files'
   trap - EXIT
   printf 'State backup: %s\n' "$output"
   printf 'Manifest: %s (active version: %s)\n' "$manifest" "${active:-none}"
@@ -122,7 +160,12 @@ probe() (
   # of an already-selected version.
   tar -cf - --exclude='./runtime' -C "$DSH_HOME" . | tar -xf - -C "$scratch" ||
     die 'could not copy Profile state for readiness'
-  DSH_HOME="$scratch" npm_config_store_dir="$scratch/pnpm/store" node "$web" probe "$candidate"
+  agents_home=${DSH_AGENTS_HOME:-}
+  if [[ $agents_home == "$DSH_HOME/"* ]]; then
+    agents_home="$scratch/${agents_home#"$DSH_HOME/"}"
+  fi
+  DSH_HOME="$scratch" DSH_AGENTS_HOME="$agents_home" npm_config_store_dir="$scratch/pnpm/store" \
+    node "$web" probe "$candidate"
 )
 # Node/DSH startup, Profile and Bundle compatibility, lockfile presence and
 # unapproved lifecycle scripts. A failure here leaves live state untouched.
@@ -157,6 +200,7 @@ compat_gate() {
     node -e 'for (const failure of JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).failures) console.error(`  blocked: ${failure}`)' "$report" >&2
   fi
   cp -- "$report" "$root/.last-compat.json" 2>/dev/null || true
+  if [[ -n ${upgrade_report:-} ]]; then cp -- "$report" "$upgrade_report"; fi
   rm -f -- "$report" "$approvals"
   [[ $status == pass ]] || die "candidate $version failed the compatibility gate; live state is unchanged"
 }
@@ -183,7 +227,13 @@ select_version() {
   local version=$1 next
   exact "$version" || die 'provide an exact npm version'
   [[ $version != "$active" ]] || return 0
+  if [[ ${2:-} == initialize ]]; then
+    runtime_step compatibility 'checking the initial release'
+  fi
   compat_gate "$version"
+  if [[ ${2:-} == initialize ]]; then
+    runtime_step readiness 'testing authenticated Web startup'
+  fi
   probe "$version" || die 'candidate failed readiness; stored selection is unchanged'
   if [[ -n $active ]]; then snapshot; fi
   next="$(mktemp "$root/.select.XXXXXXXX")"
@@ -196,10 +246,24 @@ select_version() {
 case "${1:-}" in
   serve)
     lock
+    if [[ ${DSH_AGENTS_HOME:-} == "$DSH_HOME/.agents" ]]; then
+      mkdir -p -- "$DSH_AGENTS_HOME"
+    fi
     if [[ -z $active ]]; then
       version=${DSH_INITIAL_VERSION:?set DSH_INITIAL_VERSION to an exact version}
+      exact "$version" || die 'set DSH_INITIAL_VERSION to an exact version'
+      operation=initialize from= want=$version upgrade_phase=install
+      status_file="$root/startup-status.json"
+      unset before backup_id upgrade_report
+      trap finish_runtime_operation EXIT
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
+      runtime_step install 'installing first DSH version'
       install_version "$version"
-      select_version "$version"
+      select_version "$version" initialize
+      write_runtime_status selected
+      finish_runtime_operation
+      trap - EXIT INT TERM
     fi
     if [[ ${WORKSTATION_BROWSER_MCP:-} == 1 ]]; then
       bundle="$DSH_HOME/profiles/web/.workstation-browser-0.1.0"
@@ -227,14 +291,27 @@ case "${1:-}" in
   install) lock; install_version "${2:-}" ;;
   upgrade)
     lock
-    from=${active:-none}
+    [[ -n $active ]] || die 'select an initial DSH version before upgrading'
+    from=$active
     want=${2:-}
     exact "$want" || die 'usage: dsh-runtime upgrade VERSION'
     [[ $want != "$from" ]] || die "DSH $want is already selected"
+    unset before backup_id upgrade_report
+    operation=upgrade
+    status_file="$root/upgrade-status.json"
+    upgrade_phase=install
+    trap finish_runtime_operation EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     printf 'Upgrade %s -> %s\n' "$from" "$want"
+    runtime_step install 'installing candidate'
     install_version "$want"
+    runtime_step compatibility 'checking Node, Profile bundles and dependency scripts'
+    upgrade_report="$(mktemp "$root/.upgrade-compat.XXXXXXXX.json")"
     compat_gate "$want"
+    runtime_step readiness 'testing authenticated Web startup on copied state'
     probe "$want" || die 'candidate failed readiness; live state is unchanged'
+    runtime_step backup 'backing up the selected version and Profile state'
     started="$(stamp)"
     before="$(mktemp "$root/.before.XXXXXXXX.json")"
     node "$state" fingerprint --dsh-home "$DSH_HOME" > "$before"
@@ -248,6 +325,7 @@ case "${1:-}" in
     backup_path="$(printf '%s\n' "$backup_line" | sed -n 's/^State backup: //p')"
     printf '%s\n' "$backup_line"
     [[ -n $backup_id && -f $backup_path ]] || die 'backup did not produce a usable archive; live state is unchanged'
+    runtime_step switch 'switching the active version'
     next="$(mktemp "$root/.select.XXXXXXXX")"
     printf '%s %s\n' "$want" "$from" > "$next"
     mv -Tf -- "$next" "$selection"
@@ -257,7 +335,7 @@ case "${1:-}" in
       require("node:fs").writeFileSync(out, JSON.stringify({ phase: "switched", at, from, to, backup: id,
         archive, before: JSON.parse(require("node:fs").readFileSync(before, "utf8")) }))
     ' "$(stamp)" "$from" "$want" "$backup_id" "$backup_path" "$before")"
-    rm -f -- "$before"
+    write_runtime_status selected
     cat <<EOF
 Selected DSH $active
 Restart the Runtime, then run 'dsh-runtime verify' to record whether the new
@@ -267,23 +345,16 @@ EOF
     ;;
   verify)
     lock
-    # Compare live state against the `start` record of the most recent upgrade
-    # transaction, which is the only baseline that always exists, and pair it
-    # with the `switched` record that carries the matched backup id.
+    # A completed switch carries both the pre-upgrade state and the backup ID.
+    # An aborted attempt may have written a start record without a switch.
     transaction="$(node -e '
       const fs = require("node:fs")
       let lines = []
       try { lines = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean) } catch {}
-      const records = lines.map(line => JSON.parse(line))
-      let start = null
-      let switched = null
-      for (const record of records) {
-        if (record.phase === "start") { start = record; switched = null }
-        if (record.phase === "switched" && start) switched = record
-      }
-      if (start) console.log(JSON.stringify({ ...start, backup: switched?.backup ?? null, archive: switched?.archive ?? null }))
-    ' "$audit")"
-    [[ -n $transaction ]] || die 'no upgrade transaction to verify'
+      const switched = lines.map(line => JSON.parse(line)).findLast(record => record.phase === "switched")
+      if (switched?.to === process.argv[2] && switched.before && switched.backup) console.log(JSON.stringify(switched))
+    ' "$audit" "$active")"
+    [[ -n $transaction ]] || die 'no completed upgrade to the active version to verify'
     pair="$(mktemp "$root/.pair.XXXXXXXX.json")"
     printf '%s' "$transaction" > "$pair"
     now="$(mktemp "$root/.now.XXXXXXXX.json")"
@@ -310,6 +381,22 @@ EOF
         migrated: changes === "yes", after }))
     ' "$pair" "$now" "$changes" "$(stamp)")"
     backup_id="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).backup ?? "")' "$pair")"
+    status_file="$root/upgrade-status.json"
+    if [[ -n $backup_id ]] && node -e '
+      const fs = require("node:fs")
+      try {
+        const status = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+        if (status.backup === process.argv[2] && status.to === process.argv[3]) process.exit(0)
+      } catch {}
+      process.exit(1)
+    ' "$status_file" "$backup_id" "$active"; then
+      read -r from want < <(node -e '
+        const { from, to } = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))
+        console.log(from, to)
+      ' "$pair")
+      upgrade_phase=switch
+      if [[ $changes == yes ]]; then write_runtime_status migrated; else write_runtime_status verified; fi
+    fi
     rm -f -- "$pair" "$now" "$prior"
     if [[ $changes == yes ]]; then
       printf 'This transaction changed persistent Profile state, so a pointer rollback would leave the new data behind.\n'
@@ -350,8 +437,11 @@ EOF
     [[ -n $restore_to ]] || die 'manifest records no DSH version'
     [[ -x $(bin "$restore_to") ]] || die "backup belongs to DSH $restore_to which is not installed; install it first so the restored data matches its Runtime"
     stage="$(mktemp -d "$DSH_HOME/.restore.XXXXXXXX")" || die 'could not create a restore staging directory'
+    hold= next=
+    trap 'rm -rf -- "$stage" "$hold" "$next"' EXIT
     hold="$(mktemp -d "$DSH_HOME/.restore-old.XXXXXXXX")" || die 'could not create a restore hold directory'
-    trap 'rm -rf -- "$stage" "$hold"' EXIT
+    next="$(mktemp "$root/.select.XXXXXXXX")"
+    printf '%s\n' "$restore_to" > "$next"
     tar -xzf "$archive" -C "$stage"
     # Swap every restored top-level entry, but never the trees the archive
     # deliberately excludes: installed DSH versions and the pnpm store are
@@ -373,21 +463,34 @@ EOF
     done < <(find "$DSH_HOME" -mindepth 1 -maxdepth 1 -print0)
     incoming=()
     while IFS= read -r -d '' entry; do incoming+=("${entry##*/}"); done < <(find "$stage" -mindepth 1 -maxdepth 1 -print0)
-    rollback_restore() {
-      for name in "${incoming[@]}"; do rm -rf -- "${DSH_HOME:?}/$name"; done
-      for name in "${hold}"/*; do [[ -e $name ]] || continue; mv -- "$name" "$DSH_HOME/"; done
-      printf 'dsh-runtime: restore failed; the previous DSH_HOME data was put back\n' >&2
-      exit 1
-    }
-    trap rollback_restore ERR
-    for name in "${current[@]}"; do mv -- "$DSH_HOME/$name" "$hold/"; done
-    for name in "${incoming[@]}"; do mv -- "$stage/$name" "$DSH_HOME/$name"; done
-    trap - ERR
-    rm -rf -- "$stage" "$hold"
+    # Once live files move, an interrupted restore must preserve the hold directory.
     trap - EXIT
-    next="$(mktemp "$root/.select.XXXXXXXX")"
-    printf '%s %s\n' "$restore_to" "" > "$next"
-    mv -Tf -- "$next" "$selection"
+    held=()
+    installed=()
+    rollback_restore() {
+      local name failed=0
+      for name in "${installed[@]}"; do
+        mv -T -- "$DSH_HOME/$name" "$stage/$name" || failed=1
+      done
+      for name in "${held[@]}"; do
+        mv -T -- "$hold/$name" "$DSH_HOME/$name" || failed=1
+      done
+      if (( failed )); then
+        die "restore failed and could not put all data back; the remaining files are in $hold and $stage"
+      fi
+      rm -rf -- "$stage" "$hold" "$next"
+      die 'restore failed; the previous DSH_HOME data was put back'
+    }
+    for name in "${current[@]}"; do
+      mv -T -- "$DSH_HOME/$name" "$hold/$name" || rollback_restore
+      held+=("$name")
+    done
+    for name in "${incoming[@]}"; do
+      mv -T -- "$stage/$name" "$DSH_HOME/$name" || rollback_restore
+      installed+=("$name")
+    done
+    mv -Tf -- "$next" "$selection" || rollback_restore
+    rm -rf -- "$stage" "$hold"
     active=$restore_to previous=
     record "$(entry '
       const [out, at, id, version, image] = process.argv.slice(1)

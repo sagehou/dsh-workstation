@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -133,13 +134,23 @@ func (g *gateway) fromEdge(r *http.Request) bool {
 }
 
 func (g *gateway) session(r *http.Request) (s session, err error) {
+	return g.loadSession(r, true)
+}
+
+func (g *gateway) loadSession(r *http.Request, touch bool) (s session, err error) {
 	token := cookie(r, sessionCookie)
 	if len(token) != 43 {
 		return s, sql.ErrNoRows
 	}
 	now := time.Now().Unix()
-	err = g.db.QueryRowContext(r.Context(), "UPDATE sessions SET seen=? WHERE token=? AND seen>? AND created>? AND EXISTS(SELECT 1 FROM account WHERE id=1 AND enabled=1) RETURNING id,created,seen,stepped",
-		now, hash(token), now-g.idle, now-g.absolute).Scan(&s.ID, &s.Created, &s.Seen, &s.Stepped)
+	const filter = " WHERE token=? AND seen>? AND created>? AND EXISTS(SELECT 1 FROM account WHERE id=1 AND enabled=1)"
+	args := []any{hash(token), now - g.idle, now - g.absolute}
+	query := "SELECT id,created,seen,stepped FROM sessions" + filter
+	if touch {
+		query = "UPDATE sessions SET seen=?" + filter + " RETURNING id,created,seen,stepped"
+		args = append([]any{now}, args...)
+	}
+	err = g.db.QueryRowContext(r.Context(), query, args...).Scan(&s.ID, &s.Created, &s.Seen, &s.Stepped)
 	return
 }
 func (g *gateway) newSession(ctx context.Context, tx *sql.Tx, token, old string, stepped bool) error {
@@ -325,7 +336,8 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s, err := g.session(r)
+	// Passive polling must not extend an otherwise idle session.
+	s, err := g.loadSession(r, route != "GET /mgmt/upgrade-status")
 	if errors.Is(err, sql.ErrNoRows) {
 		if document(r, r.Method, r.URL.RequestURI()) {
 			http.Redirect(w, r, nextURL("/_auth/login", r.URL.RequestURI()), 303)
@@ -384,6 +396,13 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		g.controlAction(w, r)
 	case "GET /mgmt", "GET /_auth/operations":
 		g.operationsPage(w, r)
+	case "GET /mgmt/upgrade-status":
+		data := readUpgradeStatus(os.Getenv("WORKSTATION_DSH_HOME"))
+		if data == nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, map[string]any{"message": data.message(), "status": data})
 	case "GET /mgmt/backup":
 		g.backupPage(w, r, s)
 	case "POST /mgmt/runtime":

@@ -14,12 +14,16 @@ ARG DEBIAN_MIRROR=
 ARG NPM_REGISTRY=
 RUN if [ -n "$DEBIAN_MIRROR" ]; then sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g" /etc/apt/sources.list.d/debian.sources; fi; \
     apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git openssh-client python3 make g++ util-linux \
+ && apt-get install -y --no-install-recommends ca-certificates git openssh-client python3 make g++ util-linux xdg-user-dirs=0.18-1 \
  && rm -rf /var/lib/apt/lists/* \
  && npm install --global ${NPM_REGISTRY:+--registry=$NPM_REGISTRY} --ignore-scripts --no-audit --no-fund pnpm@11.28.5 \
- && install -d -o node -g node /dsh-home /workspace /backup /run/dsh-runtime
+ && install -d -o node -g node /dsh-home/.agents /workspace /backup /run/dsh-runtime /home/node/.config \
+ && chown node:node /dsh-home \
+ && printf '%s\n' 'XDG_DOCUMENTS_DIR="/workspace"' > /home/node/.config/user-dirs.dirs \
+ && ln -s /dsh-home/.agents /home/node/.agents
 
 ENV DSH_HOME=/dsh-home \
+    DSH_AGENTS_HOME=/dsh-home/.agents \
     DSH_TELEMETRY_DISABLED=1 \
     npm_config_store_dir=/dsh-home/pnpm/store \
     npm_config_ignore_scripts=true
