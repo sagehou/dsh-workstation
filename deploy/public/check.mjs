@@ -8,7 +8,7 @@ const root = 'https://workstation.test'
 const browser = await chromium.launch({ args: ['--ignore-certificate-errors-spki-list=' + process.env.CI_EDGE_SPKI] })
 const phase = process.argv[2]
 const restore = phase === 'restore'
-const context = await browser.newContext(phase !== 'gateway' ? { storageState: '/ci-state/browser.json' } : {})
+const context = await browser.newContext(phase !== 'gateway' ? { storageState: '/ci-state/browser.json', locale: 'en-US' } : {})
 const wait = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms))
 async function until(description, attempt, ms = 28_000) {
   const limit = Date.now() + ms
@@ -89,6 +89,7 @@ try {
   } else if (phase === 'gateway') {
     await page.goto(root + '/')
     await page.waitForURL('**/_auth/login?*')
+    await page.screenshot({ path: '/ci-ui/sign-in.png' })
     await page.getByLabel('用户名').fill('operator')
     await page.getByLabel('密码', { exact: true }).fill(password())
     const reveal = page.getByRole('button', { name: '显示密码' })
@@ -123,9 +124,25 @@ try {
     console.log('WebAuthn: native browser registration with a resident, user-verified credential')
 
     await page.goto(root + '/mgmt')
-    await page.getByRole('heading', { name: '控制台', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '概览', exact: true }).waitFor()
     await page.getByRole('rowheader', { name: 'Gateway', exact: true }).waitFor()
-    await page.getByRole('heading', { name: '可用 DSH 版本', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '已安装的版本', exact: true }).waitFor()
+    await page.getByRole('link', { name: '升级 DSH', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    const dialog = page.getByRole('dialog', { name: '升级 DSH' })
+    await dialog.waitFor()
+    assert.equal(await page.evaluate(() => document.activeElement.textContent), '取消')
+    await page.screenshot({ path: '/ci-ui/upgrade-dialog.png' })
+    await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden' })
+    assert.equal(await page.evaluate(() => document.activeElement.textContent), '升级 DSH')
+    await page.screenshot({ path: '/ci-ui/overview.png' })
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await page.setViewportSize({ width: 390, height: 844 })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'overview overflows on mobile')
+    await page.screenshot({ path: '/ci-ui/overview-mobile-dark.png', fullPage: true })
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.setViewportSize({ width: 1280, height: 720 })
     await page.getByRole('link', { name: '备份', exact: true }).click()
     await submit(page, '创建备份', '/mgmt/runtime')
     await page.waitForURL('**/mgmt/backup')
@@ -144,6 +161,96 @@ try {
     await page.getByRole('link', { name: '浏览器', exact: true }).click()
     await page.getByRole('heading', { name: '浏览器控制', exact: true }).waitFor()
     console.log('Gateway: authenticated management routes, online backup, archive verification and browser controls')
+  }
+
+  if (phase === 'upgrade' || phase === 'upgrade-failure') {
+    const path = '/mgmt/upgrade'
+    await page.goto(root + '/mgmt')
+    await page.getByRole('link', { name: '升级 DSH', exact: true }).click()
+    const version = page.getByLabel('目标版本', { exact: true })
+    const factor = page.getByLabel('动态验证码', { exact: true })
+    await version.or(factor).waitFor()
+    if (await factor.isVisible()) {
+      await factor.fill(code())
+      await submit(page, '验证动态验证码', '/_auth/stepup')
+    }
+    await version.fill('0.2.2-rc.5')
+    await submit(page, '开始升级', path)
+    await page.waitForURL(root + '/mgmt')
+    const status = page.locator('[data-upgrade]')
+    await status.locator('[data-upgrade-progress]').waitFor()
+    assert.match(await status.locator('[role=status]').innerText(), /进行中/)
+    const rejected = phase === 'upgrade-failure'
+    await status.and(page.locator(rejected ? '[data-result="failed"]' : '[data-result="verified"],[data-result="migrated"]'))
+      .waitFor({ timeout: 180_000 })
+    if (rejected) {
+      await page.getByText('失败 · 检查插件与依赖兼容性', { exact: true }).waitFor()
+      await page.locator('[data-upgrade-details] summary').click()
+      assert.match(await page.locator('[data-upgrade-blockers]').innerText(), /dsh-drill-pin requires DSH/)
+    } else {
+      assert.equal(await page.locator('[data-active-version]').innerText(), '0.2.2-rc.5')
+      assert.match(await page.locator('[data-upgrade-backup]').innerText(), /\d{8}T\d{6}Z\.[0-9a-f]{12}/)
+      const open = await context.request.get(root + '/_auth/dsh')
+      assert.ok(open.ok() && (await open.text()).includes('__DSH_BOOT__'))
+    }
+    await context.storageState({ path: '/ci-state/browser.json' })
+    await page.screenshot({ path: '/ci-ui/' + phase + '.png' })
+    console.log('Gateway upgrade phase ' + phase + ': ' + await status.locator('[role=status]').innerText())
+  }
+
+  if (phase === 'sidebar') {
+    await page.setViewportSize({ width: 1680, height: 950 })
+    let video = false
+    page.on('websocket', socket => {
+      if (new URL(socket.url()).pathname !== '/browser/api/websockets') return
+      socket.on('framereceived', ({ payload }) => {
+        if (Buffer.isBuffer(payload) && [0x03, 0x04].includes(payload[0])) video = true
+      })
+    })
+    await page.goto(root + '/_auth/dsh')
+    const notice = page.getByRole('button', { name: 'Continue', exact: true })
+    const addKey = page.getByRole('button', { name: 'Add API Key', exact: true })
+    const addWorkspace = page.getByRole('button', { name: 'Add workspace', exact: true })
+    const drawer = page.locator('[data-sidebar-toggle]').and(page.getByRole('button', { name: 'Open sidebar', exact: true }))
+    await notice.or(addKey).or(addWorkspace).or(drawer).first().waitFor()
+    if (await notice.isVisible()) await notice.click()
+    await addKey.or(addWorkspace).or(drawer).first().waitFor()
+    if (await addKey.isVisible()) {
+      await addKey.click()
+      await page.getByRole('button', { name: 'Configure later', exact: true }).click()
+    }
+    if (await drawer.isVisible()) await drawer.click()
+    await addWorkspace.click()
+    const workspace = page.getByRole('dialog', { name: 'Select Workspace Directory' })
+    await workspace.getByRole('button', { name: 'Edit path' }).click()
+    const path = workspace.getByRole('textbox', { name: 'Edit path' })
+    await path.fill('/workspace')
+    await path.press('Enter')
+    await workspace.getByRole('button', { name: 'Open', exact: true }).click()
+    const composer = page.locator('[data-composer-input][contenteditable="true"]').first()
+    await composer.fill('Open the shared browser.')
+    await composer.press('Enter')
+    await page.getByText('Compose fixture', { exact: true }).and(page.locator('p')).waitFor()
+
+    const expand = page.locator('[data-sidebar-right-expand]')
+    const entry = page.locator('[data-sidebar-right-guide-entry="workstation-browser"]')
+    if (!(await entry.isVisible())) await expand.click()
+    await entry.click()
+    const iframe = page.locator('iframe[title="共享 Chromium 桌面"]')
+    await iframe.waitFor()
+    await until('authenticated Selkies video within DSH', () => video, 40_000)
+    const frame = await (await iframe.elementHandle()).contentFrame()
+    assert.ok(frame && new URL(frame.url()).pathname === '/browser/')
+    await page.getByRole('button', { name: 'Collapse right sidebar' }).click()
+    await iframe.waitFor({ state: 'hidden' })
+    assert.equal(await iframe.count(), 1)
+    await expand.click()
+    await iframe.waitFor()
+    assert.equal(await (await iframe.elementHandle()).contentFrame(), frame)
+    const version = await context.request.get(root + '/mgmt/upgrade-status')
+    const suffix = version.ok() ? 'upgraded' : 'initial'
+    await page.screenshot({ path: '/ci-ui/sidebar-' + suffix + '.png' })
+    console.log('DSH Browser tab: opened the workspace, rendered authenticated Selkies video, and retained the iframe when docked and hidden')
   }
 
   if (phase === 'browser') {

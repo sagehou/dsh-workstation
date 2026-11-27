@@ -146,12 +146,14 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 
 | 要做什么 | 在哪里操作 |
 | --- | --- |
-| 打开共享 Chromium | 从 `/_auth/browser` 打开同源的 `/browser/`，沿用工作台登录。 |
+| 打开共享 Chromium | 在 DSH 会话的右侧栏选「浏览器」，也可以通过 `/_auth/browser` 打开独立桌面。两处沿用工作台登录。 |
 | 让 Agent 使用标签页 | Agent 可以通过 `lease_status` 取得空闲租约，也可以在 `/mgmt/browser` 手动授予最长 120 秒的租约。`browser-gate` 确认已按住的输入释放后，才会移交控制权。 |
 | 接管浏览器 | 选择 **接管浏览器**。Provider 停止接收新调用，等待当前操作结束后交还控制。 |
 | 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Gateway。 |
 
 MCP 启用时，Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。来源清单约束工具调用和返回的页面文本。浏览器网络出口由独立策略控制。[候选版租约行为](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
+
+右侧栏入口需要 Runtime 提供浏览器 Bundle 的客户端，并在 Gateway 启用浏览器。折叠停靠的侧栏会保留 iframe。隐藏浮动面板时，DSH 会关闭该页签。`/mgmt/browser` 仍可打开独立桌面。[侧栏 #5](https://github.com/sagehou/dsh-workstation/issues/5) · [上游侧栏验收](../../docs/roadmap/M0-evidence.zh-CN.md)
 
 连接或标签页丢失时，新建 DSH 会话并重新授权。要继续原来的对话，重启 Runtime、恢复对话，再给新连接授权。新标签页使用同一份 Chromium 配置。
 
@@ -176,13 +178,15 @@ docker compose --env-file .env.public exec -T gateway node --input-type=module -
 
 ## 维护
 
-打开 `/mgmt` 查看 Runtime 状态与版本、创建或校验 DSH_HOME 备份、管理账户和交接浏览器。创建备份和校验要求五分钟内验证过身份。升级、回滚、恢复以及迁移前的备份，请在停服后执行。[Runtime 维护](../README.zh-CN.md#升级与回滚)
+打开 `/mgmt` 查看 Runtime 状态与版本、创建或校验 DSH_HOME 备份、管理账户和交接浏览器。创建备份和校验要求五分钟内验证过身份。通过 CLI 升级、手动回滚、恢复及迁移前的备份，请在停服后执行。[Runtime 维护](../README.zh-CN.md#升级与回滚)
 
 ### DSH 升级与恢复
 
-当两个镜像均包含升级进度改动时，`/mgmt` 会显示最近一次 CLI 升级、阶段和结果。停止 Runtime 时保持 Gateway 运行。沿用部署时的 Compose 文件和 `--env-file .env.public`，执行 `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <版本>`。切换后启动 Runtime，确认 DSH Web 可用。再次停服执行 `maintenance verify` 后重启 Runtime。[升级进度 #39](https://github.com/sagehou/dsh-workstation/issues/39)
+两个镜像均支持 Web 升级时，在 `/mgmt` 选择「升级 DSH」，输入确切的 npm 版本，并按提示验证 TOTP。概览会显示升级阶段、兼容性阻断原因、活动版本和匹配备份 ID。升级期间 DSH Web 暂停服务。Runtime 在副本上检查候选版本，创建备份，切换后启动 DSH 并校验 Profile。若候选版本切换后启动失败，Runtime 会恢复匹配备份并重启原版本。[Web 升级 #48](https://github.com/sagehou/dsh-workstation/issues/48)
 
-Runtime 0.2.3 的浏览器 Bundle 使用所选 DSH 自带的官方 MCP 客户端。Profile 启动时会校验客户端配置，候选版本的就绪检查也会执行该校验。部署通过链接引用 Runtime 镜像里的 Bundle 文件，重建容器后既有安装会加载新文件。`WORKSTATION_BROWSER_MCP=0` 关闭自动安装和 Agent 连接。[兼容检查与恢复](../README.zh-CN.md#升级与回滚) · [Bundle 验证 #44](https://github.com/sagehou/dsh-workstation/issues/44)
+通过 CLI 升级时，停止 Runtime 并保持 Gateway 运行。沿用部署时的 Compose 文件和 `--env-file .env.public`，执行 `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <版本>`。切换后启动 Runtime，确认 DSH Web 可用。再次停服执行 `maintenance verify` 后重启 Runtime。[升级进度 #39](https://github.com/sagehou/dsh-workstation/issues/39)
+
+浏览器 Bundle 使用所选 DSH 自带的官方 MCP 客户端。Profile 启动时会校验客户端配置，候选版本的就绪检查也会执行该校验。部署通过链接加载 Runtime 镜像里的 Bundle 文件，重建 Runtime 后既有安装会加载更新后的客户端。包含侧栏客户端时，`WORKSTATION_BROWSER_MCP=0` 关闭 Agent 连接，完整版仍提供人用浏览器入口。[兼容检查与恢复](../README.zh-CN.md#升级与回滚) · [Bundle 验证 #44](https://github.com/sagehou/dsh-workstation/issues/44)
 
 ### 工作区与 Skills
 

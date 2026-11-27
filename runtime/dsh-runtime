@@ -35,7 +35,10 @@ chosen() {
 lock() {
   # The serving process keeps this lock after startup releases the state lock.
   # Both Compose services see the same inode through DSH_HOME.
-  exec 8>"$root/.serve.lock"
+  # The in-container supervisor lends its locked descriptor to its own commands.
+  if [[ ! /dev/fd/8 -ef $root/.serve.lock ]]; then
+    exec 8>"$root/.serve.lock"
+  fi
   flock -n -x 8 || die 'runtime is serving or being modified; stop it before maintenance'
   exec 9>"$root/.lock"
   flock -n -x 9 || die 'runtime is serving or being modified; stop it before maintenance'
@@ -69,6 +72,7 @@ write_runtime_status() {
     const { readFileSync, renameSync, writeFileSync } = require("node:fs")
     const [path, from, to, phase, result, backup, report] = process.argv.slice(1)
     const status = { from, to, phase, result, backup }
+    if (process.env.DSH_RUNTIME_MANAGED_UPGRADE === "1") status.managed = true
     if (report) {
       let failures = []
       try { failures = JSON.parse(readFileSync(report, "utf8")).failures ?? [] } catch {}
@@ -267,7 +271,7 @@ case "${1:-}" in
       finish_runtime_operation
       trap - EXIT INT TERM
     fi
-    if [[ ${WORKSTATION_BROWSER_MCP:-} == 1 ]]; then
+    if [[ ${WORKSTATION_BROWSER_UI:-} == 1 || ${WORKSTATION_BROWSER_MCP:-} == 1 ]]; then
       bundle="$DSH_HOME/profiles/web/.workstation-browser-0.1.0"
       if [[ ! -f $bundle ]]; then
         if [[ -d $DSH_HOME/profiles/web ]]; then snapshot; fi
@@ -281,13 +285,7 @@ case "${1:-}" in
     if [[ -z ${MAINTENANCE_ADDR:-} ]]; then
       exec node "$web" serve "$(bin "$active")"
     fi
-    node "$lib/maintenance.mjs" 8>&- &
-    maintenance_pid=$!
-    trap 'kill "$maintenance_pid" 2>/dev/null || true; wait "$maintenance_pid" || true' EXIT
-    node "$web" serve "$(bin "$active")" &
-    web_pid=$!
-    trap 'kill "$web_pid" 2>/dev/null || true; wait "$web_pid" || true; exit 0' TERM INT
-    wait "$web_pid"
+    exec node "$lib/maintenance.mjs" "$web"
     ;;
   install) lock; install_version "${2:-}" ;;
   upgrade)

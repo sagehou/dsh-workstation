@@ -14,6 +14,7 @@ services:
   # Leave the Browser Bundle inactive when the browser workers are disabled.
   runtime:
     environment:
+      WORKSTATION_BROWSER_UI: "0"
       WORKSTATION_BROWSER_MCP: "0"
 
   gateway:

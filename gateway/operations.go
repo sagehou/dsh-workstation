@@ -30,16 +30,20 @@ type upgradeStatus struct {
 	Result   string   `json:"result"`
 	Backup   string   `json:"backup"`
 	Blockers []string `json:"blockers"`
+	Managed  bool     `json:"managed,omitempty"`
 }
 
 var runtimeVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$`)
 var upgradePhases = map[string]string{
 	"install": "安装候选版本", "compatibility": "检查插件与依赖兼容性", "readiness": "验证候选版本启动",
 	"backup": "创建升级前备份", "switch": "切换活动版本",
+	"stop": "停止 DSH Web", "restart": "启动 DSH Web", "verify": "校验 Profile", "restore": "恢复升级前备份",
 }
 var upgradeResults = map[string]string{
 	"running": "进行中", "failed": "失败", "selected": "已切换，待启动及校验", "verified": "已校验，Profile 状态未变",
 	"migrated": "已校验，Profile 状态有变化", "interrupted": "中断，需检查活动版本", "superseded": "已离开此次升级的版本",
+	"rolled-back": "升级中止，已恢复原版本", "recovery-failed": "恢复未完成，请检查备份",
+	"verification-failed": "校验未完成，请检查 Runtime",
 }
 
 func (s upgradeStatus) message() string {
@@ -47,6 +51,19 @@ func (s upgradeStatus) message() string {
 		return upgradeResults[s.Result] + " · " + upgradePhases[s.Phase]
 	}
 	return upgradeResults[s.Result]
+}
+
+func (s upgradeStatus) progress() int {
+	switch s.Result {
+	case "selected", "verified", "migrated":
+		return 8
+	}
+	for i, phase := range []string{"stop", "install", "compatibility", "readiness", "backup", "switch", "restart", "verify"} {
+		if s.Phase == phase {
+			return i
+		}
+	}
+	return 0
 }
 
 func runtimeHome(root string) string {
@@ -80,9 +97,12 @@ func readUpgradeStatus(root string) *upgradeStatus {
 		return nil
 	}
 	if status.Result == "running" {
-		// Maintenance and Web share .serve.lock with the CLI. Upgrade also
-		// takes .lock. A pending record with no writer is from an interrupted run.
-		if guard, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0); err == nil {
+		lock := ".lock"
+		if status.Managed {
+			lock = ".serve.lock"
+		}
+		// With no writer, a pending record is from an interrupted run.
+		if guard, err := os.OpenFile(filepath.Join(dir, lock), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0); err == nil {
 			if err := syscall.Flock(int(guard.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err == nil {
 				if current := readRuntimeOperation(dir, "upgrade-status.json"); current != nil {
 					status = current
@@ -232,17 +252,19 @@ func readBackups(dir string) []backupEntry {
 
 // operationsPage renders the read-only view. Every field is optional: a missing
 // volume shows as an error string on that card, not as a failed page.
-func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request) {
-	page := page{
-		View:  "operations",
-		Title: "控制台",
-	}
+func (g *gateway) runtimePage(r *http.Request, s session, p page) page {
 	root := os.Getenv("WORKSTATION_DSH_HOME")
-	page.Runtime = readRuntimeState(root)
-	page.Upgrade = readUpgradeStatus(root)
+	p.Recent = stepped(s)
+	p.Runtime = readRuntimeState(root)
+	p.Upgrade = readUpgradeStatus(root)
 	inventoryCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	g.fetchInventory(r.WithContext(inventoryCtx), &page)
+	g.fetchInventory(r.WithContext(inventoryCtx), &p)
+	return p
+}
+
+func (g *gateway) operationsPage(w http.ResponseWriter, r *http.Request, s session) {
+	page := g.runtimePage(r, s, page{View: "operations", Title: "概览"})
 	if g.browserEnabled {
 		page.ProviderOK = g.provider(r.Context(), "GET", "/status", nil, &page.Control) == nil
 	}
@@ -297,7 +319,7 @@ func (g *gateway) runtimeAction(r *http.Request, action string, args map[string]
 	if err := json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&out); err != nil {
 		return nil, errors.New("maintenance returned an unreadable response")
 	}
-	if response.StatusCode != 200 {
+	if response.StatusCode != http.StatusOK && (action != "upgrade" || response.StatusCode != http.StatusAccepted) {
 		if message, ok := out["error"].(string); ok {
 			return nil, errors.New(message)
 		}
@@ -377,6 +399,7 @@ func parseKeyValue(output string) []string {
 // Runtime listener is down, and says so.
 func (g *gateway) fetchInventory(r *http.Request, page *page) {
 	if result, err := g.runtimeAction(r, "components", map[string]any{}); err == nil {
+		page.ManagedUpgrade, _ = result["managedUpgrade"].(bool)
 		stdout, _ := result["stdout"].(string)
 		for _, line := range parseKeyValue(stdout) {
 			if at := strings.IndexByte(line, ' '); at > 0 {
@@ -387,6 +410,9 @@ func (g *gateway) fetchInventory(r *http.Request, page *page) {
 		}
 	} else {
 		page.Components.Error = err.Error()
+	}
+	if page.Upgrade != nil && page.Upgrade.Result == "running" {
+		return
 	}
 	if result, err := g.runtimeAction(r, "versions", map[string]any{}); err == nil {
 		stdout, _ := result["stdout"].(string)

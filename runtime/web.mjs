@@ -103,11 +103,14 @@ async function run() {
       throw new StartupError('DSH announced an unexpected Web address')
     }
     await readyPage(url, target)
-    if (mode === 'probe' && incompatible) throw new StartupError('DSH skipped an incompatible or inactive Profile entry')
+    if (incompatible && (mode === 'probe' || process.argv[4] === '--require-profile')) {
+      throw new StartupError('DSH skipped an incompatible or inactive Profile entry')
+    }
     console.log('Authenticated DSH Web boot ready')
     if (mode === 'serve') {
       await writeFile(launchFile + '.new', text + '\n', { mode: 0o600 })
       await rename(launchFile + '.new', launchFile)
+      process.send?.('ready')
       const code = await closed
       process.exitCode = stopping ? 0 : code
     }

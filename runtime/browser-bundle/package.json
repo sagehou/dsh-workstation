@@ -3,7 +3,16 @@
   "version": "0.1.0",
   "type": "module",
   "engines": { "dsh": "*" },
-  "exports": "./host.mjs",
+  "exports": {
+    ".": "./host.mjs",
+    "./client": "./client.js"
+  },
   "peerDependencies": { "@deepseek-ai/dsh-mcp-client": "*" },
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-ui-sidebar-right"]
+    }
+  }
 }

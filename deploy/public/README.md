@@ -154,12 +154,14 @@ Full deployment serves the standalone browser/control page. Agent MCP is disable
 
 | To | Open or choose |
 | --- | --- |
-| Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
+| Open the shared Chromium desktop | Open **浏览器** in a DSH conversation’s right sidebar, or open `/_auth/browser` for the standalone desktop. Both use the workstation login. |
 | Let an Agent use a tab | An Agent can acquire an available lease through `lease_status`. You can also grant a lease in `/mgmt/browser` for up to 120 seconds. Before granting control, `browser-gate` confirms it released held input. |
 | Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
 | Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate Gateway. |
 
 When MCP is enabled, the Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. The allowlist constrains tool calls and returned page text. Independent network policy handles browser egress. [Candidate lease behavior](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
+
+The sidebar entry requires a Runtime with the Browser Bundle client and a Gateway with browser access enabled. Collapsing the docked sidebar preserves its iframe. Hiding a floating pane closes its tab in DSH. The standalone desktop remains available from `/mgmt/browser`. [Sidebar #5](https://github.com/sagehou/dsh-workstation/issues/5) · [Upstream sidebar evidence](../../docs/roadmap/M0-evidence.md)
 
 For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
 
@@ -184,13 +186,15 @@ docker compose --env-file .env.public exec -T gateway node --input-type=module -
 
 ## Maintain
 
-Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME backup, manage the single account, and hand off browser control. Backups and archive checks require verification within the last five minutes. Stop Runtime to upgrade, roll back, restore, or make a quiescent migration backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
+Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME backup, manage the single account, and hand off browser control. Backups and archive checks require verification within the last five minutes. Stop Runtime for CLI upgrades, manual rollback, restore, or a quiescent migration backup. [Runtime maintenance](../README.md#upgrade-and-rollback)
 
 ### DSH upgrade and recovery
 
-When both images include the upgrade progress change, `/mgmt` shows the latest CLI upgrade, phase, and result. Keep Gateway running while you stop Runtime. Use the same Compose files and `--env-file .env.public` as your deployment to run `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <version>`. After the switch, start Runtime and check DSH Web. Stop Runtime again to run `maintenance verify`, then restart it. [Upgrade progress #39](https://github.com/sagehou/dsh-workstation/issues/39)
+With Web upgrade support in both images, choose **升级 DSH** in `/mgmt`, supply an exact npm version, and complete TOTP when prompted. The overview shows the phase, any compatibility blockers, the selected version, and the matching backup ID. DSH Web pauses during the operation. Runtime checks the candidate on copied state, takes the backup, switches versions, restarts DSH, and verifies Profile state. If the selected candidate fails to start, Runtime restores the matching backup and restarts the previous version. [Web upgrades #48](https://github.com/sagehou/dsh-workstation/issues/48)
 
-Runtime 0.2.3's installed browser Bundle uses the official MCP client that comes with the selected DSH. Its configuration is checked when the Profile starts, including during the candidate readiness probe. The deployed Bundle links to files in the Runtime image, so replacing the image supplies the new files to existing installations. Setting `WORKSTATION_BROWSER_MCP=0` disables automatic installation and Agent connections. [Compatibility and recovery](../README.md#upgrade-and-rollback) · [Bundle verification #44](https://github.com/sagehou/dsh-workstation/issues/44)
+For a CLI upgrade, stop Runtime while Gateway stays up. Use the deployment’s Compose files and `--env-file .env.public` to run `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <version>`. Start Runtime and check DSH Web, then stop it to run `maintenance verify` and restart it. [Upgrade progress #39](https://github.com/sagehou/dsh-workstation/issues/39)
+
+The Browser Bundle uses the official MCP client that comes with the selected DSH. Its configuration is checked when the Profile starts, including during the candidate readiness probe. The deployment links to Bundle files in the Runtime image, so recreating Runtime supplies the updated client to existing linked Profiles. With the sidebar client present, `WORKSTATION_BROWSER_MCP=0` suppresses Agent connections and the full deployment still loads the human browser entry. [Compatibility and recovery](../README.md#upgrade-and-rollback) · [Bundle verification #44](https://github.com/sagehou/dsh-workstation/issues/44)
 
 ### Workspace and skills
 

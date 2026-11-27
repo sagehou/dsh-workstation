@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <meta name="csrf-token" content="{{.CSRF}}">
   <title>{{.Title}} · DSH Workstation</title>
   <link rel="stylesheet" href="/_auth/style.css">
   {{if or (eq .View "login") (eq .View "account")}}
   <script src="/_auth/passkey.js" defer></script>
   {{end}}
-  {{if or (eq .View "login") (eq .View "account") (eq .View "operations")}}
+  {{if or (eq .View "login") (eq .View "account") (eq .View "operations") (eq .View "upgrade")}}
   <script src="/_auth/ui.js" defer></script>
   {{end}}
 </head>
@@ -19,12 +20,6 @@
   {{if $signIn}}
   <header class="auth-brand">
     {{template "brand"}}
-    <div class="auth-art" aria-hidden="true">
-      <span class="art-shadow"></span>
-      <span class="art-layer"></span>
-      <span class="art-layer"></span>
-      <span class="art-layer"></span>
-    </div>
   </header>
   {{else}}
   {{template "rail" .}}
@@ -45,6 +40,7 @@
       {{template "feedback" .}}
       {{if $signIn}}{{template "sign-in" .}}
       {{else if eq .View "operations"}}{{template "overview" .}}
+      {{else if eq .View "upgrade"}}<section class="panel task-panel">{{template "upgrade-form" .}}</section>
       {{else if eq .View "backup"}}{{template "backup" .}}
       {{else if eq .View "control"}}{{template "browser" .}}
       {{else if eq .View "account"}}{{template "account" .}}
@@ -64,7 +60,7 @@
 <header class="rail">
   {{template "brand"}}
   <nav class="rail-nav" aria-label="控制台">
-    <a href="/mgmt"{{if eq .View "operations"}} aria-current="page"{{end}}><span class="icon icon-overview" aria-hidden="true"></span>概览</a>
+    <a href="/mgmt"{{if or (eq .View "operations") (eq .View "upgrade")}} aria-current="page"{{end}}><span class="icon icon-overview" aria-hidden="true"></span>概览</a>
     {{if .BrowserEnabled}}<a href="/mgmt/browser"{{if eq .View "control"}} aria-current="page"{{end}}><span class="icon icon-browser" aria-hidden="true"></span>浏览器</a>{{end}}
     <a href="/mgmt/backup"{{if eq .View "backup"}} aria-current="page"{{end}}><span class="icon icon-backup" aria-hidden="true"></span>备份</a>
     <a href="/mgmt/account"{{if eq .View "account"}} aria-current="page"{{end}}><span class="icon icon-account" aria-hidden="true"></span>账户</a>
@@ -134,54 +130,66 @@
 
 {{define "overview"}}
 <div class="dashboard">
-  <section class="panel runtime-card" aria-labelledby="runtime-title">
-    <span class="runtime-art" aria-hidden="true"></span>
+  <section class="panel runtime-card">
     <div class="runtime-content">
-      <h2 id="runtime-title">活动 DSH 版本</h2>
-      {{if .Runtime.Active}}<p class="active-version">{{.Runtime.Active}}</p>
-      {{else if .Runtime.ReadError}}<p class="active-version no-version">状态不可用</p>
-      {{else}}<p class="active-version no-version">未选择</p>{{end}}
-      {{if .Runtime.ReadError}}
-      <p class="runtime-detail" role="alert">无法读取 Runtime 状态。</p>
-      {{else}}
-      <dl class="runtime-meta">
-        <div><dt>已安装</dt><dd>{{len .Runtime.Installed}} 个版本</dd></div>
-        {{if .Runtime.Previous}}<div><dt>上一个版本</dt><dd><code>{{.Runtime.Previous}}</code></dd></div>{{end}}
-      </dl>
-      {{end}}
+      <div>
+        <h2 id="runtime-title">当前 DSH 版本</h2>
+        <p class="active-version" data-active-version>{{if .Runtime.Active}}{{.Runtime.Active}}{{else if .Runtime.ReadError}}状态不可用{{else}}未选择{{end}}</p>
+      </div>
+      <div class="runtime-actions">
+        <a class="button primary" href="/mgmt/upgrade" data-upgrade-open>升级 DSH</a>
+        <details class="hint">
+          <summary aria-label="升级与恢复说明"><span aria-hidden="true">i</span></summary>
+          <p class="hint-bubble">升级会短暂中断 DSH Web。Runtime 会验证候选版本并创建匹配备份。若 Profile 状态变化，回退时恢复对应备份。</p>
+        </details>
+      </div>
+    </div>
+    <div class="upgrade-summary" data-upgrade{{if not .Upgrade}} hidden{{end}} data-result="{{with .Upgrade}}{{.Result}}{{end}}">
+      <div class="upgrade-line">
+        <p id="upgrade-message" data-upgrade-message role="status">{{with .Upgrade}}{{upgradeMessage .}}{{end}}</p>
+        <code data-upgrade-version>{{with .Upgrade}}{{.From}} → {{.To}}{{end}}</code>
+        <details class="hint" data-upgrade-details{{if not (and .Upgrade .Upgrade.Blockers)}} hidden{{end}}>
+          <summary aria-label="查看失败详情"><span aria-hidden="true">i</span></summary>
+          <pre class="hint-bubble" data-upgrade-blockers>{{with .Upgrade}}{{range .Blockers}}{{.}}{{"\n"}}{{end}}{{end}}</pre>
+        </details>
+      </div>
+      <progress max="8" value="{{with .Upgrade}}{{upgradeProgress .}}{{else}}0{{end}}" aria-labelledby="upgrade-message" data-upgrade-progress{{if not (and .Upgrade (eq .Upgrade.Result "running"))}} hidden{{end}}></progress>
+      <p class="subtle" data-upgrade-backup{{if not (and .Upgrade .Upgrade.Backup)}} hidden{{end}}>{{with .Upgrade}}{{if .Backup}}备份 ID <code>{{.Backup}}</code>{{end}}{{end}}</p>
     </div>
   </section>
 
-  <section class="panel" aria-labelledby="upgrade-title" data-upgrade{{if not .Upgrade}} hidden{{end}}>
-    <div class="panel-heading">
-      <h2 id="upgrade-title">最近一次 DSH 升级</h2>
-      <details class="hint">
-        <summary aria-label="查看升级详情"><span aria-hidden="true">i</span></summary>
-        <p class="hint-bubble"><span data-upgrade-help{{if and .Upgrade .Upgrade.Blockers}} hidden{{end}}>在宿主机停服后升级。切换后启动 Runtime 并执行 verify。若 Profile 状态发生变化，回退时使用匹配的备份。</span><span data-upgrade-blockers{{if not (and .Upgrade .Upgrade.Blockers)}} hidden{{end}}>{{with .Upgrade}}{{range .Blockers}}{{.}}{{"\n"}}{{end}}{{end}}</span></p>
-      </details>
-    </div>
-    <div class="panel-body upgrade-summary">
-      <p data-upgrade-message role="status">{{with .Upgrade}}{{upgradeMessage .}}{{end}}</p>
-      <p data-upgrade-version>{{with .Upgrade}}{{.From}} → {{.To}}{{end}}</p>
-      <p data-upgrade-backup{{if not (and .Upgrade .Upgrade.Backup)}} hidden{{end}}>{{with .Upgrade}}{{if .Backup}}备份 ID {{.Backup}}{{end}}{{end}}</p>
+  <section class="panel versions-card">
+    <div class="panel-heading"><h2 id="versions-title">已安装的版本</h2></div>
+    <div class="panel-body" data-installed-versions>
+      {{if .Runtime.Installed}}
+      <ul class="data-list version-list" role="list">
+        {{range .Runtime.Installed}}
+        <li><code>{{.}}</code>{{if eq . $.Runtime.Active}}<span class="status success">使用中</span>{{else if eq . $.Runtime.Previous}}<span class="status muted">上一个版本</span>{{end}}</li>
+        {{end}}
+      </ul>
+      {{else}}<div class="empty"><p>还没有已安装的版本。</p><a class="button" href="/mgmt">刷新版本</a></div>{{end}}
     </div>
   </section>
 
   <section class="panel browser-card" aria-labelledby="browser-title">
     <div class="panel-heading">
-      <h2 id="browser-title">浏览器控制</h2>
-      {{if .BrowserEnabled}}<a class="icon-link" href="/mgmt/browser" aria-label="管理浏览器"><span aria-hidden="true">↗</span></a>{{end}}
+      <h2 id="browser-title">共享浏览器</h2>
     </div>
     <dl class="browser-metrics">
       <div><dt>控制权</dt><dd>{{if .ProviderOK}}{{template "browser-state" .Control.State}}{{else if .BrowserEnabled}}<span class="status muted">状态不可用</span>{{else}}<span class="status muted">未启用</span>{{end}}</dd></div>
       <div><dt>活动 DSH 会话</dt><dd class="metric">{{if .ProviderOK}}{{len .Control.Peers}}{{else}}—{{end}}</dd></div>
     </dl>
+    {{if .BrowserEnabled}}
+    <div class="panel-body browser-links">
+      <a class="button" href="/_auth/browser" target="_blank" rel="noopener">打开浏览器 <span class="arrow" aria-hidden="true">↗</span></a>
+      <a class="text-action" href="/mgmt/browser">浏览器控制</a>
+    </div>
+    {{end}}
   </section>
 
   <section class="panel components-card" aria-labelledby="components-title">
-    <div class="panel-heading"><h2 id="components-title">组件版本</h2></div>
+    <div class="panel-heading"><h2 id="components-title">运行环境</h2></div>
     <table class="data-table component-table" aria-labelledby="components-title">
-      <thead><tr><th scope="col">组件</th><th scope="col">状态与版本</th></tr></thead>
       <tbody>
         <tr><th scope="row">Gateway</th><td><span class="status success">运行中</span></td></tr>
         {{range .Components.Rows}}
@@ -192,38 +200,39 @@
     {{if .Components.Error}}<p class="panel-message feedback error" role="alert">无法读取 Runtime 组件版本。</p>{{end}}
   </section>
 
-  <section class="panel versions-card" aria-labelledby="versions-title">
-    <div class="panel-heading">
-      <h2 id="versions-title">可用 DSH 版本</h2>
-      <details class="hint">
-        <summary aria-label="版本维护提示"><span aria-hidden="true">i</span></summary>
-        <p class="hint-bubble">升级和回滚在停服后通过 Runtime 命令执行。</p>
-      </details>
-    </div>
-    {{if .Versions.Values}}
-    <ul class="data-list version-list" role="list">
-      {{range $i, $v := .Versions.Values}}
-      {{if lt $i 4}}
-      <li><code>{{$v}}</code>{{if eq $v $.Runtime.Active}}<span class="status success">使用中</span>{{else if eq $i 0}}<span class="status info">最新发布</span>{{end}}</li>
-      {{end}}
-      {{end}}
-    </ul>
-    {{else}}
-    <div class="panel-body version-empty">
-      {{if .Versions.Error}}<p role="alert">无法获取已发布版本。</p>{{else}}<p>暂无版本信息。</p>{{end}}
-      <a class="button" href="/mgmt">刷新版本</a>
-    </div>
-    {{end}}
-    {{if .Runtime.Installed}}
-    <div class="installed-versions">
-      <h3>已安装版本</h3>
-      <ul class="chips" role="list">
-        {{range .Runtime.Installed}}<li><code>{{.}}</code></li>{{end}}
-      </ul>
-    </div>
-    {{end}}
-  </section>
+  {{if and .Recent .ManagedUpgrade}}
+  <dialog class="upgrade-dialog" aria-labelledby="upgrade-dialog-title" data-upgrade-dialog>
+    <h2 id="upgrade-dialog-title">升级 DSH</h2>
+    {{template "upgrade-form" .}}
+  </dialog>
+  {{end}}
 </div>
+{{end}}
+
+{{define "upgrade-form"}}
+{{if .ManagedUpgrade}}
+<form class="form-stack" action="/mgmt/upgrade" method="post" data-upgrade-form>
+  {{template "csrf" .CSRF}}
+  <div class="field">
+    <label for="upgrade-version">目标版本</label>
+    <input id="upgrade-version" class="mono" name="version" type="text" list="published-versions"
+      placeholder="0.2.2-rc.5" value="{{.TargetVersion}}" required maxlength="96"
+      autocomplete="off" autocapitalize="none" spellcheck="false">
+    <datalist id="published-versions">{{range .Versions.Values}}{{if ne . $.Runtime.Active}}<option value="{{.}}"></option>{{end}}{{end}}</datalist>
+  </div>
+  <div class="task-actions">
+    {{if eq .View "upgrade"}}<a class="button" href="/mgmt">取消</a>
+    {{else}}<button class="button" type="button" data-dialog-cancel autofocus>取消</button>{{end}}
+    <button class="button primary" type="submit" aria-describedby="upgrade-impact">开始升级</button>
+    <details class="hint">
+      <summary aria-label="升级影响"><span aria-hidden="true">i</span></summary>
+      <p id="upgrade-impact" class="hint-bubble">升级期间 DSH Web 会暂时中断。</p>
+    </details>
+  </div>
+</form>
+{{else}}
+<div class="empty"><p>Runtime 的 Web 升级服务暂不可用。</p><a class="button" href="/mgmt">返回概览</a></div>
+{{end}}
 {{end}}
 
 {{define "backup-action"}}
@@ -282,7 +291,6 @@
 </section>
 {{else}}
 <section class="panel empty">
-  <span class="empty-mark" aria-hidden="true"><span class="icon icon-backup"></span></span>
   <p>还没有备份。</p>
   {{template "backup-action" .}}
 </section>
@@ -301,7 +309,6 @@
 {{define "browser"}}
 {{if not .BrowserEnabled}}
 <section class="panel empty">
-  <span class="empty-mark" aria-hidden="true"><span class="icon icon-browser"></span></span>
   <p>当前部署未启用共享浏览器。</p>
   <a class="button" href="/mgmt">返回概览</a>
 </section>
@@ -364,7 +371,6 @@
   </section>
   {{else}}
   <section class="panel empty">
-    <span class="empty-mark" aria-hidden="true"><span class="icon icon-browser"></span></span>
     <p>还没有活动的 DSH 会话。</p>
     <a class="button" href="/_auth/dsh">打开 DSH</a>
   </section>

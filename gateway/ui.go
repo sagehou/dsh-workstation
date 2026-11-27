@@ -31,6 +31,7 @@ type page struct {
 	View, Title, CSRF, Next    string
 	Error, ErrorDetail, Notice string
 	Key, Challenge, BackupID   string
+	TargetVersion              string
 	Status                     int
 	Recent, BrowserEnabled     bool
 	Codes                      []string
@@ -40,6 +41,7 @@ type page struct {
 	Control                    browserStatus
 	ProviderOK                 bool
 	Runtime                    runtimeState
+	ManagedUpgrade             bool
 	Upgrade                    *upgradeStatus
 	Backups                    []backupEntry
 	Components                 components
@@ -62,6 +64,7 @@ var auditLabels = map[string]string{
 	"session_revoked": "撤销会话", "sessions_revoked": "撤销全部会话",
 	"runtime_backup": "创建备份", "runtime_backup_failed": "创建备份失败", "runtime_backup_denied": "创建备份被拒绝",
 	"runtime_verify": "校验备份", "runtime_verify_failed": "备份校验失败", "runtime_verify_denied": "备份校验被拒绝",
+	"runtime_upgrade": "发起 DSH 升级", "runtime_upgrade_denied": "DSH 升级未受理",
 	"browser_takeover": "接管浏览器", "browser_grant": "移交浏览器控制权",
 }
 
@@ -86,12 +89,13 @@ func fileSize(bytes int64) string {
 }
 
 var ui = template.Must(template.New("page").Funcs(template.FuncMap{
-	"upgradeMessage": func(status *upgradeStatus) string { return status.message() },
-	"stamp":          func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(displayTime) },
-	"isoTime":        func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(time.RFC3339) },
-	"fileSize":       fileSize,
-	"componentLabel": func(key string) string { return displayLabel(componentLabels, key) },
-	"auditLabel":     func(key string) string { return displayLabel(auditLabels, key) },
+	"upgradeMessage":  func(status *upgradeStatus) string { return status.message() },
+	"upgradeProgress": func(status *upgradeStatus) int { return status.progress() },
+	"stamp":           func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(displayTime) },
+	"isoTime":         func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(time.RFC3339) },
+	"fileSize":        fileSize,
+	"componentLabel":  func(key string) string { return displayLabel(componentLabels, key) },
+	"auditLabel":      func(key string) string { return displayLabel(auditLabels, key) },
 	"archiveTime": func(raw string) string {
 		if stamp, err := time.Parse(time.RFC3339, raw); err == nil {
 			return stamp.UTC().Format(displayTime)
