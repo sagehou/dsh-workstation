@@ -11,9 +11,11 @@
 
 ## 当前部署版本
 
-Runtime `0.2.2` 和 Gateway `0.1.0` 从 `ee18eb8` 构建，支持 Linux amd64。使用 `main` 上 `deploy/public/release-commit` 记录的部署提交，获取配套 Compose 文件与固定的镜像摘要。[镜像清单](../deploy/public/images.env) · [发布作业](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway)
+Runtime `0.2.3` 和 Gateway `0.1.1` 从 `7509e8c` 构建，支持 Linux amd64。使用 `main` 上 `deploy/public/release-commit` 记录的提交获取配套 Compose 文件和镜像摘要。从同一提交重新生成 Traefik 路由，使其使用新的服务端点。[镜像清单](../deploy/public/images.env) · [发布作业](https://github.com/sagehou/dsh-workstation/actions/runs/45947520822) · [部署步骤](../deploy/public/README.zh-CN.md#traefik)
 
-上一版部署提交 `81feffd` 使用 Runtime `0.2.1`、Auth `0.1.1`、Provider `0.2.0` 和 browser-gate `0.1.0`。运行上一版时使用该提交的部署文件。[上一版验收](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+本版包含 DSH 升级进度、默认工作区初始化和共享 Skills 持久化。HTTPS Compose 演练保留浏览器 Bundle，从 DSH `0.2.2-rc.1` 升至 `0.2.2-rc.5`，重建后调用浏览器 MCP 工具并校验了 Profile。[Compose 演练](https://github.com/sagehou/dsh-workstation/actions/runs/45946909560/job/140333615353)
+
+上一版部署提交 `0e1ef08` 使用 Runtime `0.2.2` 和 Gateway `0.1.0`。更早的部署提交 `81feffd` 使用 Runtime `0.2.1`、Auth `0.1.1`、Provider `0.2.0` 和 browser-gate `0.1.0`。运行旧版本时使用其配套 Compose 文件与固定摘要。[上一版发布](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [早期验收](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 
 ## 保障链条
 

@@ -11,9 +11,11 @@ error, so there is no code path from that file to a floating tag.
 
 ## Current deployment
 
-Runtime `0.2.2` and Gateway `0.1.0` are built from `ee18eb8` for Linux amd64. Use the deployment commit recorded by `deploy/public/release-commit` on `main` for the matching Compose files and pinned image digests. [Image inventory](../deploy/public/images.env) · [Publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service)
+Runtime `0.2.3` and Gateway `0.1.1` are built from `7509e8c` for Linux amd64. Use the commit recorded in `deploy/public/release-commit` on `main` for the matching Compose files and image digests. Regenerate the Traefik routes from that checkout so the routes use the new service endpoints. [Image inventory](../deploy/public/images.env) · [Publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45947520822) · [Deployment instructions](../deploy/public/README.md#traefik)
 
-The previous deployment at `81feffd` uses Runtime `0.2.1`, Auth `0.1.1`, Provider `0.2.0`, and browser-gate `0.1.0`. Use that checkout's files to run the previous stack. [Previous deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+The release includes DSH upgrade progress, default workspace initialization, and a persistent shared skills directory. The HTTPS Compose drill upgraded DSH `0.2.2-rc.1` to `0.2.2-rc.5` with the browser Bundle installed, exercised the browser MCP tools after recreation, and verified the Profile. [Compose drill](https://github.com/sagehou/dsh-workstation/actions/runs/45946909560/job/140333615353)
+
+The previous deployment at `0e1ef08` uses Runtime `0.2.2` and Gateway `0.1.0`. The earlier deployment at `81feffd` uses Runtime `0.2.1`, Auth `0.1.1`, Provider `0.2.0`, and browser-gate `0.1.0`. Use either deployment's own checkout for its Compose files and pinned digests. [Previous publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [Earlier deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 
 ## What guarantees the chain
 
