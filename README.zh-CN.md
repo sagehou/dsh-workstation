@@ -24,7 +24,7 @@
 | 公网访问 | 一位使用者通过 HTTPS 登录，可用密码加 TOTP 或 Passkey。Go Gateway 提供会话管理和 Traefik ForwardAuth。`/mgmt` 统一提供账户、浏览器控制和 Runtime 运维入口。 |
 | 浏览器 | 人工与 Agent 共享 Chromium。独立桌面位于 `/browser/`。浏览器 Bundle 为 DSH 会话的右侧栏提供可选的「浏览器」页签。 |
 | 输入交接 | 真实栈已验证交接和断线时释放鼠标按键。键盘、租约过期、重启和 Provider 异常退出仍待真实栈验收。[#4](https://github.com/sagehou/dsh-workstation/issues/4) |
-| 镜像 | 当前发布使用按摘要固定的 Runtime `0.2.3` 和 Gateway `0.1.1`，完整版再启动固定版本的 LinuxServer Chromium。[发布状态](docs/release.zh-CN.md#当前部署版本) · [部署验证](docs/roadmap/public-compose.zh-CN.md) |
+| 镜像 | 当前发布使用按摘要固定的 Runtime `0.2.4` 和 Gateway `0.1.2`，完整版再启动固定版本的 LinuxServer Chromium。[发布状态](docs/release.zh-CN.md#当前部署版本) · [部署验证](docs/roadmap/public-compose.zh-CN.md) |
 
 ## 项目文档
 

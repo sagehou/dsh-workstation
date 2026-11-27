@@ -196,7 +196,7 @@ DSH_HOME 归档包含设置、凭据、会话、Profile 插件及其锁文件、
 
 ### Traefik
 
-- 更新 Runtime 0.2.3 和 Gateway 0.1.1 时，使用对应部署提交。沿用原域名、代理网、Traefik 容器和子网重新运行 `deploy/public/init.sh --release`，加载新生成的路由文件。自定义 DSH MCP 配置如引用工作台 Provider，请使用 `http://gateway:8080/mcp`。
+- 更新 Runtime 0.2.4 和 Gateway 0.1.2 时，使用对应部署提交。沿用原域名、代理网、Traefik 容器和子网重新运行 `deploy/public/init.sh --release`，加载新生成的路由文件。自定义 DSH MCP 配置如引用工作台 Provider，请使用 `http://gateway:8080/mcp`。
 - 如需在重建 Traefik 时保留连接，在它自己的 Compose 中将 `dsh-workstation_workstation` 声明为外部网络。
 - 若 Traefik 在代理网上的 IP 变化，按[已有部署迁移](#从-auth-迁移到-gateway)的步骤停服并拆除旧网络。沿用已保存的配置重新初始化，再按第 4 步接回 Traefik 并更新路由。
 
@@ -224,7 +224,7 @@ Provider 会尝试自动重连。如果 Chromium 已就绪而控制页仍显示 
 
 ### DSH 版本
 
-Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。启用 Agent MCP 时，Runtime 通过官方 Plugin Manager 将 Workstation 浏览器 Bundle 安装到持久化 Web Profile。Runtime 和 Profile 安装均禁用包生命周期脚本。Bundle 使用已验证的 DSH 版本。
+Runtime 首次启动时安装官方 DSH `0.2.2-rc.1`。完整版 Runtime 通过官方 Plugin Manager 将 Workstation 浏览器 Bundle 安装到持久化 Web Profile。Runtime 和 Profile 安装均禁用包生命周期脚本。Bundle 使用已验证的 DSH 版本。
 
 更改 Profile 或版本前备份 DSH_HOME。对公网 Compose 执行维护命令时使用 `--env-file .env.public`。版本回滚只切换 npm 安装，已迁移的数据需要从匹配的备份还原。[Runtime 维护命令](../README.zh-CN.md#升级与回滚)
 
