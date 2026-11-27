@@ -28,7 +28,7 @@
 | 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | `main` 分支的 CI 覆盖 | 在相信「合并后的树就是被测试过的树」之前完成；#6 从 main 部署。 |
 | 09 | [#26](https://github.com/sagehou/dsh-workstation/issues/26) | 无共享浏览器的精简部署 | 两服务配置与 HTTPS 登录已验证。 |
 | 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent 优先租约、浏览器出口加固及录制 | 自动取得租约已通过源码 Compose 验证。出口和录制仍待验收。 |
-| 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | 运维控制台、Gateway 改名及界面 | 控制台和认证已通过源码 CI。Gateway 镜像仍待发布，目标主机迁移仍待验证。 |
+| 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | 运维控制台、Gateway 改名及界面 | 控制台和认证已通过 CI。Gateway 镜像已发布，目标主机迁移由 #6 跟踪。 |
 | 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | 完整部署收敛为三个容器 | Runtime、Gateway 和 Browser。验证 CDP 隔离、浏览器重建及已有登录和租约流程。 |
 | 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | 共用一张工作台网络 | 直连边界、证书保留及 Agent MCP 启用时的浏览器交接均已通过。[Compose 验证](public-compose.zh-CN.md#共享网络验证) |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | DSH 原生 Browser Sidebar | 延后增强；独立页面持续可用，不阻塞首版。 |
@@ -98,4 +98,4 @@
 
 已发布的 Auth 版本支持双容器精简部署。目标主机仍需验收 Traefik 兼容性、子网预检、HTTPS 和备份恢复。[部署验收 #6](https://github.com/sagehou/dsh-workstation/issues/6)
 
-Gateway 和新版控制台在 PR #34。候选版允许 Agent 自动取得租约，清单为空时浏览器工具允许所有 HTTPS 源。生产部署按上面的发布门槛验收。首版界面使用独立浏览器页面。[PR #34](https://github.com/sagehou/dsh-workstation/pull/34) · [Compose 验证](public-compose.zh-CN.md#gateway-候选版验证) · [发布状态](../release.zh-CN.md#当前部署版本) · [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md)
+Gateway 和新版控制台随 PR #34 发布。公网部署默认关闭 Agent MCP。启用时，Agent 可以自动取得空闲租约。首版界面使用独立浏览器页面。[PR #34](https://github.com/sagehou/dsh-workstation/pull/34) · [Compose 验证](public-compose.zh-CN.md#共享网络验证) · [发布状态](../release.zh-CN.md#当前部署版本) · [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md)

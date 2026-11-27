@@ -11,12 +11,9 @@ error, so there is no code path from that file to a floating tag.
 
 ## Current deployment
 
-The `deploy/public/release-commit` file records the commit with the
-published digests, currently `81feffd`. That deployment uses Runtime 0.2.1,
-Auth 0.1.1, Provider 0.2.0 and browser-gate 0.1.0. Use its Compose and initializer
-together. [Published deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+Runtime `0.2.2` and Gateway `0.1.0` are built from `ee18eb8` for Linux amd64. Use the deployment commit recorded by `deploy/public/release-commit` on `main` for the matching Compose files and pinned image digests. [Image inventory](../deploy/public/images.env) · [Publish run](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service)
 
-The three-service candidate builds Runtime 0.2.2 and Gateway 0.1.0. Their release digests are pending. [Image inventory](../deploy/public/images.env) · [Gateway migration](../deploy/public/README.md#migrate-from-the-auth-service) · [Tracking issue](https://github.com/sagehou/dsh-workstation/issues/36)
+The previous deployment at `81feffd` uses Runtime `0.2.1`, Auth `0.1.1`, Provider `0.2.0`, and browser-gate `0.1.0`. Use that checkout's files to run the previous stack. [Previous deployment verification](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 
 ## What guarantees the chain
 

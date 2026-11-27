@@ -11,7 +11,7 @@ The owner approved a single-administrator public Compose release. The authentica
 | Existing proxy | Gateway's public and verification listeners. Gateway checks the exact Traefik source IP. |
 | `workstation` | Runtime, Gateway and Browser share this network. Traefik reaches DSH and Selkies HTTP here. |
 
-## Three-service candidate
+## Three-service deployment
 
 Full starts `browser`, `gateway` and `runtime`. Core starts `gateway` and `runtime`. Both declare one `workstation` network alongside the external proxy network. Provider and the input gate run inside Gateway, and LinuxServer starts the CDP relay inside Browser. The relay writes the Unix socket and Gateway mounts it read-only. [Deployment guide](../../deploy/public/README.md#choose-a-deployment-shape) · [ADR-0007](../adr/0007-three-service-deployment.md)
 
