@@ -112,8 +112,8 @@ Runtime 镜像将 Linux 的 Documents 指向 `/workspace`。DSH 首次使用时�
 - 修改 Profile 或插件依赖前，备份 DSH_HOME 并记录确切 Runtime、DSH、Profile 和插件版本。
 - 验证候选版本启动、Node 兼容性、Profile/Bundle 兼容性、锁文件一致性和明确批准的生命周期脚本。
 - `dsh-runtime upgrade` 是一个事务：在活动版本旁安装、门禁、在副本上就绪检查、记录指纹、归档加清单，最后才移动指针。被阻断的候选版本保持安装状态，指针不动。
-- Web 在共享 DSH_HOME 中持有服务锁。独立维护容器必须获取这把锁，才能升级、切换、回滚或恢复。备份使用另一把共享锁，可以在线执行。迁移前停服并备份，避免捕获正在变化的数据。
-- CLI 逐阶段输出升级进度，原子写入 `$DSH_HOME/runtime/upgrade-status.json`。Gateway 通过数据卷读取，Runtime 停止时仍可在 `/mgmt` 查看。完成版本切换后，启动 Runtime 并校验 Profile。
+- Runtime 监督进程在共享 DSH_HOME 中持有服务锁。独立的维护容器必须获取这把锁，才能升级、切换、回滚或恢复。从 Web 发起升级时，监督进程先停止 DSH Web，再把锁描述符传给 CLI 子进程。备份使用独立的共享状态锁，可以在 DSH Web 运行时执行。
+- `/mgmt/upgrade` 校验确切的 DSH 版本和近期 TOTP，再由 Gateway 将请求发往 Runtime 私有维护监听器。CLI 和监督进程将阶段原子写入 `$DSH_HOME/runtime/upgrade-status.json`，供 Gateway 展示。监督进程在切换后启动 DSH Web，通过就绪检查后校验 Profile。切换后启动失败会恢复匹配的状态备份。独立 CLI 操作也通过同一个数据卷显示进度。
 - 批准针对精确的 `package@version` 并保存在 DSH_HOME 中，因此对后续回滚同样生效。DSH 自身依赖树中的生命周期脚本只报告不阻断，因为该策略固定为 `--ignore-scripts` 且对所有版本一致。
 - 指针回滚只恢复所选可执行版本。如果发生数据迁移，还必须恢复匹配的 DSH_HOME 备份及相关工作区状态。`verify` 比较 Profile 清单、锁文件和 pnpm 存储中的包版本与切换前指纹，并给出所需操作。
 - DSH_HOME 备份排除 `runtime` 和 `pnpm`，因为两者都可重新安装；改用清单记录选择状态和 Runtime 镜像，并拒绝校验和、所有者或 DSH 版本不匹配的恢复。

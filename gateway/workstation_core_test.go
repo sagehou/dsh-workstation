@@ -113,3 +113,12 @@ func TestCoreDeploymentRefusesOpenBrowser(t *testing.T) {
 		t.Fatalf("core deployment issued a redirect to %q", loc)
 	}
 }
+
+func TestBrowserAvailability(t *testing.T) {
+	g, sess := loginForBrowserTest(t)
+	const path = "/_auth/browser-available"
+	response(t, request(g, req(g, "GET", path, nil)), http.StatusUnauthorized)
+	response(t, request(g, req(g, "GET", path, nil, sess)), http.StatusNotFound)
+	g.browserEnabled = true
+	response(t, request(g, req(g, "GET", path, nil, sess)), http.StatusNoContent)
+}

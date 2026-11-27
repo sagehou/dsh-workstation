@@ -337,7 +337,7 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Passive polling must not extend an otherwise idle session.
-	s, err := g.loadSession(r, route != "GET /mgmt/upgrade-status")
+	s, err := g.loadSession(r, route != "GET /mgmt/upgrade-status" && route != "GET /_auth/browser-available")
 	if errors.Is(err, sql.ErrNoRows) {
 		if document(r, r.Method, r.URL.RequestURI()) {
 			http.Redirect(w, r, nextURL("/_auth/login", r.URL.RequestURI()), 303)
@@ -355,6 +355,12 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 		g.dsh(w, r)
 	case "GET /_auth/browser":
 		g.openBrowser(w, r)
+	case "GET /_auth/browser-available":
+		if !g.browserEnabled {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case "POST /_auth/control/record":
 		// Start/stop the browser recording (#31). The action is a fixed enum so a
 		// caller cannot reach an arbitrary Provider route through this endpoint.
@@ -395,14 +401,17 @@ func (g *gateway) public(w http.ResponseWriter, r *http.Request) {
 	case "POST /_auth/control":
 		g.controlAction(w, r)
 	case "GET /mgmt", "GET /_auth/operations":
-		g.operationsPage(w, r)
+		g.operationsPage(w, r, s)
+	case "GET /mgmt/upgrade", "POST /mgmt/upgrade":
+		g.upgrade(w, r, s)
 	case "GET /mgmt/upgrade-status":
-		data := readUpgradeStatus(os.Getenv("WORKSTATION_DSH_HOME"))
+		root := os.Getenv("WORKSTATION_DSH_HOME")
+		data := readUpgradeStatus(root)
 		if data == nil {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, map[string]any{"message": data.message(), "status": data})
+		writeJSON(w, map[string]any{"message": data.message(), "progress": data.progress(), "status": data, "runtime": readRuntimeState(root)})
 	case "GET /mgmt/backup":
 		g.backupPage(w, r, s)
 	case "POST /mgmt/runtime":

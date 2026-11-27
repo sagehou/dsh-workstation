@@ -174,3 +174,86 @@ func TestManagementMaintenance(t *testing.T) {
 		t.Fatal("an expired step-up authorized a backup")
 	}
 }
+
+func TestStartDSHUpgrade(t *testing.T) {
+	g, _, seed := newTestGateway(t)
+	const target = "0.2.2-rc.5"
+	var queued atomic.Int32
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Action string
+			Args   map[string]string
+		}
+		if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer fixture" || json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Error("invalid request to Runtime")
+			w.WriteHeader(400)
+			return
+		}
+		switch body.Action {
+		case "components":
+			writeJSON(w, map[string]any{"ok": true, "managedUpgrade": true})
+		case "versions":
+			writeJSON(w, map[string]any{"ok": true, "stdout": `["0.2.2-rc.5"]`})
+		case "upgrade":
+			if body.Args["version"] != target {
+				t.Error("Runtime received the wrong candidate version")
+			}
+			if queued.Add(1) == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				writeJSON(w, map[string]any{"ok": true})
+			} else {
+				w.WriteHeader(http.StatusConflict)
+				writeJSON(w, map[string]string{"error": "UPGRADE_BUSY"})
+			}
+		default:
+			t.Errorf("unexpected action: %s", body.Action)
+			w.WriteHeader(400)
+		}
+	}))
+	t.Cleanup(runtime.Close)
+	secret := filepath.Join(t.TempDir(), "maintenance")
+	if err := os.WriteFile(secret, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKSTATION_MAINTENANCE_ADDR", strings.TrimPrefix(runtime.URL, "http://"))
+	t.Setenv("WORKSTATION_MAINTENANCE_SECRET", secret)
+	csrf := &http.Cookie{Name: csrfCookie, Value: randomText(random(32))}
+	sess := &http.Cookie{Name: sessionCookie, Value: randomText(random(32))}
+	ctx := context.Background()
+	if err := g.change(ctx, "test_session", func(tx *sql.Tx) error {
+		return g.newSession(ctx, tx, sess.Value, "", false)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(version string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		return request(g, req(g, "POST", upgradePath, url.Values{"csrf": {csrf.Value}, "version": {version}}, cookies...))
+	}
+	response(t, post(target, csrf), http.StatusUnauthorized)
+	stale := post(target, csrf, sess)
+	response(t, stale, http.StatusSeeOther)
+	if stale.Header().Get("Location") != "/_auth/stepup?next=%2Fmgmt%2Fupgrade" {
+		t.Fatal("upgrade did not request recent verification")
+	}
+	step := url.Values{"csrf": {csrf.Value}, "next": {upgradePath}, "code": {totp(seed, time.Now().Unix()/30)}}
+	response(t, request(g, req(g, "POST", "/_auth/stepup", step, csrf, sess)), http.StatusSeeOther)
+	response(t, post(target, sess), http.StatusForbidden)
+	response(t, post("latest", csrf, sess), http.StatusBadRequest)
+	if queued.Load() != 0 {
+		t.Fatal("an unauthenticated or invalid action reached Runtime")
+	}
+	form := request(g, req(g, "GET", upgradePath, nil, csrf, sess))
+	response(t, form, http.StatusOK)
+	if !strings.Contains(form.Body.String(), "开始升级") || !strings.Contains(form.Body.String(), target) {
+		t.Fatal("upgrade form is missing the confirmation or published version")
+	}
+	accepted := post(target, csrf, sess)
+	response(t, accepted, http.StatusSeeOther)
+	if accepted.Header().Get("Location") != "/mgmt" {
+		t.Fatal("accepted upgrade did not return to its progress display")
+	}
+	busy := post(target, csrf, sess)
+	response(t, busy, http.StatusConflict)
+	if !strings.Contains(busy.Body.String(), "Runtime 正在维护") {
+		t.Fatal("missing maintenance conflict feedback")
+	}
+}

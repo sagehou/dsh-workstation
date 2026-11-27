@@ -37,9 +37,8 @@ COPY --chmod=0755 dsh-runtime /usr/local/bin/dsh-runtime
 # any COPY, is what keeps COPY from setting its mode.
 RUN install -d -m 0755 /usr/local/lib/dsh-runtime
 COPY --chmod=0644 web.mjs /usr/local/lib/dsh-runtime/web.mjs
-# Maintenance listener (#32): the only path that may change the DSH version from
-# outside the container. It shells out to dsh-runtime and nothing else.
 COPY --chmod=0644 maintenance.mjs /usr/local/lib/dsh-runtime/maintenance.mjs
+COPY --chmod=0644 managed-web.mjs /usr/local/lib/dsh-runtime/managed-web.mjs
 COPY --chmod=0644 compat.mjs /usr/local/lib/dsh-runtime/compat.mjs
 COPY --chmod=0644 state.mjs /usr/local/lib/dsh-runtime/state.mjs
 COPY browser-bundle /opt/workstation-browser

@@ -105,6 +105,7 @@ services:
       DSH_BIND_IP: ${WORKSTATION_RUNTIME_IP:-172.30.241.2}
       DSH_PUBLIC_ORIGIN: https://${WORKSTATION_DOMAIN:?set WORKSTATION_DOMAIN}
       WORKSTATION_INTERNAL_TLS: "1"
+      WORKSTATION_BROWSER_UI: "1"
       WORKSTATION_BROWSER_MCP: ${WORKSTATION_BROWSER_MCP:-0}
       # Gateway uses this listener for inventory, backup and archive validation.
       MAINTENANCE_ADDR: 0.0.0.0:8099

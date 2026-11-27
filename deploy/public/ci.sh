@@ -132,6 +132,8 @@ if (( $(date +%s) % 30 > 20 )); then sleep "$((30 - $(date +%s) % 30 + 1))"; fi
 node deploy/public/otp.mjs bootstrap | compose run --rm -T --no-deps gateway-admin bootstrap operator > "$state/ci-state/recovery"
 viewer_user="$(docker run --rm --entrypoint sh workstation-ci-viewer -c 'printf "%s:%s" "$(id -u)" "$(id -g)"')"
 sudo chown -R "$viewer_user" "$state/ci-state"
+mkdir -p evidence/ui
+sudo chown "$viewer_user" evidence/ui
 compose up -d --no-build --wait --wait-timeout 360
 docker network connect dsh-workstation_workstation "$edge"
 install -m 0600 "$state/edge/routes.yml" "$edge_dir/.routes.tmp"
@@ -308,9 +310,16 @@ check() {
   docker run --rm --ipc=host --network host --add-host workstation.test:127.0.0.1 \
     -e CI_EDGE_SPKI -e NODE_EXTRA_CA_CERTS=/ci-edge.pem -v "$edge_dir/cert.pem:/ci-edge.pem:ro" \
     -v "$PWD/deploy/public:/m0/public:ro" -v "$state/ci-state:/ci-state" \
+    -v "$PWD/evidence/ui:/ci-ui" \
     workstation-ci-viewer node /m0/public/check.mjs "$1"
 }
 check gateway
+console_drill=0
+if [[ $ci_image_mode == release || ( $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ) ]]; then
+  console_drill=1
+  compose exec -T runtime mkdir -p /workspace/sidebar-initial /workspace/sidebar-upgraded
+  check sidebar-initial
+fi
 compose stop gateway
 restore_volume=dsh-workstation_ci-auth-restore
 docker volume create "$restore_volume" >/dev/null
@@ -412,15 +421,26 @@ compose up -d --no-build --wait --wait-timeout 60 gateway
 check browser
 echo 'Input gate verified: authenticated handover, refusal of unauthenticated, stack healthy after'
 
-# Exercise the persisted Browser Bundle after a real DSH version switch once
-# in the source matrix and again from the pinned release images.
-if [[ $ci_image_mode == release || ( $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ) ]]; then
-  compose stop runtime
-  compose run --rm --no-deps -T maintenance upgrade 0.2.2-rc.5
-  compose up -d --no-build --force-recreate --wait --wait-timeout 360 runtime
+# Exercise the Browser Bundle after a Web upgrade on the default source leg
+# and on the published images using their matching deployment checkout.
+if [[ $console_drill == 1 ]]; then
+  # A disposable Profile pin exercises the error feedback on the upgrade page.
+  compose exec -T runtime sh -ec '
+    dir=/dsh-home/profiles/drill-gate
+    mkdir -p "$dir/node_modules/dsh-drill-pin"
+    printf "%s" "{\"name\":\"drill-gate\",\"dependencies\":{\"dsh-drill-pin\":\"1.0.0\"}}" > "$dir/package.json"
+    printf "%s" "lockfileVersion: 9" > "$dir/pnpm-lock.yaml"
+    printf "%s" "{\"name\":\"dsh-drill-pin\",\"version\":\"1.0.0\",\"engines\":{\"dsh\":\"0.2.2-rc.1\"}}" \
+      > "$dir/node_modules/dsh-drill-pin/package.json"
+  '
+  check upgrade-failure
+  compose exec -T runtime dsh-runtime status | grep -Fx 'Active: 0.2.2-rc.1'
+  compose exec -T runtime rm -rf /dsh-home/profiles/drill-gate
+  runtime_id="$(compose ps -q runtime)"
+  check upgrade
+  test "$(compose ps -q runtime)" = "$runtime_id"
   compose exec -T runtime dsh-runtime status | grep -Fx 'Active: 0.2.2-rc.5'
   check browser
-  compose stop runtime
-  compose run --rm --no-deps -T maintenance verify
-  echo 'The installed Browser Bundle served real MCP tools before and after upgrading DSH from 0.2.2-rc.1 to 0.2.2-rc.5'
+  check sidebar-upgraded
+  echo 'Gateway upgraded DSH from 0.2.2-rc.1 to 0.2.2-rc.5 and the installed Browser Bundle served real MCP tools'
 fi
