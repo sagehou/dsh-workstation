@@ -8,6 +8,7 @@ const root = 'https://workstation.test'
 const browser = await chromium.launch({ args: ['--ignore-certificate-errors-spki-list=' + process.env.CI_EDGE_SPKI] })
 const phase = process.argv[2]
 const restore = phase === 'restore'
+let sidebarStep = ''
 const context = await browser.newContext(phase !== 'gateway' ? { storageState: '/ci-state/browser.json', locale: 'en-US' } : {})
 const wait = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms))
 async function until(description, attempt, ms = 28_000) {
@@ -198,7 +199,7 @@ try {
     console.log('Gateway upgrade phase ' + phase + ': ' + await status.locator('[role=status]').innerText())
   }
 
-  if (phase === 'sidebar') {
+  if (phase === 'sidebar-initial' || phase === 'sidebar-upgraded') {
     await page.setViewportSize({ width: 1680, height: 950 })
     let video = false
     page.on('websocket', socket => {
@@ -207,49 +208,54 @@ try {
         if (Buffer.isBuffer(payload) && [0x03, 0x04].includes(payload[0])) video = true
       })
     })
-    await page.goto(root + '/_auth/dsh')
+    sidebarStep = 'open DSH and finish onboarding'
     const notice = page.getByRole('button', { name: 'Continue', exact: true })
     const addKey = page.getByRole('button', { name: 'Add API Key', exact: true })
     const addWorkspace = page.getByRole('button', { name: 'Add workspace', exact: true })
     const drawer = page.locator('[data-sidebar-toggle]').and(page.getByRole('button', { name: 'Open sidebar', exact: true }))
-    await notice.or(addKey).or(addWorkspace).or(drawer).first().waitFor()
-    if (await notice.isVisible()) await notice.click()
+    await page.addLocatorHandler(notice, () => notice.click(), { times: 1 })
+    await page.goto(root + '/_auth/dsh')
     await addKey.or(addWorkspace).or(drawer).first().waitFor()
     if (await addKey.isVisible()) {
       await addKey.click()
       await page.getByRole('button', { name: 'Configure later', exact: true }).click()
     }
     if (await drawer.isVisible()) await drawer.click()
+    sidebarStep = 'open the workspace picker'
     await addWorkspace.click()
     const workspace = page.getByRole('dialog', { name: 'Select Workspace Directory' })
+    sidebarStep = 'enter the workspace path'
     await workspace.getByRole('button', { name: 'Edit path' }).click()
     const path = workspace.getByRole('textbox', { name: 'Edit path' })
-    await path.fill('/workspace')
+    await path.fill('/workspace/' + phase)
     await path.press('Enter')
+    sidebarStep = 'confirm the workspace path'
     await workspace.getByRole('button', { name: 'Open', exact: true }).click()
+    sidebarStep = 'start a conversation'
     const composer = page.locator('[data-composer-input][contenteditable="true"]').first()
     await composer.fill('Open the shared browser.')
     await composer.press('Enter')
     await page.getByText('Compose fixture', { exact: true }).and(page.locator('p')).waitFor()
 
+    sidebarStep = 'open the Browser tab'
     const expand = page.locator('[data-sidebar-right-expand]')
     const entry = page.locator('[data-sidebar-right-guide-entry="workstation-browser"]')
     if (!(await entry.isVisible())) await expand.click()
     await entry.click()
     const iframe = page.locator('iframe[title="共享 Chromium 桌面"]')
     await iframe.waitFor()
+    sidebarStep = 'wait for embedded Selkies video'
     await until('authenticated Selkies video within DSH', () => video, 40_000)
     const frame = await (await iframe.elementHandle()).contentFrame()
     assert.ok(frame && new URL(frame.url()).pathname === '/browser/')
+    sidebarStep = 'collapse and reopen the docked sidebar'
     await page.getByRole('button', { name: 'Collapse right sidebar' }).click()
     await iframe.waitFor({ state: 'hidden' })
     assert.equal(await iframe.count(), 1)
     await expand.click()
     await iframe.waitFor()
     assert.equal(await (await iframe.elementHandle()).contentFrame(), frame)
-    const version = await context.request.get(root + '/mgmt/upgrade-status')
-    const suffix = version.ok() ? 'upgraded' : 'initial'
-    await page.screenshot({ path: '/ci-ui/sidebar-' + suffix + '.png' })
+    await page.screenshot({ path: '/ci-ui/' + phase + '.png' })
     console.log('DSH Browser tab: opened the workspace, rendered authenticated Selkies video, and retained the iframe when docked and hidden')
   }
 
@@ -447,7 +453,7 @@ try {
 } catch (error) {
   // Playwright's request call log can contain Cookie or Authorization headers.
   const message = String(error?.message).split('\n', 1)[0]
-  console.error(phase + ': ' + message.replace(/([?#]token=)[^\s"']+/gi, '$1[redacted]'))
+  console.error(phase + (sidebarStep ? ' (' + sidebarStep + ')' : '') + ': ' + message.replace(/([?#]token=)[^\s"']+/gi, '$1[redacted]'))
   process.exitCode = 1
 } finally {
   await browser.close()

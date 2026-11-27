@@ -121,8 +121,8 @@ time { font-variant-numeric: tabular-nums; }
   border-block-end: 1px solid var(--stroke);
   background: var(--surface);
 }
-.rail-nav { display: flex; flex-wrap: wrap; gap: .25rem; }
-.rail-nav a, .rail-exit {
+.rail-nav { display: flex; flex: 1; flex-wrap: wrap; gap: .25rem; }
+.rail-nav a {
   display: inline-flex;
   align-items: center;
   gap: .45rem;
@@ -134,7 +134,7 @@ time { font-variant-numeric: tabular-nums; }
   font-weight: 620;
   text-decoration: none;
 }
-.rail-nav a:hover, .rail-exit:hover { background: var(--surface-soft); color: var(--ink); }
+.rail-nav a:hover { background: var(--surface-soft); color: var(--ink); }
 .rail-nav [aria-current="page"] {
   color: var(--link);
   background: var(--hero);
@@ -142,7 +142,7 @@ time { font-variant-numeric: tabular-nums; }
   text-decoration-thickness: 2px;
   font-weight: 720;
 }
-.rail-exit { margin-inline-start: auto; border: 1px solid var(--field-stroke); color: var(--ink); }
+.rail-nav .rail-exit { margin-inline-start: auto; border: 1px solid var(--field-stroke); color: var(--ink); }
 
 .icon {
   display: inline-block;
@@ -178,6 +178,7 @@ time { font-variant-numeric: tabular-nums; }
 .page-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .9rem; margin-block-end: 1.45rem; }
 .dashboard, .control-grid, .account-grid, .stack { display: grid; gap: 1rem; align-items: start; }
 .dashboard, .control-grid, .account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dashboard { align-items: stretch; }
 .runtime-card, .components-card { grid-column: 1 / -1; }
 .panel { min-inline-size: 0; border: 1px solid var(--stroke); border-radius: var(--radius); background: var(--surface); }
 .panel-heading, .heading-label, .settings-heading, .settings-line, .line-item, .activity-row {
@@ -453,7 +454,6 @@ dialog::backdrop { background: #08160e70; overflow: hidden; overscroll-behavior:
 @media (max-width: 42rem) {
   .rail { padding-inline: 1rem; }
   .rail-nav { flex-basis: 100%; }
-  .rail-exit { margin-inline-start: 0; }
   .panel-heading, .panel-body, .settings-group, .verify-form, .data-table th, .data-table td, .account-list { padding-inline: .9rem; }
   .browser-metrics { margin-inline: .9rem; }
   .hint-bubble { inset-inline-end: 0; inset-inline-start: auto; }
@@ -462,7 +462,8 @@ dialog::backdrop { background: #08160e70; overflow: hidden; overscroll-behavior:
   .runtime-actions > .hint > .hint-bubble { inset-inline: 1.15rem auto; }
   .auth-main { place-items: start center; padding-block-start: 2rem; }
 }
-@media (max-width: 24rem) {
+@media (max-width: 28rem) {
+  .rail-nav a { padding-inline: .55rem; }
   .rail-nav .icon { display: none; }
 }
 @media (forced-colors: active) {

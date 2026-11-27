@@ -72,7 +72,11 @@ write_runtime_status() {
     const { readFileSync, renameSync, writeFileSync } = require("node:fs")
     const [path, from, to, phase, result, backup, report] = process.argv.slice(1)
     const status = { from, to, phase, result, backup }
-    if (process.env.DSH_RUNTIME_MANAGED_UPGRADE === "1") status.managed = true
+    if (process.env.DSH_RUNTIME_MANAGED_UPGRADE === "1") {
+      status.managed = true
+      // The supervisor owns the result until the selected Web process is ready.
+      if (result === "failed" || result === "selected") status.result = "running"
+    }
     if (report) {
       let failures = []
       try { failures = JSON.parse(readFileSync(report, "utf8")).failures ?? [] } catch {}

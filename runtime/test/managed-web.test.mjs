@@ -41,13 +41,13 @@ for (const scenario of ['verified', 'rejected', 'rolled-back', 'interrupted afte
       assert.equal(managed, true)
       steps.push(action)
       if (action === 'upgrade' && scenario === 'rejected') {
-        announce('compatibility', 'failed', { backup: '', blockers: ['test-bundle'] })
+        announce('compatibility', 'running', { backup: '', blockers: ['test-bundle'] })
         return { code: 1 }
       }
       if (action === 'upgrade') {
         assert.equal(value, to)
         writeFileSync(selected, to + '\n')
-        announce('switch', 'selected')
+        announce('switch', 'running')
       } else if (action === 'verify') {
         assert.equal(status().phase, 'verify')
         announce('switch', 'verified')

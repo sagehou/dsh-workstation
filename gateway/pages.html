@@ -64,8 +64,8 @@
     {{if .BrowserEnabled}}<a href="/mgmt/browser"{{if eq .View "control"}} aria-current="page"{{end}}><span class="icon icon-browser" aria-hidden="true"></span>浏览器</a>{{end}}
     <a href="/mgmt/backup"{{if eq .View "backup"}} aria-current="page"{{end}}><span class="icon icon-backup" aria-hidden="true"></span>备份</a>
     <a href="/mgmt/account"{{if eq .View "account"}} aria-current="page"{{end}}><span class="icon icon-account" aria-hidden="true"></span>账户</a>
+    <a class="rail-exit" href="/_auth/dsh">打开 DSH <span class="arrow" aria-hidden="true">↗</span></a>
   </nav>
-  <a class="rail-exit" href="/_auth/dsh">打开 DSH <span class="arrow" aria-hidden="true">↗</span></a>
 </header>
 {{end}}
 

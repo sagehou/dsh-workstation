@@ -314,6 +314,12 @@ check() {
     workstation-ci-viewer node /m0/public/check.mjs "$1"
 }
 check gateway
+console_drill=0
+if [[ $ci_image_mode == build && $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ]]; then
+  console_drill=1
+  compose exec -T runtime mkdir -p /workspace/sidebar-initial /workspace/sidebar-upgraded
+  check sidebar-initial
+fi
 compose stop gateway
 restore_volume=dsh-workstation_ci-auth-restore
 docker volume create "$restore_volume" >/dev/null
@@ -415,10 +421,9 @@ compose up -d --no-build --wait --wait-timeout 60 gateway
 check browser
 echo 'Input gate verified: authenticated handover, refusal of unauthenticated, stack healthy after'
 
-# Exercise the persisted Browser Bundle after a real DSH version switch once
-# in the source matrix and again from the pinned release images.
-if [[ $ci_image_mode == release || ( $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ) ]]; then
-  check sidebar
+# Exercise the installed Browser Bundle after a Web upgrade on the default
+# source leg. The release job runs the probes from its own deployment checkout.
+if [[ $console_drill == 1 ]]; then
   # A disposable Profile pin exercises the error feedback on the upgrade page.
   compose exec -T runtime sh -ec '
     dir=/dsh-home/profiles/drill-gate
@@ -436,6 +441,6 @@ if [[ $ci_image_mode == release || ( $traefik_version == "$(bash deploy/public/t
   test "$(compose ps -q runtime)" = "$runtime_id"
   compose exec -T runtime dsh-runtime status | grep -Fx 'Active: 0.2.2-rc.5'
   check browser
-  check sidebar
+  check sidebar-upgraded
   echo 'Gateway upgraded DSH from 0.2.2-rc.1 to 0.2.2-rc.5 and the installed Browser Bundle served real MCP tools'
 fi

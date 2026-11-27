@@ -55,8 +55,8 @@ The approved direction is a self-hosted workstation around the official DSH appl
 ## Workstation browser integration
 
 - The first release uses the authenticated standalone browser/control page as the supported entry point.
-- A native DSH right Sidebar is a deferred enhancement, not a first-release deployment gate.
-- When implemented, register it only through supported DSH client/Sidebar APIs and embed the relative URL `/browser/`. Do not fork DSH core or depend on private DOM internals.
+- The optional **浏览器** tab opens in the right sidebar of a DSH conversation. Use the supported Browser Bundle client export and Sidebar registry.
+- The pane embeds `/_auth/browser`, which hands the authenticated operator to same-origin `/browser/`. The standalone page remains available in full deployments.
 - Verify docking, floating, resize, maximize/restore, hide, reconnect, and iframe lifecycle against the exact DSH release. Keep the standalone page as a fallback.
 - The official DSH chat, session, file, diff, terminal, Profile, and Plugin Manager remain the primary application interfaces.
 

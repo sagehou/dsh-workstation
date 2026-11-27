@@ -48,7 +48,8 @@ const commands = new Set()
 function run (argv, supervised = false) {
   return new Promise(resolve => {
     const stdio = ['ignore', 'pipe', 'pipe']
-    if (supervised) stdio[8] = 8
+    // Fill descriptors 3–7 so Node passes the serving lock at descriptor 8.
+    if (supervised) stdio.push('ignore', 'ignore', 'ignore', 'ignore', 'ignore', 8)
     const env = supervised ? { ...process.env, DSH_RUNTIME_MANAGED_UPGRADE: '1' } : process.env
     const child = spawn(RUNTIME, argv, { stdio, env, detached: true })
     let out = ''

@@ -68,7 +68,7 @@ export function manageWeb(dir, launcher, command, onExit) {
       if (transaction?.from === status.from && transaction.to === status.to) status = transaction
       // Leave the durable transaction for start() when the container is stopping.
       if (shuttingDown) return
-      if (result.code !== 0 || status.result !== 'selected' || selection() !== status.to) {
+      if (result.code !== 0 || status.phase !== 'switch' || !BACKUP_ID.test(status.backup ?? '') || selection() !== status.to) {
         throw Error('upgrade transaction failed')
       }
       record(status, 'restart', 'running')
@@ -88,6 +88,7 @@ export function manageWeb(dir, launcher, command, onExit) {
           await startWeb()
           record(status, 'restart', 'rolled-back')
         } else {
+          record(status, 'restart', 'running')
           await startWeb()
           record(status, status.phase, 'failed')
         }
