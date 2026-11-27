@@ -11,7 +11,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 - The authenticated standalone browser/control page is the first-release UI. Native Sidebar is deferred and cannot block deployment.
 - No DSH core fork, custom Agent runtime, replacement plugin manager, public plugin marketplace, multi-user shared mode, or Kubernetes.
 - Initial deployment support is Linux amd64.
-- `BROWSER_TOOL_ORIGINS` is an application-layer origin allowlist, not network egress isolation. Keep Agent browsing disabled/restricted until the separate egress policy is implemented for untrusted destinations.
+- `BROWSER_TOOL_ORIGINS` is an optional application-layer origin allowlist; unset means every HTTPS origin is allowed, per [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md). No egress policy is required for the single-operator deployment.
 
 ## Ordered work
 
@@ -23,11 +23,10 @@ English · [简体中文](development-roadmap.zh-CN.md)
 | 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Configurable Docker subnets and overlap preflight | Before target-host deployment. Derive fixed IPs, health checks, and certificate SANs from one configuration. |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | Browser exclusive input and safe handoff | Before enabling Agent control of the shared browser. |
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR image publishing and immutable deployment references | Before declaring repeatable release distribution. |
-| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3, #8, #9, and #10. Agent browser control stays disabled until #4; untrusted-site browsing stays disabled until #11. |
-| 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | Browser egress policy and SSRF boundary | Required before enabling broad Agent browsing of untrusted sites. |
+| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | Target-host deployment, HTTPS, backup/restore and recovery drill | Requires #3, #8, #9, and #10. Agent browser control is enabled by default per ADR-0006. |
 | 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | CI coverage on `main` | Before trusting that the merged tree is the tested tree; #6 deploys from main. |
 | 09 | [#26](https://github.com/sagehou/dsh-workstation/issues/26) | Core deployment without the shared browser | Two-service Compose configuration and HTTPS login verified. |
-| 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent-first lease, browser egress hardening and recording | Automatic acquisition passed source Compose. Egress and recording acceptance remain open. |
+| 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent-first lease and recording | Automatic acquisition passed source Compose. Recording acceptance remains open. |
 | 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | Operations console, Gateway rename and UI | Console and authentication passed CI. The Gateway image is published. Deployment-host migration is tracked in #6. |
 | 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | Three-service full deployment | Runtime, Gateway and Browser. Verify CDP isolation, browser recreation and existing login and lease flows. |
 | 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | Shared workstation network | Direct-access boundaries, certificate preservation and browser handoff with Agent MCP enabled passed. [Compose evidence](public-compose.md#shared-network-verification) |
@@ -54,14 +53,7 @@ English · [简体中文](development-roadmap.zh-CN.md)
 - Expiry, concurrency, disconnect, Provider restart, and Chromium restart fail closed.
 - Agent browser access is not enabled in production before this gate passes.
 
-### Gate C — untrusted browsing
-
-- Enforce browser egress controls outside the model prompt.
-- Resolve and validate destinations, block prohibited IP ranges, and revalidate redirects.
-- Verify DNS rebinding, IPv4/IPv6, loopback, link-local, private and cloud metadata destinations.
-- Origin allowlists alone do not satisfy this gate.
-
-### Gate D — native Sidebar (post-launch)
+### Gate C — native Sidebar (post-launch)
 
 - Public DSH APIs only; no core fork/private DOM.
 - Verify dock/float/resize/maximize/restore/hide/reconnect and iframe lifecycle.

@@ -59,28 +59,26 @@ opened. **No tab is ever closed to make room.**
 Unset, or the literal `*`, means every HTTPS origin is allowed. A configured list
 still restricts to exactly those origins.
 
-**This overrides the `AGENTS.md` rule:** *"Keep broad browsing of untrusted sites
-disabled until browser egress controls are independently enforced and tested.
-`BROWSER_TOOL_ORIGINS` is not an egress firewall or complete SSRF defense."*
-
-The product owner accepted the risk explicitly, in those words, on 2026-11-26.
+The `AGENTS.md` baseline now states the same rule, so there is no longer an
+override to record. The product owner confirmed on 2026-11-27 that this
+single-operator deployment does not require an SSRF or egress policy.
 
 ## Consequences
 
 ### Accepted risks
 
-- **The egress rule is now unenforced.** `BROWSER_TOOL_ORIGINS` was never a
-  firewall, and with default-open it is not even an allowlist. Nothing stops
-  Chromium from reaching `169.254.169.254`, RFC1918 services, the Provider's own
-  control endpoints, or the Docker host.
-- **The Agent can drive the browser into the deployment's own services.** The
-  Provider control listener and the input gate are reachable from the Chromium
-  network. A page that the Agent navigates to can attempt those requests; the
-  credentials live in `/run/secrets` inside containers Chromium does not mount,
-  so the immediate impact is limited to unauthenticated endpoints, but this is
-  defence by accident rather than by design.
 - **The lease is no longer an approval.** It still serialises ownership and still
   gates input, but it no longer expresses "the operator permitted this".
+
+### Not required for this deployment
+
+An SSRF or browser egress policy is out of scope. One operator drives one
+Chromium against one deployment; the Agent browsing `169.254.169.254`, an RFC1918
+service, the Provider's control listener or the Docker host is the same trust
+boundary the operator already has, so blocking those destinations would add a
+gate without removing an attacker. A deployment that later serves more than one
+operator would need to revisit this, because the boundary that makes it
+acceptable here is the single-tenant one.
 
 ### What still holds
 
@@ -92,11 +90,9 @@ The product owner accepted the risk explicitly, in those words, on 2026-11-26.
 
 ### Follow-up
 
-Issue #30 tracks the deployment controls that would make default-open survivable
-(network-level egress policy, a deny list for metadata and RFC1918, and a
-decision on whether the Provider control endpoints should be reachable from the
-Chromium network at all). Issue #11 remains open and is now a hardening item
-rather than a release gate.
+No follow-up is required for the first release. Issue #11 is closed as out of
+scope for a single-operator deployment; it would reopen only if this deployment
+ever serves more than one operator.
 
 ## Related
 
@@ -106,7 +102,5 @@ rather than a release gate.
   keeps; its human-first lease default is superseded here.
 - [#29](https://github.com/sagehou/dsh-workstation/issues/29) — the product-model
   change this ADR records.
-- [#30](https://github.com/sagehou/dsh-workstation/issues/30) — the hardening work
-  the override makes necessary.
-- [#11](https://github.com/sagehou/dsh-workstation/issues/11) — browser egress
-  policy, now hardening rather than a gate.
+- [#30](https://github.com/sagehou/dsh-workstation/issues/30) — the product-model
+  change this ADR records alongside #29.

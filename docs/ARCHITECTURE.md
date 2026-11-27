@@ -104,8 +104,7 @@ The Runtime image points Linux Documents to `/workspace`. DSH creates `/workspac
 - Block human keyboard and mouse input at the Selkies boundary during Agent control. Takeover must drain or safely cancel the active operation, release held input, confirm release, and only then change owner.
 - Expiry, uncertain renderer completion, Provider restart, or browser process death must fail closed. Claim exclusive control only after testing the actual input path.
 - Attach over CDP to the existing default Chromium context to share tabs and cookies. Prevent tools from closing the browser or context.
-- `BROWSER_TOOL_ORIGINS` is a Provider application-layer origin allowlist. It is not an egress firewall or complete SSRF defense. Chromium still executes page scripts and follows redirects.
-- Before broad Agent browsing of untrusted sites, add an independent browser egress control that blocks loopback, link-local, private, metadata, and other prohibited destinations after DNS resolution and on redirects. Keep CDP and Provider management private.
+- `BROWSER_TOOL_ORIGINS` is a Provider application-layer origin allowlist, and the Agent may browse any HTTPS origin. This single-operator deployment does not require an SSRF or egress policy (ADR-0006). Keep CDP and Provider management private.
 
 ## Runtime upgrades and recovery
 

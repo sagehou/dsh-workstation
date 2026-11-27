@@ -73,7 +73,7 @@
 - 首版严格只有一个本地管理员。该管理员可以注册多个 Passkey。不得增加多账户、邀请、角色或多人共用模式。
 - 官方 DSH 保持产品核心。不得另造 Agent Runtime、聊天/编辑器、包管理器或公共插件市场。
 - 首版浏览器界面使用已认证的独立浏览器/控制页面。原生 DSH Sidebar 延后，不得阻塞部署。
-- 浏览器独占输入交接验收通过前，不得开放 Agent 浏览器控制。独立浏览器出口控制强制实施并通过测试前，不得开放 Agent 广泛访问不可信网站。`BROWSER_TOOL_ORIGINS` 不是网络出口防火墙或完整 SSRF 防护。
+- Agent 是浏览器的默认使用者，可以访问任意 HTTPS 源。`BROWSER_TOOL_ORIGINS` 是可选的 Provider 应用层来源白名单，留空即允许所有 HTTPS 源。按 [ADR-0006](docs/adr/0006-agent-first-browser-and-default-open-origins.md)，该单操作员部署不需要 SSRF 或出口策略。
 - 首版部署只支持 Linux amd64。不得宣称支持 ARM64 或多用户隔离。
 - 目标主机部署前，必须完成目标 Traefik 兼容性矩阵和 Docker 子网冲突/配置检查。
 - Runtime 指针回滚不等于数据回滚。修改持久化 Profile/插件数据前必须备份，并证明匹配数据可恢复。
