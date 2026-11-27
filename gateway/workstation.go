@@ -151,29 +151,29 @@ func (g *gateway) websocket(w http.ResponseWriter, r *http.Request) {
 func (g *gateway) dsh(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile("/run/dsh-runtime/launch-url")
 	if err != nil {
-		unavailable(w)
+		g.dshUnavailable(w, r)
 		return
 	}
 	launch, err := url.Parse(strings.TrimSpace(string(data)))
 	if err != nil || launch.Scheme != "https" || launch.Host != g.host || launch.Path != "/" || launch.User != nil || launch.Fragment != "" ||
 		len(launch.Query()) != 1 || len(launch.Query()["token"]) != 1 || launch.Query().Get("token") == "" {
-		unavailable(w)
+		g.dshUnavailable(w, r)
 		return
 	}
 	request, err := http.NewRequestWithContext(r.Context(), "GET", dshUpstream+"/?"+launch.RawQuery, nil)
 	if err != nil {
-		unavailable(w)
+		g.dshUnavailable(w, r)
 		return
 	}
 	request.Host = g.host
 	response, err := g.dshClient.Do(request)
 	if err != nil {
-		unavailable(w)
+		g.dshUnavailable(w, r)
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusSeeOther {
-		unavailable(w)
+		g.dshUnavailable(w, r)
 		return
 	}
 	for _, c := range response.Cookies() {
@@ -183,7 +183,15 @@ func (g *gateway) dsh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	unavailable(w)
+	g.dshUnavailable(w, r)
+}
+
+func (g *gateway) dshUnavailable(w http.ResponseWriter, r *http.Request) {
+	message := readStartupStatus(os.Getenv("WORKSTATION_DSH_HOME"))
+	if message == "" {
+		message = "DSH 暂不可用，请查看 Runtime 状态。"
+	}
+	g.render(w, r, page{View: "dsh-unavailable", Title: "打开 DSH", Error: message, Status: http.StatusServiceUnavailable})
 }
 func (g *gateway) openBrowser(w http.ResponseWriter, r *http.Request) {
 	if !g.browserEnabled {

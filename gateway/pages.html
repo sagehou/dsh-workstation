@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="/_auth/style.css">
   {{if or (eq .View "login") (eq .View "account")}}
   <script src="/_auth/passkey.js" defer></script>
+  {{end}}
+  {{if or (eq .View "login") (eq .View "account") (eq .View "operations")}}
   <script src="/_auth/ui.js" defer></script>
   {{end}}
 </head>
@@ -46,6 +48,7 @@
       {{else if eq .View "backup"}}{{template "backup" .}}
       {{else if eq .View "control"}}{{template "browser" .}}
       {{else if eq .View "account"}}{{template "account" .}}
+      {{else if eq .View "dsh-unavailable"}}<a class="button primary" href="/mgmt">查看 Runtime 状态</a>
       {{else}}{{template "account-task" .}}
       {{end}}
     </div>
@@ -146,6 +149,21 @@
         {{if .Runtime.Previous}}<div><dt>上一个版本</dt><dd><code>{{.Runtime.Previous}}</code></dd></div>{{end}}
       </dl>
       {{end}}
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="upgrade-title" data-upgrade{{if not .Upgrade}} hidden{{end}}>
+    <div class="panel-heading">
+      <h2 id="upgrade-title">最近一次 DSH 升级</h2>
+      <details class="hint">
+        <summary aria-label="查看升级详情"><span aria-hidden="true">i</span></summary>
+        <p class="hint-bubble"><span data-upgrade-help{{if and .Upgrade .Upgrade.Blockers}} hidden{{end}}>在宿主机停服后升级。切换后启动 Runtime 并执行 verify。若 Profile 状态发生变化，回退时使用匹配的备份。</span><span data-upgrade-blockers{{if not (and .Upgrade .Upgrade.Blockers)}} hidden{{end}}>{{with .Upgrade}}{{range .Blockers}}{{.}}{{"\n"}}{{end}}{{end}}</span></p>
+      </details>
+    </div>
+    <div class="panel-body upgrade-summary">
+      <p data-upgrade-message role="status">{{with .Upgrade}}{{upgradeMessage .}}{{end}}</p>
+      <p data-upgrade-version>{{with .Upgrade}}{{.From}} → {{.To}}{{end}}</p>
+      <p data-upgrade-backup{{if not (and .Upgrade .Upgrade.Backup)}} hidden{{end}}>{{with .Upgrade}}{{if .Backup}}备份 ID {{.Backup}}{{end}}{{end}}</p>
     </div>
   </section>
 

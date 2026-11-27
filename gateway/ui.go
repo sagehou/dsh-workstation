@@ -40,6 +40,7 @@ type page struct {
 	Control                    browserStatus
 	ProviderOK                 bool
 	Runtime                    runtimeState
+	Upgrade                    *upgradeStatus
 	Backups                    []backupEntry
 	Components                 components
 	Versions                   availableVersions
@@ -85,6 +86,7 @@ func fileSize(bytes int64) string {
 }
 
 var ui = template.Must(template.New("page").Funcs(template.FuncMap{
+	"upgradeMessage": func(status *upgradeStatus) string { return status.message() },
 	"stamp":          func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(displayTime) },
 	"isoTime":        func(seconds int64) string { return time.Unix(seconds, 0).UTC().Format(time.RFC3339) },
 	"fileSize":       fileSize,

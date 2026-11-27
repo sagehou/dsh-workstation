@@ -79,13 +79,15 @@ Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior 
 
 | Store | Contents |
 | --- | --- |
-| DSH_HOME | Runtime versions, Profile manifests and lockfiles, node_modules, pnpm store, sessions, settings, credentials, and plugin configuration. One persistent volume. |
-| Workspace | Project files in a separate volume or bind mount. |
+| DSH_HOME | Runtime versions, Profile manifests and lockfiles, node_modules, pnpm store, sessions, settings, credentials, plugin configuration, and user and shared skills. One persistent volume. |
+| Workspace | Default Web workspace, project files, and project skills in a separate volume or bind mount. |
 | Chromium `/config` | Persistent profile, cookies, extensions, and downloads. |
 | Gateway SQLite (`auth-data`) | Single administrator and session state in SQLite, stored in a separate volume. |
 | Provider state | Lease/recovery state required to fail closed across Provider restarts. |
 | Authentication secrets | Docker secrets or read-only files. Store and back them up separately from the database. |
 | Deployment configuration | Git, with secrets kept outside the repository. |
+
+The Runtime image points Linux Documents to `/workspace`. DSH creates `/workspace/deepseek-harness/default-workspace` on first use and reuses an existing registration. Skills can live in `$DSH_HOME/skills`, `$DSH_AGENTS_HOME/skills` (backed by `$DSH_HOME/.agents` and reachable through `~/.agents`), or the project's `.agents/skills` directory.
 
 ## Authentication and account model
 
@@ -112,6 +114,7 @@ Verify subpath support, response headers, CSP, WebSockets, and sign-in behavior 
 - Validate candidate startup, Node compatibility, Profile/Bundle compatibility, lockfile consistency, and explicitly approved lifecycle scripts.
 - `dsh-runtime upgrade` is one transaction: install beside the active version, gate, probe a copy, fingerprint, archive plus manifest, then move the pointer. A blocked candidate stays installed and the pointer does not move.
 - Web holds the serving lock in the shared DSH_HOME. An independent maintenance container needs that lock for an upgrade, switch, rollback or restore. Backup takes a separate shared lock and can run while Web is up. Stop Web to take a quiescent snapshot before a migration.
+- The CLI outputs each upgrade phase and records it atomically in `$DSH_HOME/runtime/upgrade-status.json`. Gateway reads it through the volume, so the administrator can follow the current phase in `/mgmt` while Runtime is stopped. Selection is followed by a Runtime restart and Profile verification.
 - Approvals are for exact `package@version` and persist in DSH_HOME, so they also apply to a later rollback. Lifecycle scripts in the DSH release's own tree are reported, not blocking, because that policy is fixed at `--ignore-scripts` and identical for every version.
 - A pointer rollback restores only the selected executable. If data migration occurred, restore the matching DSH_HOME backup and any coupled workspace state. `verify` compares Profile manifests, lockfiles and pnpm-store package versions against the pre-switch fingerprint and names the required action.
 - A DSH_HOME backup excludes `runtime` and `pnpm` because both are reinstallable; it records the selection and Runtime image in a manifest instead, and refuses a restore whose checksum, ownership or DSH version does not match.

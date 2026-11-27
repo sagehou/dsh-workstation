@@ -10,9 +10,11 @@ const port = Number(process.env.DSH_BIND_PORT ?? 3080)
 const args = ['web', '--no-open']
 const tls = process.env.WORKSTATION_INTERNAL_TLS === '1'
 
+class StartupError extends Error {}
+
 function listener() {
   if (!isIPv4(bind ?? '') || !Number.isInteger(port) || port < 1024 || port > 65535) {
-    throw Error('set DSH_BIND_IP to the concrete container IPv4 address and use a valid DSH_BIND_PORT')
+    throw new StartupError('set DSH_BIND_IP to the concrete container IPv4 address and use a valid DSH_BIND_PORT')
   }
   return new URL((tls ? 'https://' : 'http://') + bind + ':' + port + '/')
 }
@@ -24,12 +26,16 @@ async function readyPage(launch, target) {
   authURL.port = root.port
   authURL.protocol = root.protocol
   const request = { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { host: launch.host } }
-  const exchange = await fetch(authURL, request)
+  const exchange = await fetch(authURL, request).catch(() => {
+    throw new StartupError('could not reach the Web listener for the token exchange')
+  })
   const cookie = exchange.headers.get('set-cookie')?.split(';', 1)[0]
   await exchange.body?.cancel()
-  if (!cookie || exchange.status < 300 || exchange.status >= 400) throw Error('DSH did not exchange the startup token')
-  const page = await fetch(root, { ...request, signal: AbortSignal.timeout(8000), headers: { ...request.headers, cookie } })
-  if (page.status !== 200 || !(await page.text()).includes('__DSH_BOOT__')) throw Error('authenticated Web page did not boot')
+  if (!cookie || exchange.status < 300 || exchange.status >= 400) throw new StartupError(`token exchange refused (HTTP ${exchange.status})`)
+  const page = await fetch(root, { ...request, signal: AbortSignal.timeout(8000), headers: { ...request.headers, cookie } }).catch(() => {
+    throw new StartupError('could not read the authenticated Web page')
+  })
+  if (page.status !== 200 || !(await page.text()).includes('__DSH_BOOT__')) throw new StartupError(`authenticated Web page did not boot (HTTP ${page.status})`)
 }
 
 async function run() {
@@ -37,17 +43,17 @@ async function run() {
     await access(launchFile)
     const response = await fetch(listener(), { redirect: 'manual', signal: AbortSignal.timeout(4000) })
     await response.body?.cancel()
-    if (response.status !== 401) throw Error('Web listener did not return the expected authentication challenge')
+    if (response.status !== 401) throw new StartupError('Web listener did not return the expected authentication challenge')
     return
   }
-  if (!bin || !['probe', 'serve'].includes(mode)) throw Error('invalid Web launcher mode')
+  if (!bin || !['probe', 'serve'].includes(mode)) throw new StartupError('invalid Web launcher mode')
   let publicRoot, target
   if (mode === 'serve') {
     target = listener()
     publicRoot = new URL(process.env.DSH_PUBLIC_ORIGIN)
     if (!['http:', 'https:'].includes(publicRoot.protocol) || publicRoot.pathname !== '/' ||
       publicRoot.username || publicRoot.password || publicRoot.search || publicRoot.hash) {
-      throw Error('DSH_PUBLIC_ORIGIN must be an HTTP(S) origin')
+      throw new StartupError('DSH_PUBLIC_ORIGIN must be an HTTP(S) origin')
     }
     await rm(launchFile, { force: true })
     if (tls) args.push('--tls-cert', '/run/secrets/runtime_cert', '--tls-key', '/run/secrets/runtime_key')
@@ -61,7 +67,7 @@ async function run() {
   const closed = new Promise(resolve => { finish = resolve })
   const announcement = new Promise(resolve => { announce = resolve })
   const timeout = new Promise(resolve => { expired = resolve })
-  child.once('error', () => finish(1))
+  child.once('error', () => finish('could not start the DSH executable'))
   child.once('close', code => finish(code ?? 1))
   const stop = () => {
     stopping = true
@@ -86,15 +92,18 @@ async function run() {
   })
   timer = setTimeout(() => expired(null), 90_000)
   try {
-    const text = await Promise.race([announcement, timeout, closed.then(() => null)])
-    if (!text) throw Error('DSH did not announce Web readiness')
+    const text = await Promise.race([announcement, timeout, closed.then(code => {
+      if (typeof code === 'string') throw new StartupError(code)
+      throw new StartupError(`DSH exited before Web readiness (exit ${code})`)
+    })])
+    if (!text) throw new StartupError('timed out waiting for the DSH Web listener')
     const url = new URL(text)
     if ((publicRoot && url.origin !== publicRoot.origin) ||
       (!publicRoot && (url.protocol !== 'http:' || url.hostname !== '127.0.0.1'))) {
-      throw Error('DSH announced an unexpected Web address')
+      throw new StartupError('DSH announced an unexpected Web address')
     }
     await readyPage(url, target)
-    if (mode === 'probe' && incompatible) throw Error('DSH skipped an incompatible or inactive Profile entry')
+    if (mode === 'probe' && incompatible) throw new StartupError('DSH skipped an incompatible or inactive Profile entry')
     console.log('Authenticated DSH Web boot ready')
     if (mode === 'serve') {
       await writeFile(launchFile + '.new', text + '\n', { mode: 0o600 })
@@ -118,7 +127,9 @@ async function run() {
 
 try {
   await run()
-} catch {
-  console.error('DSH Web readiness or startup failed; check the selected version, Profile and listener configuration')
+} catch (error) {
+  // The launch URL and DSH's own startup output may contain credentials.
+  const reason = error instanceof StartupError ? error.message : 'check the selected version, Profile and listener configuration'
+  console.error('DSH Web startup: ' + reason)
   process.exitCode = 1
 }

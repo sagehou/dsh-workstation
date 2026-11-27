@@ -19,6 +19,7 @@
 //     requests are redirected to the login page before reaching that branch, so
 //     a 303 would prove nothing about the core refusal.
 import { code, password } from './otp.mjs'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { request as httpsRequest } from 'node:https'
 
@@ -44,15 +45,19 @@ function store(headers) {
 }
 const cookies = () => [...jar].map(([n, v]) => `${n}=${v}`).join('; ')
 
-async function request(path, { method = 'GET', form, headers = {} } = {}) {
+async function request(path, { method = 'GET', form, json, headers = {} } = {}) {
   const url = new URL(path, root)
   const allHeaders = { cookie: cookies(), ...headers }
   let payload
   if (form) {
     payload = new URLSearchParams(form).toString()
     allHeaders['content-type'] = 'application/x-www-form-urlencoded'
-    allHeaders['content-length'] = Buffer.byteLength(payload)
   }
+  if (json) {
+    payload = JSON.stringify(json)
+    allHeaders['content-type'] = 'application/json'
+  }
+  if (payload) allHeaders['content-length'] = Buffer.byteLength(payload)
   // node:https rather than fetch: the CI edge presents a certificate from a CA
   // that exists only for the run, and fetch has no per-request CA option.
   // Spreading a URL object copies internal symbols, not its fields, so the
@@ -137,6 +142,26 @@ const exchange = await request(entry.location)
 if (exchange.status !== 200) throw Error(`the DSH launch exchange answered ${exchange.status}, expected 200`)
 if (!exchange.text.includes('__DSH_BOOT__')) throw Error('the DSH launch exchange carried no boot marker')
 console.log('authenticated session reaches DSH; launch exchange carried the boot marker')
+
+// The boot document can load even when the first-use Documents lookup fails.
+async function initializeWorkspace() {
+  const endpoint = 'workspace/initializeDefault'
+  const response = await request('/api/' + endpoint, {
+    method: 'POST',
+    headers: { origin: root, 'sec-fetch-site': 'same-origin' },
+    json: { type: 'client-request', rpcId: randomUUID(), method: endpoint, payload: { args: {} } },
+  })
+  if (response.status !== 200) throw Error(`default workspace transport answered ${response.status}`)
+  const { result } = JSON.parse(response.text)
+  const workspace = result?.value?.workspace
+  if (!result?.ok || workspace?.path !== '/workspace/deepseek-harness/default-workspace' || !workspace.workspaceId) {
+    throw Error(`default workspace initialization failed (${result?.error?.code ?? 'unexpected workspace'})`)
+  }
+  return workspace.workspaceId
+}
+const workspaceId = await initializeWorkspace()
+if (await initializeWorkspace() !== workspaceId) throw Error('repeated initialization changed the workspace registration')
+console.log('first-use workspace created under the workspace volume and reused')
 
 // --- 5. the browser data socket is refused by the core path ----------------
 // Not /browser/ as a plain request: that path is routed by Traefik straight to
