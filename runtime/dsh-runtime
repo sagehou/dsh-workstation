@@ -160,6 +160,8 @@ probe() (
   # of an already-selected version.
   tar -cf - --exclude='./runtime' -C "$DSH_HOME" . | tar -xf - -C "$scratch" ||
     die 'could not copy Profile state for readiness'
+  node "$state" probe-links --dsh-home "$DSH_HOME" --copy "$scratch" ||
+    die 'could not prepare Profile links for readiness'
   agents_home=${DSH_AGENTS_HOME:-}
   if [[ $agents_home == "$DSH_HOME/"* ]]; then
     agents_home="$scratch/${agents_home#"$DSH_HOME/"}"

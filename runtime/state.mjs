@@ -14,8 +14,8 @@
 
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 const PROFILE_FILES = ['package.json', 'pnpm-lock.yaml', 'cordis.patch.yml', 'pnpm-workspace.yaml']
 
@@ -32,6 +32,32 @@ function readJSON(path) {
     return JSON.parse(readFileSync(path, 'utf8'))
   } catch {
     return null
+  }
+}
+
+// pnpm records linked Profile packages relative to their original location.
+// A probe copies DSH_HOME deeper into the volume, which changes external links.
+function rebaseProbeLinks(source, copy) {
+  source = resolve(source)
+  copy = resolve(copy)
+  const list = dir => lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()
+    ? readdirSync(dir, { withFileTypes: true }) : []
+  const profiles = join(copy, 'profiles')
+  for (const profile of list(profiles).filter(entry => entry.isDirectory())) {
+    const modules = join(profiles, profile.name, 'node_modules')
+    const scopes = list(modules).filter(entry => entry.isDirectory() && entry.name.startsWith('@'))
+    for (const dir of [modules, ...scopes.map(scope => join(modules, scope.name))]) {
+      for (const entry of list(dir).filter(item => item.isSymbolicLink())) {
+        const link = join(dir, entry.name)
+        const stored = readlinkSync(link)
+        const original = resolve(source, relative(copy, dir), stored)
+        const path = relative(source, original)
+        const target = path === '..' || path.startsWith('..' + sep) ? original : resolve(copy, path)
+        if (resolve(dir, stored) === target) continue
+        unlinkSync(link)
+        symlinkSync(target, link)
+      }
+    }
   }
 }
 
@@ -236,6 +262,8 @@ if (invokedDirectly) {
   try {
     if (command === 'fingerprint') {
       console.log(JSON.stringify(fingerprint(home), null, 2))
+    } else if (command === 'probe-links') {
+      rebaseProbeLinks(home, options.copy)
     } else if (command === 'diff') {
       const before = JSON.parse(readFileSync(options.before, 'utf8'))
       const after = JSON.parse(readFileSync(options.after, 'utf8'))
@@ -295,7 +323,7 @@ if (invokedDirectly) {
       rmSync(options['json-file'], { force: true })
       console.log(JSON.stringify({ recorded: entry.phase }))
     } else {
-      console.error('usage: state.mjs {fingerprint|diff|manifest|verify|record}')
+      console.error('usage: state.mjs {fingerprint|probe-links|diff|manifest|verify|record}')
       process.exitCode = 2
     }
   } catch (error) {
