@@ -2,7 +2,7 @@
 
 English · [简体中文](public-compose.zh-CN.md)
 
-The owner approved a single-administrator public Compose release. The authenticated standalone browser/control page is the first-release UI; native Sidebar is deferred. Agent browser control remains gated until held-input release and exclusive handoff pass #4, and broad untrusted-site browsing remains gated until the egress policy passes #11. [ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.md) · [M0](M0-evidence.md) · [Provider results](M0-provider-evidence.md) · [M1 Runtime results](M1.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
+The owner approved a single-administrator public Compose release. The authenticated standalone browser/control page is the first-release UI; native Sidebar is deferred. The Agent owns the browser by default and may browse any HTTPS origin, per [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md); no egress or SSRF policy is required for this single-operator deployment. [ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.md) · [M0](M0-evidence.md) · [Provider results](M0-provider-evidence.md) · [M1 Runtime results](M1.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
 
 ## Compose networks
 

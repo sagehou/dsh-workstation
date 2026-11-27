@@ -73,7 +73,7 @@ Build a Docker Compose workstation around the **official DeepSeek Harness (DSH) 
 - First release has exactly one local administrator. Multiple Passkeys for that administrator are allowed. Do not add multi-account, invitations, roles, or shared-user mode.
 - Official DSH remains the product core. Do not implement a replacement Agent runtime, chat/editor, package manager, or public plugin marketplace.
 - The authenticated standalone browser/control page is the first-release browser UI. Native DSH Sidebar is deferred and must not block deployment.
-- Keep Agent browser control disabled until exclusive input handoff passes its acceptance criteria. Keep broad browsing of untrusted sites disabled until browser egress controls are independently enforced and tested. `BROWSER_TOOL_ORIGINS` is not an egress firewall or complete SSRF defense.
+- The Agent is the default owner of the browser and may browse any HTTPS origin. `BROWSER_TOOL_ORIGINS` is an optional application-layer origin allowlist; unset means every HTTPS origin is allowed. Per [ADR-0006](docs/adr/0006-agent-first-browser-and-default-open-origins.md) this single-operator deployment does not require an SSRF or egress policy.
 - Initial deployment support is Linux amd64. Do not claim ARM64 or multi-user isolation.
 - Before target-host deployment, complete the target Traefik compatibility matrix and Docker subnet overlap/configuration checks.
 - Runtime pointer rollback is not data rollback. Back up before persistent Profile/plugin migrations and prove matched data restore.

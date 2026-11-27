@@ -18,12 +18,11 @@ if (publicMode && !/^[0-9a-f]{64}$/.test(enroll)) throw Error('Invalid workstati
 // The allowlist is optional. `BROWSER_TOOL_ORIGINS` names origins the Agent may
 // drive; leaving it empty means every HTTPS origin is allowed.
 //
-// Default-open is a deliberate product decision that OVERRIDES the egress rule in
-// AGENTS.md ("Keep broad browsing of untrusted sites disabled until browser egress
-// controls are independently enforced"). It was taken by the product owner on
-// 2026-11-26 and is recorded in ADR-0006 and issue #30. The rule it replaces
-// remains the right default for any deployment that has not made the same
-// decision, which is why the allowlist still works when it is set.
+// Default-open is a deliberate product decision, recorded in ADR-0006 and issue
+// #30: the Agent is the default owner of the browser and may reach any HTTPS
+// origin. This single-operator deployment does not require an SSRF or egress
+// policy. The allowlist still works when it is set, so a deployment that wants a
+// narrower surface can restrict it without a code change.
 //
 // What this does NOT change: `allowed()` still rejects a non-HTTPS scheme and any
 // URL carrying credentials. Neither of those is a browsing case, and both were

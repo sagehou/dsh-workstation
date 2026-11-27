@@ -104,8 +104,7 @@ Runtime 镜像将 Linux 的 Documents 指向 `/workspace`。DSH 首次使用时�
 - Agent 控制时，在 Selkies 输入边界拦截人工键盘和鼠标。接管必须排空或安全取消当前操作、释放已按住输入并确认，然后才能切换所有者。
 - 过期、无法确认渲染器是否结束、Provider 重启或浏览器进程退出时必须失败关闭。实际输入路径通过测试后才能宣称独占。
 - 通过 CDP 连接 Chromium 默认上下文，共享标签页和 Cookie。禁止工具关闭浏览器或上下文。
-- `BROWSER_TOOL_ORIGINS` 是 Provider 应用层来源白名单，不是网络出口防火墙或完整 SSRF 防护。Chromium 仍会执行页面脚本和跟随重定向。
-- 在开放 Agent 广泛访问不可信网站前，增加独立浏览器出口控制，在 DNS 解析后及重定向时阻止回环、链路本地、私有网段、云元数据和其他禁止目标。CDP 与 Provider 管理端保持私有。
+- `BROWSER_TOOL_ORIGINS` 是 Provider 应用层来源白名单，Agent 可访问任意 HTTPS 源。该单操作员部署不需要 SSRF 或出口策略（ADR-0006）。CDP 与 Provider 管理端保持私有。
 
 ## Runtime 升级与恢复
 

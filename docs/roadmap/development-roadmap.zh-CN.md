@@ -11,7 +11,7 @@
 - 首版使用已认证的独立浏览器/控制页面。原生 Sidebar 延后，不得阻塞部署。
 - 不 Fork DSH 核心、不自研 Agent Runtime、不替代官方 Plugin Manager、不托管公共插件市场、不提供多人共用模式、不引入 Kubernetes。
 - 首版部署只支持 Linux amd64。
-- `BROWSER_TOOL_ORIGINS` 是应用层来源白名单，不是网络出口隔离。针对不可信目标的独立出口策略完成前，Agent 浏览必须保持关闭或严格受限。
+- `BROWSER_TOOL_ORIGINS` 是可选的应用层来源白名单，留空即允许所有 HTTPS 源，见 [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md)。单操作员部署不需要出口策略。
 
 ## 有序任务
 
@@ -23,11 +23,10 @@
 | 03 | [#9](https://github.com/sagehou/dsh-workstation/issues/9) | Docker 子网可配置和冲突预检 | 目标主机部署前完成。固定 IP、健康检查和证书 SAN 从同一配置生成。 |
 | 04 | [#4](https://github.com/sagehou/dsh-workstation/issues/4) | 浏览器输入独占和安全交接 | 开放 Agent 控制共享浏览器前完成。 |
 | 05 | [#10](https://github.com/sagehou/dsh-workstation/issues/10) | GHCR 镜像发布和不可变部署引用 | 宣布具备可重复的正式镜像分发前完成。 |
-| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8、#9 和 #10。#4 通过前关闭 Agent 浏览器控制；#11 通过前关闭不可信网站浏览。 |
-| 07 | [#11](https://github.com/sagehou/dsh-workstation/issues/11) | 浏览器出口策略和 SSRF 边界 | 开放 Agent 广泛访问不可信网站前完成。 |
+| 06 | [#6](https://github.com/sagehou/dsh-workstation/issues/6) | 目标主机部署、HTTPS、备份恢复和故障演练 | 依赖 #3、#8、#9 和 #10。按 ADR-0006，Agent 浏览器控制默认开启。 |
 | 08 | [#23](https://github.com/sagehou/dsh-workstation/issues/23) | `main` 分支的 CI 覆盖 | 在相信「合并后的树就是被测试过的树」之前完成；#6 从 main 部署。 |
 | 09 | [#26](https://github.com/sagehou/dsh-workstation/issues/26) | 无共享浏览器的精简部署 | 两服务配置与 HTTPS 登录已验证。 |
-| 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent 优先租约、浏览器出口加固及录制 | 自动取得租约已通过源码 Compose 验证。出口和录制仍待验收。 |
+| 11–13 | [#29](https://github.com/sagehou/dsh-workstation/issues/29) · [#30](https://github.com/sagehou/dsh-workstation/issues/30) · [#31](https://github.com/sagehou/dsh-workstation/issues/31) | Agent 优先租约及录制 | 自动取得租约已通过源码 Compose 验证。录制仍待验收。 |
 | 14–16 | [#32](https://github.com/sagehou/dsh-workstation/issues/32) · [#33](https://github.com/sagehou/dsh-workstation/issues/33) · [#35](https://github.com/sagehou/dsh-workstation/issues/35) | 运维控制台、Gateway 改名及界面 | 控制台和认证已通过 CI。Gateway 镜像已发布，目标主机迁移由 #6 跟踪。 |
 | 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | 完整部署收敛为三个容器 | Runtime、Gateway 和 Browser。验证 CDP 隔离、浏览器重建及已有登录和租约流程。 |
 | 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | 共用一张工作台网络 | 直连边界、证书保留及 Agent MCP 启用时的浏览器交接均已通过。[Compose 验证](public-compose.zh-CN.md#共享网络验证) |
@@ -54,14 +53,7 @@
 - 过期、并发、断开、Provider 重启和 Chromium 重启均失败关闭。
 - 此门槛通过前，生产环境不得开放 Agent 浏览器控制。
 
-### Gate C — 不可信网站浏览
-
-- 在模型提示词之外强制执行浏览器网络出口控制。
-- 解析并校验目标地址，阻止禁止 IP 范围，并重新校验重定向。
-- 验证 DNS rebinding、IPv4/IPv6、回环、链路本地、私有网段和云元数据目标。
-- 单靠来源白名单不满足此门槛。
-
-### Gate D — 原生 Sidebar（上线后）
+### Gate C — 原生 Sidebar（上线后）
 
 - 只使用 DSH 公开 API，不 Fork 核心或依赖私有 DOM。
 - 验证停靠、浮动、调整大小、最大化/还原、隐藏、重连和 iframe 生命周期。

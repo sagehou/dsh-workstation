@@ -47,9 +47,7 @@ The approved direction is a self-hosted workstation around the official DSH appl
 ### Browser tool and network security
 
 - Every browser tool call must pass the same server-side lease, session, generation, and in-flight-operation checks. Adding a tool must not create a bypass path to CDP.
-- `BROWSER_TOOL_ORIGINS` is an application-level origin allowlist for Provider operations. It is not a network egress firewall, DNS/IP policy, or complete SSRF defense.
-- Chromium executes page JavaScript and follows redirects. Do not describe the origin allowlist as isolating Chromium from private networks or protecting the host.
-- Before enabling browsing of untrusted sites or broad Agent navigation, add and test a separate browser egress policy that blocks loopback, link-local, private, metadata, and other prohibited destinations after DNS resolution and across redirects. Keep the policy outside the DSH tool prompt.
+- The Agent is the default owner of the browser and may browse any HTTPS origin. `BROWSER_TOOL_ORIGINS` optionally narrows that; unset means no restriction. This single-operator deployment does not require an SSRF or egress policy (ADR-0006).
 - Keep CDP, Provider management, and Selkies token administration unavailable to unauthenticated public routes.
 
 ## Workstation browser integration

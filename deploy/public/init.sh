@@ -158,6 +158,12 @@ fi
 
 if $fresh; then
   {
+    # BROWSER_TOOL_ORIGINS stays empty: empty means every HTTPS origin is
+    # allowed. A configured list restricts the Agent to exactly those origins,
+    # so a template value here would narrow browsing for every new deployment.
+    # For a reachability check use an origin with a valid public certificate,
+    # such as https://example.com, rather than the deployment's own
+    # self-signed domain, which Chromium rejects.
     printf 'WORKSTATION_STATE=%s\nWORKSTATION_DOMAIN=%s\nBROWSER_TOOL_ORIGINS=\n' "$state" "$domain"
     printf '%s\n' "$derived"
   } > "$staging/env"
