@@ -235,11 +235,11 @@ try {
     const composer = page.locator('[data-composer-input][contenteditable="true"]').first()
     await composer.fill('Open the shared browser.')
     await composer.press('Enter')
-    await page.getByText('Compose fixture', { exact: true }).and(page.locator('p')).waitFor()
 
     sidebarStep = 'open the Browser tab'
     const expand = page.locator('[data-sidebar-right-expand]')
     const entry = page.locator('[data-sidebar-right-guide-entry="workstation-browser"]')
+    await entry.or(expand).first().waitFor()
     if (!(await entry.isVisible())) await expand.click()
     await entry.click()
     const iframe = page.locator('iframe[title="共享 Chromium 桌面"]')

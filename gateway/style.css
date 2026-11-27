@@ -211,9 +211,7 @@ time { font-variant-numeric: tabular-nums; }
   padding-block: .65rem 1.1rem;
   border-block-start: 1px solid var(--field-stroke);
 }
-.upgrade-line { position: relative; min-block-size: 2.2rem; }
-.upgrade-line > .hint { position: static; }
-.upgrade-line > .hint > .hint-bubble { inset-inline: 0 auto; }
+.upgrade-line { min-block-size: 2.2rem; }
 .upgrade-line p { font-weight: 680; }
 .upgrade-line code, .upgrade-summary > p { font-size: .88rem; }
 .upgrade-summary progress { inline-size: min(100%, 24rem); block-size: .85rem; }
@@ -430,7 +428,11 @@ input:user-invalid, select:user-invalid { border-color: var(--error-ink); }
 .upgrade-dialog > h2 { margin-block-end: 1.1rem; }
 dialog:modal { overscroll-behavior: contain; }
 dialog::backdrop { background: #08160e70; overflow: hidden; overscroll-behavior: contain; }
-.upgrade-dialog .task-actions { justify-self: end; }
+[data-upgrade-form] .task-actions { position: relative; inline-size: 100%; }
+[data-upgrade-form] .hint { position: static; }
+[data-upgrade-form] .hint-bubble { inset-block: auto calc(100% + .28rem); inset-inline: 0 auto; max-inline-size: 100%; }
+.upgrade-dialog .task-actions { justify-content: flex-end; }
+.upgrade-dialog [data-upgrade-form] .hint-bubble { inset-inline: auto 0; }
 .auth-page {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -458,7 +460,9 @@ dialog::backdrop { background: #08160e70; overflow: hidden; overscroll-behavior:
   .browser-metrics { margin-inline: .9rem; }
   .hint-bubble { inset-inline-end: 0; inset-inline-start: auto; }
   .runtime-actions > .hint { position: static; }
-  .runtime-content { position: relative; }
+  .runtime-content, .upgrade-line { position: relative; }
+  .upgrade-line > .hint { position: static; }
+  .upgrade-line > .hint > .hint-bubble { inset-inline: 0 auto; }
   .runtime-actions > .hint > .hint-bubble { inset-inline: 1.15rem auto; }
   .auth-main { place-items: start center; padding-block-start: 2rem; }
 }
