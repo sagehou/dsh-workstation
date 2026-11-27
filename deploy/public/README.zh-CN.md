@@ -141,7 +141,7 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 
 ## 使用浏览器
 
-完整版提供独立浏览器页面。Agent MCP 默认关闭。生产环境在独占交接通过验收后开放 Agent 控制，在独立出口策略通过验收后开放不可信网站浏览。[交接 #4](https://github.com/sagehou/dsh-workstation/issues/4) · [出口 #11](https://github.com/sagehou/dsh-workstation/issues/11)
+完整版提供独立浏览器页面。Agent MCP 默认关闭，设置 `WORKSTATION_BROWSER_MCP=1` 开启。开启后 Agent 默认拥有浏览器，可访问任意 HTTPS 源，这是 [ADR-0006](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md) 中已接受的基线。Agent 可访问 Chromium 容器能访问的一切，这在单操作员部署中是被接受的。
 
 
 | 要做什么 | 在哪里操作 |
@@ -149,9 +149,9 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 | 打开共享 Chromium | 从 `/_auth/browser` 打开同源的 `/browser/`，沿用工作台登录。 |
 | 让 Agent 使用标签页 | Agent 可以通过 `lease_status` 取得空闲租约，也可以在 `/mgmt/browser` 手动授予最长 120 秒的租约。`browser-gate` 确认已按住的输入释放后，才会移交控制权。 |
 | 接管浏览器 | 选择 **接管浏览器**。Provider 停止接收新调用，等待当前操作结束后交还控制。 |
-| 指定 Agent 可用的网站 | 在 `.env.public` 中设置 `BROWSER_TOOL_ORIGINS`，填逗号分隔的 HTTPS 源，例如 `https://www.example.org,https://docs.example.com`，再重建 Gateway。 |
+| 指定 Agent 可用的网站 | `BROWSER_TOOL_ORIGINS` 是可选项。在 `.env.public` 中留空即允许所有 HTTPS 源；填入逗号分隔的 HTTPS 源（例如 `https://www.example.org,https://docs.example.com`）则只允许这些源。改动后需重建 Gateway。 |
 
-MCP 启用时，Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。来源清单约束工具调用和返回的页面文本。浏览器网络出口由独立策略控制。[候选版租约行为](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
+MCP 启用时，Agent 先用 `mcp__browser__lease_status` 获取代次，再调用 `navigate`、`read` 或 `click`。配置了来源清单时它约束工具调用和返回的页面文本；留空则不约束。Chromium 仍会执行正常的证书校验，自签名证书的源会加载失败——要端到端确认工具链路，请使用 `https://example.com` 这类公信证书源。[候选版租约行为](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
 
 连接或标签页丢失时，新建 DSH 会话并重新授权。要继续原来的对话，重启 Runtime、恢复对话，再给新连接授权。新标签页使用同一份 Chromium 配置。
 

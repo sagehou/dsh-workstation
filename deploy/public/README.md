@@ -149,7 +149,7 @@ install -m 0644 "${WORKSTATION_STATE:-.workstation}/edge/routes.yml" "$traefik_d
 
 ## Use the browser
 
-Full deployment serves the standalone browser/control page. Agent MCP is disabled by default. Enable Agent control in production after exclusive handoff passes acceptance, and enable browsing of untrusted sites after independent egress policy passes. [Handoff #4](https://github.com/sagehou/dsh-workstation/issues/4) · [Egress #11](https://github.com/sagehou/dsh-workstation/issues/11)
+Full deployment serves the standalone browser/control page. Agent MCP is disabled by default; set `WORKSTATION_BROWSER_MCP=1` to enable it. The Agent then owns the browser by default and may reach any HTTPS origin, which is the accepted baseline in [ADR-0006](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md). The Agent can reach anything the Chromium container can reach; that is accepted for a single-operator deployment.
 
 
 | To | Open or choose |
@@ -157,9 +157,9 @@ Full deployment serves the standalone browser/control page. Agent MCP is disable
 | Open the shared Chromium desktop | `/_auth/browser` opens same-origin `/browser/` through the workstation login. |
 | Let an Agent use a tab | An Agent can acquire an available lease through `lease_status`. You can also grant a lease in `/mgmt/browser` for up to 120 seconds. Before granting control, `browser-gate` confirms it released held input. |
 | Take over | Choose **接管浏览器**. The Provider stops new calls, lets the current call finish, and returns control. |
-| Allow specific websites | Set `BROWSER_TOOL_ORIGINS` in `.env.public` to comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com`. Recreate Gateway. |
+| Allow specific websites | `BROWSER_TOOL_ORIGINS` is optional. Leave it empty in `.env.public` to allow every HTTPS origin, or set comma-separated exact HTTPS origins such as `https://www.example.org,https://docs.example.com` to restrict the Agent to exactly those. Recreate Gateway after changing it. |
 
-When MCP is enabled, the Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. The allowlist constrains tool calls and returned page text. Independent network policy handles browser egress. [Candidate lease behavior](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
+When MCP is enabled, the Agent gets its generation with `mcp__browser__lease_status` before calling `navigate`, `read`, or `click`. A configured allowlist constrains tool calls and returned page text; leaving it empty does not. Chromium still applies normal certificate checks, so an origin with a self-signed certificate fails to load — use a publicly trusted origin such as `https://example.com` to confirm the tool path end to end. [Candidate lease behavior](../../docs/adr/0006-agent-first-browser-and-default-open-origins.md)
 
 For a lost connection or tab, create a new DSH session and grant it a lease. To keep the conversation, restart Runtime, resume the conversation, and grant a new tab in the same Chromium profile.
 

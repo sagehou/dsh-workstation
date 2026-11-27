@@ -2,7 +2,7 @@
 
 [English](public-compose.md) · 简体中文
 
-项目所有者批准首版单管理员公网 Compose。首版正式浏览器入口是已认证的独立浏览器/控制页面；原生 Sidebar 延后。#4 的已按住输入释放和独占交接通过前，不开放 Agent 浏览器控制；#11 的出口策略通过前，不开放 Agent 广泛访问不可信网站。[ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.zh-CN.md) · [M0](M0-evidence.zh-CN.md) · [Provider 验证](M0-provider-evidence.zh-CN.md) · [M1 Runtime 结果](M1.zh-CN.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
+项目所有者批准首版单管理员公网 Compose。首版正式浏览器入口是已认证的独立浏览器/控制页面；原生 Sidebar 延后。按 [ADR-0006](../adr/0006-agent-first-browser-and-default-open-origins.md)，Agent 默认拥有浏览器，可访问任意 HTTPS 源；该单操作员部署不需要出口或 SSRF 策略。[ADR-0004](../adr/0004-single-user-release-and-deferred-sidebar.zh-CN.md) · [M0](M0-evidence.zh-CN.md) · [Provider 验证](M0-provider-evidence.zh-CN.md) · [M1 Runtime 结果](M1.zh-CN.md) · [#1](https://github.com/sagehou/dsh-workstation/issues/1)
 
 ## Compose 网络
 
