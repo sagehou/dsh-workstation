@@ -37,7 +37,7 @@ for (const origin of origins) {
   if (!origin.startsWith('https://') || new URL(origin).origin !== origin) throw Error('Expected bare HTTPS browser tool origins')
 }
 const cdp = publicMode ? 'http://127.0.0.1:9223' : 'http://172.30.231.2:9223'
-const selkies = publicMode ? 'http://dsh-workstation-chromium:3000' : 'http://172.30.231.2:3000'
+const selkies = publicMode ? 'http://browser:3000' : 'http://172.30.231.2:3000'
 // The gate's address and control credential come from the environment so a
 // custom subnet moves them too. The prototype path has no gate; the input
 // helpers below keep the non-public behaviour unchanged.
@@ -622,7 +622,7 @@ async function mcp(req, res) {
   }
   const abort = new AbortController()
   res.once('close', () => abort.abort())
-  const request = new Request('http://provider:8080/mcp', {
+  const request = new Request('http://gateway:8080/mcp', {
     method: req.method, headers: req.headers, signal: abort.signal,
   })
   const reply = await peer.transport.handleRequest(request, { parsedBody: body })

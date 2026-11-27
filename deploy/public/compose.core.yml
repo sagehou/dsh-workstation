@@ -11,10 +11,7 @@ services:
   browser:
     profiles: ["browser"]
 
-  # Without this, the Runtime still installs the Workstation browser Bundle into
-  # the Web Profile (runtime/dsh-runtime:191) even though nothing can serve it.
-  # The Bundle pins DSH 0.2.2-rc.1 and would fail an otherwise valid upgrade, so
-  # leaving it off is the difference between "core" and "full minus containers".
+  # Leave the Browser Bundle inactive when the browser workers are disabled.
   runtime:
     environment:
       WORKSTATION_BROWSER_MCP: "0"

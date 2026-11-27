@@ -190,7 +190,7 @@ Open `/mgmt` to check Runtime status and versions, create or verify a DSH_HOME b
 
 When both images include the upgrade progress change, `/mgmt` shows the latest CLI upgrade, phase, and result. Keep Gateway running while you stop Runtime. Use the same Compose files and `--env-file .env.public` as your deployment to run `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <version>`. After the switch, start Runtime and check DSH Web. Stop Runtime again to run `maintenance verify`, then restart it. [Upgrade progress #39](https://github.com/sagehou/dsh-workstation/issues/39)
 
-The installed `dsh-workstation-browser@0.1.0` Bundle pins DSH to `0.2.2-rc.1`. Setting `WORKSTATION_BROWSER_MCP=0` disables automatic installation. For an already installed Bundle, take a backup and use the official Plugin Manager to remove it, or use a Bundle verified with the target DSH version. [Compatibility and recovery](../README.md#upgrade-and-rollback)
+Runtime 0.2.3's installed browser Bundle uses the official MCP client that comes with the selected DSH. Its configuration is checked when the Profile starts, including during the candidate readiness probe. The deployed Bundle links to files in the Runtime image, so replacing the image supplies the new files to existing installations. Setting `WORKSTATION_BROWSER_MCP=0` disables automatic installation and Agent connections. [Compatibility and recovery](../README.md#upgrade-and-rollback) · [Bundle verification #44](https://github.com/sagehou/dsh-workstation/issues/44)
 
 ### Workspace and skills
 
@@ -200,6 +200,7 @@ Before replacing an older Runtime container, export any files in its `/home/node
 
 ### Traefik
 
+- For Runtime 0.2.3 and Gateway 0.1.1, use their matching deployment checkout. Rerun `deploy/public/init.sh --release` with the saved domain, proxy, Traefik container and subnet, then load its generated route file. Use `http://gateway:8080/mcp` in any custom DSH MCP configuration that references the Workstation provider.
 - To retain the attachment across Traefik recreation, declare `dsh-workstation_workstation` as an external network in Traefik's Compose.
 - If Traefik's IP on the proxy network changes, use the teardown in [Existing deployment migration](#migrate-from-the-auth-service), rerun the initializer with the saved settings, and follow step 4 to reconnect Traefik and reload the routes.
 

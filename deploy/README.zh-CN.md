@@ -53,7 +53,7 @@ preview run --rm --no-deps maintenance upgrade 0.2.2-rc.5
 | 检查 | 阻断原因 |
 | --- | --- |
 | 镜像 Node.js 与候选版本 `engines.node` | 拒绝 Node `24.22.3` 的候选版本无法启动。 |
-| 已安装 Profile Bundle 与候选版本 | 声明 `engines.dsh` 的 Bundle 会锁定 DSH 版本。随镜像发布的浏览器 Bundle 声明 `0.2.2-rc.1`，因此只要它处于安装状态，DSH 就无法升级。 |
+| 已安装 Profile Bundle 与候选版本 | 各 Bundle 的 `engines.dsh` 和 DSH peer 范围须接受候选版本。工作台浏览器 Bundle 使用所选 DSH 安装自带的 MCP 客户端。 |
 | 含生命周期脚本的 Profile 依赖 | 安装使用 `--ignore-scripts`，因此这类脚本从未执行。只可按精确的 `package@version` 批准。 |
 | 候选版本在 DSH_HOME 副本上的就绪检查 | 启动和 Profile 激活必须在脱离实际数据的情况下成功。 |
 

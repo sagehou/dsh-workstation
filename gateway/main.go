@@ -199,7 +199,7 @@ func run() error {
 		// The Selkies data socket is reached through the input gate so held
 		// input can be released before authority changes hands (ADR-0005).
 		browserUpstream: gatewayEnv("BROWSER_UPSTREAM", gateLoopback),
-		browserDirect:   gatewayEnv("BROWSER_DIRECT", "http://dsh-workstation-chromium:3000"),
+		browserDirect:   gatewayEnv("BROWSER_DIRECT", "http://browser:3000"),
 		// A core deployment sets this to 0: no Chromium, gate or provider is
 		// running, so /browser/ answers with a clear refusal rather than
 		// proxying to an address nothing listens on.

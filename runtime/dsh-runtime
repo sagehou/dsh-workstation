@@ -160,6 +160,8 @@ probe() (
   # of an already-selected version.
   tar -cf - --exclude='./runtime' -C "$DSH_HOME" . | tar -xf - -C "$scratch" ||
     die 'could not copy Profile state for readiness'
+  node "$state" probe-links --dsh-home "$DSH_HOME" --copy "$scratch" ||
+    die 'could not prepare Profile links for readiness'
   agents_home=${DSH_AGENTS_HOME:-}
   if [[ $agents_home == "$DSH_HOME/"* ]]; then
     agents_home="$scratch/${agents_home#"$DSH_HOME/"}"
@@ -268,7 +270,6 @@ case "${1:-}" in
     if [[ ${WORKSTATION_BROWSER_MCP:-} == 1 ]]; then
       bundle="$DSH_HOME/profiles/web/.workstation-browser-0.1.0"
       if [[ ! -f $bundle ]]; then
-        [[ $active == 0.2.2-rc.1 ]] || die 'browser bundle requires the verified DSH 0.2.2-rc.1'
         if [[ -d $DSH_HOME/profiles/web ]]; then snapshot; fi
         "$(bin "$active")" plugin --profile web add --save-exact --ignore-scripts --ignore-workspace-root-check link:/opt/workstation-browser
         touch "$bundle"

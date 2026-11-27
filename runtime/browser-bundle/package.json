@@ -2,9 +2,8 @@
   "name": "dsh-workstation-browser",
   "version": "0.1.0",
   "type": "module",
-  "engines": { "dsh": "0.2.2-rc.1" },
+  "engines": { "dsh": "*" },
   "exports": "./host.mjs",
-  "peerDependencies": { "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.1" },
-  "devDependencies": { "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.1" },
+  "peerDependencies": { "@deepseek-ai/dsh-mcp-client": "*" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 }

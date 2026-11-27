@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { diff, fingerprint } from '../state.mjs'
@@ -27,6 +27,32 @@ function home() {
 function run(args) {
   return execFileSync(process.execPath, [state, ...args], { encoding: 'utf8' })
 }
+
+test('the readiness copy keeps external Profile links and uses copied internal targets', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-probe-links-'))
+  try {
+    const live = join(dir, 'live')
+    const copy = join(live, 'runtime', '.probe')
+    const external = join(dir, 'image-bundle')
+    const local = join(live, 'local-bundle')
+    const modules = 'profiles/web/node_modules'
+    const relativeLink = relative(join(live, modules), external)
+    mkdirSync(external)
+    mkdirSync(local, { recursive: true })
+    mkdirSync(join(live, modules, '@scope'), { recursive: true })
+    symlinkSync(relativeLink, join(live, modules, 'external'))
+    symlinkSync(local, join(live, modules, '@scope', 'local'))
+    cpSync(join(live, 'profiles'), join(copy, 'profiles'), { recursive: true, verbatimSymlinks: true })
+    cpSync(local, join(copy, 'local-bundle'), { recursive: true })
+    run(['probe-links', '--dsh-home', live, '--copy', copy])
+    assert.equal(realpathSync(join(copy, modules, 'external')), external)
+    assert.equal(realpathSync(join(copy, modules, '@scope', 'local')), join(copy, 'local-bundle'))
+    assert.equal(readlinkSync(join(live, modules, 'external')), relativeLink)
+    assert.equal(readlinkSync(join(live, modules, '@scope', 'local')), local)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 test('a fingerprint captures the selection and Profile dependency set', () => {
   const dir = home()

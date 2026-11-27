@@ -271,7 +271,7 @@ func (g *gateway) backupPage(w http.ResponseWriter, r *http.Request, s session) 
 func (g *gateway) runtimeAction(r *http.Request, action string, args map[string]any) (map[string]any, error) {
 	addr := os.Getenv("WORKSTATION_MAINTENANCE_ADDR")
 	if addr == "" {
-		addr = "dsh-workstation-runtime:8099"
+		addr = "runtime:8099"
 	}
 	secret, err := os.ReadFile(os.Getenv("WORKSTATION_MAINTENANCE_SECRET"))
 	if err != nil {

@@ -15,8 +15,7 @@
 #     added later turns this into a timeout.
 #   - /browser/ must answer 503 from the core path. If GATEWAY_BROWSER_ENABLED stops
 #     being honoured it proxies to nothing and becomes a 502 or a stall.
-#   - The Runtime must not have installed the browser Bundle, which pins DSH
-#     0.2.2-rc.1 and would fail an otherwise valid upgrade.
+#   - Core must leave the browser Bundle uninstalled.
 set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_ENVIRONMENT:-} == github-hosted ]]
 cd -- "$(dirname -- "$0")/../.."
