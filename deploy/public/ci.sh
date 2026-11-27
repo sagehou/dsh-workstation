@@ -170,10 +170,14 @@ browser_ip="$(network_ip "$(compose ps -q browser)" dsh-workstation_workstation)
 gateway_ip="$(network_ip "$(compose ps -q gateway)" "$proxy")"
 compose exec -T runtime node - "$browser_ip" "$gateway_ip" "$WORKSTATION_PROVIDER_IP" <<'NET'
 const assert = require('node:assert/strict')
+const { lookup } = require('node:dns/promises')
 const { request } = require('node:https')
 const [browser, gateway, gatewayPeer] = process.argv.slice(2)
 ;(async () => {
-  const origin = `http://${browser}:3000`
+  assert.equal((await lookup('browser')).address, browser)
+  assert.equal((await lookup('gateway')).address, gatewayPeer)
+  await assert.rejects(lookup('provider'), { code: 'ENOTFOUND' })
+  const origin = 'http://browser:3000'
   const document = await fetch(origin + '/browser/', { signal: AbortSignal.timeout(2000) })
   assert.equal(document.status, 200, 'Selkies HTML is reachable on the shared network')
   await document.body.cancel()
@@ -198,16 +202,16 @@ const [browser, gateway, gatewayPeer] = process.argv.slice(2)
     `http://${browser}:8082/`,
     `http://${browser}:9222/json/version`,
     `http://${browser}:9223/json/version`,
-    'http://provider:9223/json/version',
-    'http://provider:8081/status',
-    'http://provider:8082/health',
+    'http://gateway:9223/json/version',
+    'http://gateway:8081/status',
+    'http://gateway:8082/health',
     'http://gateway:8081/verify',
     `http://${gateway}:8081/verify`,
   ]) {
     await assert.rejects(fetch(url, { signal: AbortSignal.timeout(1200) }), url)
   }
-  assert.equal((await fetch('http://provider:8080/mcp')).status, 401)
-  assert.equal((await fetch('http://provider:8080/mcp', {
+  assert.equal((await fetch('http://gateway:8080/mcp')).status, 401)
+  assert.equal((await fetch('http://gateway:8080/mcp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover' }),
@@ -228,7 +232,7 @@ for port in (8081, 8082, 9223):
     with connection:
         raise SystemExit(f"Browser reached a private Gateway listener on port {port}")
 
-connection = http.client.HTTPConnection("dsh-workstation-runtime", 8099, timeout=2)
+connection = http.client.HTTPConnection("runtime", 8099, timeout=2)
 try:
     connection.request("POST", "/", body="{}")
     response = connection.getresponse()
@@ -403,3 +407,16 @@ gate_release handover
 compose up -d --no-build --wait --wait-timeout 60 gateway
 check browser
 echo 'Input gate verified: authenticated handover, refusal of unauthenticated, stack healthy after'
+
+# Exercise the persisted Browser Bundle after a real DSH version switch once
+# in the source matrix and again from the pinned release images.
+if [[ $ci_image_mode == release || ( $traefik_version == "$(bash deploy/public/traefik-image.sh --default)" && ${WORKSTATION_CI_SUBNETS:-default} == default ) ]]; then
+  compose stop runtime
+  compose run --rm --no-deps -T maintenance upgrade 0.2.2-rc.5
+  compose up -d --no-build --force-recreate --wait --wait-timeout 360 runtime
+  compose exec -T runtime dsh-runtime status | grep -Fx 'Active: 0.2.2-rc.5'
+  check browser
+  compose stop runtime
+  compose run --rm --no-deps -T maintenance verify
+  echo 'The installed Browser Bundle served real MCP tools before and after upgrading DSH from 0.2.2-rc.1 to 0.2.2-rc.5'
+fi

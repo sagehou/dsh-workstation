@@ -5,6 +5,15 @@ import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 export const inject = ['tools']
 
 export function apply(ctx) {
+  // Validate the selected DSH client's config during Profile startup, including offline upgrade probes.
+  const config = McpClient.Config({
+    serverName: 'browser',
+    transport: 'streamable-http',
+    url: 'http://gateway:8080/mcp',
+    failOnStartupError: true,
+    toolCallTimeoutMs: 20_000,
+    reconnect: { enabled: false },
+  })
   if (process.env.WORKSTATION_BROWSER_MCP !== '1') return
   const key = readFileSync('/run/secrets/browser_enroll', 'utf8').trim()
   if (!/^[0-9a-f]{64}$/.test(key)) throw Error('Invalid workstation MCP admission key')
@@ -40,19 +49,8 @@ export function apply(ctx) {
       clients.delete(agent)
       void Promise.resolve().then(() => fiber?.dispose()).catch(() => {})
     }
-    let stage = 'config'
     try {
       const headers = { Authorization: 'Bearer ' + ticket }
-      const config = McpClient.Config({
-        serverName: 'browser',
-        transport: 'streamable-http',
-        url: 'http://provider:8080/mcp',
-        headers,
-        failOnStartupError: true,
-        toolCallTimeoutMs: 20_000,
-        reconnect: { enabled: false },
-      })
-      stage = 'plugin'
       agent.ctx.on('tools/execute', (exec, next) => {
         if (exec.name.startsWith('mcp__browser__') && exec.agent !== agent) {
           throw Error('This browser tool belongs to another session')
@@ -74,7 +72,7 @@ export function apply(ctx) {
       const reason = /40[0134]/.test(detail) ? 'http-denied'
         : /schema/i.test(detail) ? 'schema'
           : /already in use/.test(detail) ? 'duplicate' : 'unknown'
-      report(stage + ' ' + reason)
+      report('plugin ' + reason)
       ctx.logger.warn('Workstation browser connection unavailable for this session')
     } finally {
       signal?.removeEventListener('abort', abort)

@@ -71,8 +71,8 @@ http:
       loadBalancer:
         serversTransport: dsh-workstation-dsh-tls
         servers:
-          - url: https://dsh-workstation-runtime:3080
+          - url: https://runtime:3080
     dsh-workstation-selkies:
       loadBalancer:
         servers:
-          - url: http://dsh-workstation-chromium:3000
+          - url: http://browser:3000

@@ -32,6 +32,7 @@
 | 17 | [#36](https://github.com/sagehou/dsh-workstation/issues/36) | 完整部署收敛为三个容器 | Runtime、Gateway 和 Browser。验证 CDP 隔离、浏览器重建及已有登录和租约流程。 |
 | 18 | [#37](https://github.com/sagehou/dsh-workstation/issues/37) | 共用一张工作台网络 | 直连边界、证书保留及 Agent MCP 启用时的浏览器交接均已通过。[Compose 验证](public-compose.zh-CN.md#共享网络验证) |
 | 19–21 | [#39](https://github.com/sagehou/dsh-workstation/issues/39) · [#40](https://github.com/sagehou/dsh-workstation/issues/40) · [#41](https://github.com/sagehou/dsh-workstation/issues/41) | DSH 升级进度、首次 Web 工作区及持久化 | 在 rc.1 和 rc.5 验证升级，验证空卷 HTTPS 登录和默认工作区初始化，并检查重建与匹配恢复后的 Profile、配置和 Skills。 |
+| 22–24 | [#43](https://github.com/sagehou/dsh-workstation/issues/43) · [#44](https://github.com/sagehou/dsh-workstation/issues/44) · [#45](https://github.com/sagehou/dsh-workstation/issues/45) | 工作台服务端点、浏览器 Bundle 和镜像发布 | 验证 DNS、HTTPS 及保留浏览器 Bundle 的升级，再发布两只镜像并校验固定摘要。 |
 | 90 | [#5](https://github.com/sagehou/dsh-workstation/issues/5) | DSH 原生 Browser Sidebar | 延后增强；独立页面持续可用，不阻塞首版。 |
 
 ## 发布门槛

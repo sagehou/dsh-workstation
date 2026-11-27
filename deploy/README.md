@@ -53,7 +53,7 @@ Before the pointer moves, `upgrade` checks four things and stops on any failure:
 | Check | Why it blocks |
 | --- | --- |
 | Image Node.js against the candidate `engines.node` | A candidate that rejects Node `24.22.3` cannot boot. |
-| Installed Profile bundles against the candidate | A Bundle declaring `engines.dsh` pins the DSH version. The shipped browser Bundle declares `0.2.2-rc.1`, so DSH cannot move while it is installed. |
+| Installed Profile bundles against the candidate | Each Bundle's `engines.dsh` range and DSH peer ranges must accept the candidate. The Workstation browser Bundle uses the MCP client supplied by the selected DSH installation. |
 | Profile dependencies with lifecycle scripts | Installs use `--ignore-scripts`, so such a script never ran. Approve only an exact `package@version`. |
 | Candidate readiness on a copy of DSH_HOME | Startup and Profile activation must succeed away from live state. |
 

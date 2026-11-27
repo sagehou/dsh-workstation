@@ -182,7 +182,7 @@ docker compose --env-file .env.public exec -T gateway node --input-type=module -
 
 当两个镜像均包含升级进度改动时，`/mgmt` 会显示最近一次 CLI 升级、阶段和结果。停止 Runtime 时保持 Gateway 运行。沿用部署时的 Compose 文件和 `--env-file .env.public`，执行 `docker compose --env-file .env.public run --rm --no-deps maintenance upgrade <版本>`。切换后启动 Runtime，确认 DSH Web 可用。再次停服执行 `maintenance verify` 后重启 Runtime。[升级进度 #39](https://github.com/sagehou/dsh-workstation/issues/39)
 
-已安装的 `dsh-workstation-browser@0.1.0` Bundle 将 DSH 锁定为 `0.2.2-rc.1`。`WORKSTATION_BROWSER_MCP=0` 关闭自动安装。若 Bundle 已安装，先备份，再用官方 Plugin Manager 移除，或换用已对目标 DSH 版本验证过的 Bundle。[兼容检查与恢复](../README.zh-CN.md#升级与回滚)
+Runtime 0.2.3 的浏览器 Bundle 使用所选 DSH 自带的官方 MCP 客户端。Profile 启动时会校验客户端配置，候选版本的就绪检查也会执行该校验。部署通过链接引用 Runtime 镜像里的 Bundle 文件，重建容器后既有安装会加载新文件。`WORKSTATION_BROWSER_MCP=0` 关闭自动安装和 Agent 连接。[兼容检查与恢复](../README.zh-CN.md#升级与回滚) · [Bundle 验证 #44](https://github.com/sagehou/dsh-workstation/issues/44)
 
 ### 工作区与 Skills
 
@@ -192,6 +192,7 @@ DSH_HOME 归档包含设置、凭据、会话、Profile 插件及其锁文件、
 
 ### Traefik
 
+- 更新 Runtime 0.2.3 和 Gateway 0.1.1 时，使用对应部署提交。沿用原域名、代理网、Traefik 容器和子网重新运行 `deploy/public/init.sh --release`，加载新生成的路由文件。自定义 DSH MCP 配置如引用工作台 Provider，请使用 `http://gateway:8080/mcp`。
 - 如需在重建 Traefik 时保留连接，在它自己的 Compose 中将 `dsh-workstation_workstation` 声明为外部网络。
 - 若 Traefik 在代理网上的 IP 变化，按[已有部署迁移](#从-auth-迁移到-gateway)的步骤停服并拆除旧网络。沿用已保存的配置重新初始化，再按第 4 步接回 Traefik 并更新路由。
 

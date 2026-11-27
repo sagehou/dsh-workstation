@@ -19,7 +19,7 @@ import { InputGate } from './gate.mjs'
 
 const ENV = process.env
 const listenAddr = ENV.GATE_ADDR ?? '0.0.0.0:8082'
-const upstreamURL = ENV.GATE_UPSTREAM ?? 'ws://dsh-workstation-chromium:3000/browser/api/websockets'
+const upstreamURL = ENV.GATE_UPSTREAM ?? 'ws://browser:3000/browser/api/websockets'
 const wsPath = ENV.GATE_PATH ?? '/browser/api/websockets'
 const controlFile = ENV.GATE_CONTROL_SECRET ?? '/run/secrets/gate-control'
 const barrierTimeout = Number(ENV.GATE_BARRIER_TIMEOUT_MS ?? 2000)

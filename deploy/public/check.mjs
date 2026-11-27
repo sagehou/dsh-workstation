@@ -147,6 +147,8 @@ try {
   }
 
   if (phase === 'browser') {
+    const dsh = await context.request.get(root + '/_auth/dsh')
+    assert.ok(dsh.ok() && (await dsh.text()).includes('__DSH_BOOT__'), 'DSH did not open before the browser checks')
     const desktop = await context.newPage()
     let video = false
     desktop.on('websocket', ws => {

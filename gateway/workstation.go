@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const dshUpstream = "https://dsh-workstation-runtime:3080"
+const dshUpstream = "https://runtime:3080"
 const providerLoopback = "127.0.0.1:8081"
 const gateLoopback = "http://127.0.0.1:8082"
 
