@@ -24,7 +24,7 @@
 | 公网访问 | 一位使用者通过 HTTPS 登录，可用密码加 TOTP 或 Passkey。Go Gateway 提供会话管理和 Traefik ForwardAuth。`/mgmt` 统一提供账户、浏览器控制和 Runtime 运维入口。 |
 | 浏览器 | 人工与 Agent 共享 Chromium。Selkies 位于 `/browser/`；首版正式入口是已认证的独立浏览器/控制页面。 |
 | 延后 | DSH 原生 Sidebar 延后到首版上线后。[#5](https://github.com/sagehou/dsh-workstation/issues/5) 真实栈已验证交接和断线时释放鼠标按键。键盘、租约过期、重启和 Provider 异常退出仍待真实栈验收。[#4](https://github.com/sagehou/dsh-workstation/issues/4) |
-| 镜像 | 已发布的 Auth 完整部署有六个工作台容器。Gateway 的三服务候选版目前从源码构建。[发布状态](docs/release.zh-CN.md#当前部署版本) · [部署验证](docs/roadmap/public-compose.zh-CN.md) |
+| 镜像 | 当前发布使用按摘要固定的 Runtime `0.2.2` 和 Gateway `0.1.0`，完整版再启动固定版本的 LinuxServer Chromium。[发布状态](docs/release.zh-CN.md#当前部署版本) · [部署验证](docs/roadmap/public-compose.zh-CN.md) |
 
 ## 项目文档
 

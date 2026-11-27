@@ -11,7 +11,7 @@
 | 已有代理网 | Gateway 的公开和校验监听器。Gateway 核对 Traefik 的确切来源 IP。 |
 | `workstation` | Runtime、Gateway 和 Browser 共用。Traefik 在这里访问 DSH 和 Selkies HTTP。 |
 
-## 三服务候选版
+## 三服务部署
 
 完整版运行 `browser`、`gateway` 和 `runtime`，精简版运行 `gateway` 和 `runtime`。两种形态都使用一张 `workstation` 网络及外部代理网。Provider 与输入门禁在 Gateway 内运行，LinuxServer 在 Browser 内启动 CDP 中继。中继写入 Unix socket，Gateway 只读挂载。[部署指南](../../deploy/public/README.zh-CN.md#选择部署形态) · [ADR-0007](../adr/0007-three-service-deployment.zh-CN.md)
 

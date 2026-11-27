@@ -11,9 +11,9 @@
 
 ## 当前部署版本
 
-`deploy/public/release-commit` 记录包含已发布摘要的部署提交，目前是 `81feffd`。该版本使用 Runtime 0.2.1、Auth 0.1.1、Provider 0.2.0 和 browser-gate 0.1.0。部署时配套使用该提交的 Compose 与初始化脚本。[发布镜像验证](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
+Runtime `0.2.2` 和 Gateway `0.1.0` 从 `ee18eb8` 构建，支持 Linux amd64。使用 `main` 上 `deploy/public/release-commit` 记录的部署提交，获取配套 Compose 文件与固定的镜像摘要。[镜像清单](../deploy/public/images.env) · [发布作业](https://github.com/sagehou/dsh-workstation/actions/runs/45926159024) · [Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway)
 
-三服务候选版构建 Runtime 0.2.2 和 Gateway 0.1.0，两者仍待发布并记录摘要。[镜像清单](../deploy/public/images.env) · [Gateway 迁移](../deploy/public/README.zh-CN.md#从-auth-迁移到-gateway) · [跟踪 Issue](https://github.com/sagehou/dsh-workstation/issues/36)
+上一版部署提交 `81feffd` 使用 Runtime `0.2.1`、Auth `0.1.1`、Provider `0.2.0` 和 browser-gate `0.1.0`。运行上一版时使用该提交的部署文件。[上一版验收](https://github.com/sagehou/dsh-workstation/actions/runs/45816293100/job/139896902377)
 
 ## 保障链条
 

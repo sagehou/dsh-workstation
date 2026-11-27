@@ -53,7 +53,7 @@ new addresses.
 
 Both shapes reuse the existing Traefik. Including that container brings the totals to 3 and 4. Run `gateway-admin` and `maintenance` on demand with `docker compose run --rm --no-deps`.
 
-Core runs DSH and Gateway with its browser workers stopped. With a valid session, `/_auth/browser` and the browser data WebSocket return 503. Full starts Provider and the input gate inside Gateway. Browser runs Chromium, Selkies and the CDP relay. Keep `browser/cdp-relay` and `browser/selkies-guard.sh` executable and use them from the same checkout as Compose. [Three-service topology](../../docs/roadmap/public-compose.md#three-service-candidate)
+Core runs DSH and Gateway with its browser workers stopped. With a valid session, `/_auth/browser` and the browser data WebSocket return 503. Full starts Provider and the input gate inside Gateway. Browser runs Chromium, Selkies and the CDP relay. Keep `browser/cdp-relay` and `browser/selkies-guard.sh` executable and use them from the same checkout as Compose. [Three-service topology](../../docs/roadmap/public-compose.md#three-service-deployment)
 
 Set `COMPOSE_FILE` from the checkout root and keep it for every Compose command in this deployment. Full uses the base file.
 
@@ -75,16 +75,16 @@ Run these steps in order on the deployment host, in the same shell.
 
 ### 1. Select a deployment commit
 
-For a published install, use the deployment commit recorded in `deploy/public/release-commit`. The current commit is `81feffd`, where the service is `auth` and its one-off administrator command uses `auth-admin`. In your clone, check it out and verify that all four references resolve.
+For a published install, read `deploy/public/release-commit` from `main`, check out that commit, and resolve the two pinned GHCR images.
 
 ```bash
-git switch --detach 81feffdb5607a28062d03f443d6ff47aeb206665 &&
+git fetch origin main &&
+  deployment_ref="$(git show FETCH_HEAD:deploy/public/release-commit)" &&
+  git switch --detach "$deployment_ref" &&
   bash deploy/public/images.sh
 ```
 
-Continue from step 2 in that commit's guide. [Published deployment instructions](https://github.com/sagehou/dsh-workstation/blob/81feffdb5607a28062d03f443d6ff47aeb206665/deploy/public/README.md#2-set-the-domain-and-traefik-values)
-
-The remaining steps here are for Gateway checkouts. From a checkout with published Gateway digests, run `bash deploy/public/images.sh` to verify the Runtime and Gateway references before using `--release`. This Gateway candidate has local build references available through `bash deploy/public/images.sh --local`. [Release status](../../docs/release.md#current-deployment)
+Use the Compose files and initializer from that checkout. For a source build, use your chosen source checkout and resolve local tags with `bash deploy/public/images.sh --local`. [Release status](../../docs/release.md#current-deployment)
 
 ### 2. Set the domain and Traefik values
 

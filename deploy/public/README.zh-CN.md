@@ -48,7 +48,7 @@ WORKSTATION_SUBNET=10.71.241.0/24 \
 
 两个形态都复用已有 Traefik。把 Traefik 容器计入，总数分别为 3 和 4。`gateway-admin` 和 `maintenance` 只在需要时通过 `docker compose run --rm --no-deps` 执行。
 
-精简版只启动 DSH 和 Gateway，Gateway 的浏览器进程关闭。已登录时访问 `/_auth/browser` 或建立浏览器数据 WebSocket 会返回 503。完整版在 Gateway 内运行 Provider 和输入门禁，Browser 内运行 Chromium、Selkies 和 CDP 中继。使用与 Compose 文件同一提交的 `browser/cdp-relay` 和 `browser/selkies-guard.sh`，保留可执行权限。[三服务拓扑](../../docs/roadmap/public-compose.zh-CN.md#三服务候选版)
+精简版只启动 DSH 和 Gateway，Gateway 的浏览器进程关闭。已登录时访问 `/_auth/browser` 或建立浏览器数据 WebSocket 会返回 503。完整版在 Gateway 内运行 Provider 和输入门禁，Browser 内运行 Chromium、Selkies 和 CDP 中继。使用与 Compose 文件同一提交的 `browser/cdp-relay` 和 `browser/selkies-guard.sh`，保留可执行权限。[三服务拓扑](../../docs/roadmap/public-compose.zh-CN.md#三服务部署)
 
 在仓库根目录设置本次部署使用的 `COMPOSE_FILE`，后续所有 Compose 命令沿用该设置。完整版执行以下命令。
 
@@ -70,16 +70,16 @@ export COMPOSE_FILE=compose.yml:deploy/public/compose.core.yml
 
 ### 1. 选择部署提交
 
-安装已发布镜像时，使用 `deploy/public/release-commit` 记录的部署提交。当前为 `81feffd`，服务名是 `auth`，管理员命令使用一次性服务 `auth-admin`。在已克隆的仓库中检出该提交，确认四个镜像引用均可解析。
+安装已发布镜像时，从 `main` 读取 `deploy/public/release-commit`，检出对应的部署提交，确认两个固定摘要的 GHCR 引用均可解析。
 
 ```bash
-git switch --detach 81feffdb5607a28062d03f443d6ff47aeb206665 &&
+git fetch origin main &&
+  deployment_ref="$(git show FETCH_HEAD:deploy/public/release-commit)" &&
+  git switch --detach "$deployment_ref" &&
   bash deploy/public/images.sh
 ```
 
-继续执行该提交中部署指南的第 2 步。[已发布版本的部署指南](https://github.com/sagehou/dsh-workstation/blob/81feffdb5607a28062d03f443d6ff47aeb206665/deploy/public/README.zh-CN.md#2-配置域名和-traefik)
-
-本页后续步骤适用于 Gateway 源码。若检出版本已记录 Gateway 的发布摘要，先用 `bash deploy/public/images.sh` 确认 Runtime 和 Gateway 的两个引用，再使用 `--release`。当前候选版可从源码构建，用 `bash deploy/public/images.sh --local` 查看构建标签。[发布状态](../../docs/release.zh-CN.md#当前部署版本)
+使用该检出版本的 Compose 文件与初始化脚本。从源码构建时，在所选源码提交执行 `bash deploy/public/images.sh --local` 查看本地镜像标签。[发布状态](../../docs/release.zh-CN.md#当前部署版本)
 
 ### 2. 配置域名和 Traefik
 
